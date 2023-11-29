@@ -1,0 +1,7 @@
+**/*.pyc
+**/*.pth
+**/*.onnx
+**/*.out
+**/*.csv
+**/*.model
+__pycache__/
