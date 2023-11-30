@@ -1,4 +1,5 @@
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
+import torch
 from ppq.core import (
     OBSERVER_MSE_HIST_BINS,
     PASSIVE_OPERATIONS,
@@ -23,7 +24,7 @@ from ppq.executor import BaseGraphExecutor
 
 class HardSwishFusionPass(QuantizationOptimizationPass):
     def __init__(self) -> None:
-        super().__init__("HardSwish Fusion")
+        super().__init__("XQuant HardSwish Fusion")
 
     def optimize(
         self,
@@ -69,7 +70,7 @@ class HardSwishFusionPass(QuantizationOptimizationPass):
 
 class SwishFusionPass(QuantizationOptimizationPass):
     def __init__(self) -> None:
-        super().__init__("HardSwish Fusion")
+        super().__init__("XQuant Swish Fusion")
 
     def optimize(
         self,
@@ -111,3 +112,138 @@ class SwishFusionPass(QuantizationOptimizationPass):
             sigmoid.config.output_quantization_config[0].state = QuantizationStates.FP32
             mul.config.input_quantization_config[0].dominated_by = computing_config
             mul.config.input_quantization_config[1].state = QuantizationStates.FP32
+
+
+class ComputingFusionPass(QuantizationOptimizationPass):
+    def __init__(self, optimize_count: int = 2) -> None:
+        super().__init__("XQuant Computing Ops Fusion")
+        self.optimize_count = optimize_count
+
+    def optimize(
+        self,
+        graph: BaseGraph,
+        dataloader: Iterable,
+        executor: BaseGraphExecutor,
+        **kwargs,
+    ) -> None:
+        search_engine = SearchableGraph(graph=graph)
+        paths = search_engine.path_matching(
+            sp_expr=lambda x: x.type in {"Conv", "Gemm", "ConvTranspose"} and x.num_of_parameter > 0,
+            rp_expr=lambda x, y: False,
+            ep_expr=lambda x: x.type in {"Mul", "Div", "Add", "Sub"}
+            and any([in_var.is_parameter for in_var in x.inputs]),
+            direction="down",
+        )
+
+        for path in paths:
+            path = path.tolist()
+            assert len(path) == 2, "Oops seems we got something unexpected."
+
+            computing_op, mul_op = path
+            assert isinstance(computing_op, Operation) and isinstance(mul_op, Operation)
+
+            if (
+                len(graph.get_downstream_operations(computing_op)) != 1
+                or len(graph.get_upstream_operations(mul_op)) != 1
+            ):
+                ppq_warning(
+                    f"PPQ can not merge operation {computing_op.name} and {mul_op.name}, "
+                    "this is not suppose to happen with your network, "
+                    "network with batchnorm inside might not be able to quantize and deploy."
+                )
+                continue
+
+            parameter_index = [in_var.is_parameter for in_var in mul_op.inputs].index(True)
+            feature_index = 1 - parameter_index
+            parameter = mul_op.inputs[parameter_index]
+            feature = mul_op.inputs[feature_index]
+
+            if computing_op.num_of_parameter == 1:
+                w = computing_op.parameters[0].value  # no bias.
+                assert isinstance(w, torch.Tensor), "values of parameters are assumed as torch Tensor"
+                if computing_op.type == "ConvTranspose":
+                    b = torch.zeros(w.shape[1] * computing_op.attributes.get("group", 1))
+                elif computing_op.type == "Gemm" and computing_op.attributes.get("transB", 0) == 0:
+                    b = torch.zeros(w.shape[1])
+                else:
+                    b = torch.zeros(w.shape[0])
+            else:
+                w, b = [var.value for var in computing_op.parameters[:2]]  # has bias.
+
+            if parameter.value.numel() != 1:
+                continue
+
+            if mul_op.type in {"Mul", "Div"}:
+                alpha = parameter.value
+
+                if mul_op.type == "Div":
+                    alpha = 1.0 / alpha
+
+                if computing_op.type == "Conv":
+                    # calculate new weight and bias
+                    scale = alpha
+                    w = w * scale.reshape([-1] + [1] * (w.ndim - 1))
+                    b = alpha * b
+
+                elif computing_op.type == "Gemm":
+                    # calculate new weight and bias
+                    scale = alpha
+                    if computing_op.attributes.get("transB", 0):
+                        w = w * scale.reshape([-1, 1])
+                    else:
+                        w = w * scale.reshape([1, -1])
+                    b = alpha * b
+
+                elif computing_op.type == "ConvTranspose":
+                    scale = alpha
+                    group = computing_op.attributes.get("group", 1)
+                    scale = scale.reshape([group, 1, -1] + [1] * (w.ndim - 2))
+                    w = w.reshape([group, -1] + list(w.shape[1:])) * scale
+                    w = w.reshape([w.shape[0] * w.shape[1]] + list(w.shape[2:]))
+                    b = alpha * b
+                else:
+                    raise TypeError(
+                        f"Unexpected op type {computing_op.type}. "
+                        f"Can not merge {computing_op.name} with {mul_op.name}"
+                    )
+            else:
+                beta = parameter.value
+                if mul_op.type == "Div":
+                    if parameter_index != 1:
+                        continue
+                    beta = -beta
+                b = beta.reshape(-1) + b
+
+            # create new op and variable
+            merged_op = Operation(
+                computing_op.name, op_type=computing_op.type, attributes=computing_op.attributes.copy()
+            )
+            weight_var = Variable(computing_op.name + "_weight", w, True, [merged_op])
+            bias_var = Variable(computing_op.name + "_bias", b, True, [merged_op])
+
+            # replace & dirty work
+            input_var = computing_op.inputs[0]
+            output_var = mul_op.outputs[0]
+
+            input_var.dest_ops.remove(computing_op)
+            input_var.dest_ops.append(merged_op)
+
+            output_var.source_op = merged_op
+
+            # delete old operations
+            computing_op.inputs.pop(0)
+            mul_op.outputs.clear()
+            graph.remove_operation(computing_op)
+            graph.remove_operation(mul_op)
+
+            # insert new
+            graph.append_operation(merged_op)
+            merged_op.inputs.extend([input_var, weight_var, bias_var])
+            merged_op.outputs.extend([output_var])
+
+            graph.append_variable(weight_var)
+            graph.append_variable(bias_var)
+
+        self.optimize_count -= 1
+        if self.optimize_count > 0:
+            self.optimize(graph, dataloader, executor, **kwargs)

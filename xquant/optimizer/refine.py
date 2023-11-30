@@ -11,6 +11,8 @@ from ppq.core import (
     TargetPlatform,
     empty_ppq_cache,
     ppq_warning,
+    QuantizationVisibility,
+    convert_any_to_torch_tensor,
 )
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.quantization.optim import (
@@ -21,11 +23,12 @@ from ppq.quantization.optim import (
 from ppq.IR.search import SearchableGraph
 from ppq.executor import BaseGraphExecutor
 from ppq.quantization.qfunction import PPQuantFunction
+from ppq.quantization.observer import range as ppq_range
 
 
-class BiasParameterBakingPass(QuantizationOptimizationPass):
+class PassiveParameterBakingPass(QuantizationOptimizationPass):
     def __init__(self) -> None:
-        super().__init__(name="BiasParameterBaking Pass")
+        super().__init__(name="XQuant PassiveParameterBakingPass Pass")
         self._quantize_function = PPQuantFunction
 
     @empty_ppq_cache
@@ -33,41 +36,159 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
         for _, operation in graph.operations.items():
             if not isinstance(operation, QuantableOperation):
                 continue
-            if operation.type in {"Conv", "ConvTranspose", "Gemm"}:
-                if operation.num_of_input == 3:
-                    i_cfg, w_cfg, b_cfg = operation.config.input_quantization_config
-                    o_cfg = operation.config.output_quantization_config[0]
-                    if b_cfg.state not in {QuantizationStates.FP32}:
-                        continue
-                    bias = operation.inputs[-1].value
-                    if bias is None:
-                        raise ValueError(
-                            f"Bias Varaible {operation.inputs[-1].name} must be a constant. " "Please check it again."
-                        )
-                    assert bias.numel() == bias.shape[-1], (
-                        f"For op {operation.name}, expect Bias shape to be {[bias.numel()]}, "
-                        f"however {bias.shape} was given"
-                    )
-                    operation.inputs[-1].value = bias.squeeze()
+            if operation.type not in {"Conv", "ConvTranspose", "Gemm", "MatMul"}:
+                for in_config, in_var in operation.config_with_variable:
+                    if in_var.is_parameter and in_config.state == QuantizationStates.INITIAL:
+                        if in_config.policy.has_property(QuantizationProperty.PER_CHANNEL):
+                            raise NotImplementedError("only Computing Ops have perchannel parameters")
 
-                    if operation.inputs[-1].value.ndim == 0 and operation.inputs[-1].value.numel() == 1:
-                        operation.inputs[-1].value = operation.inputs[-1].value.unsqueeze(0)
-                    if w_cfg.scale is None or i_cfg.scale is None:
-                        continue
-                    _b_scale = w_cfg.scale * i_cfg.scale
-                    _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
-                    if torch.all(torch.abs(_i_bias) < 2 ** (b_cfg.num_of_bits - 1)):
-                        b_cfg.scale = _b_scale
-                    else:
-                        # in frac + w frac无法表示就使用 out frac
-                        b_cfg.scale = o_cfg.scale
-                    b_cfg.state = QuantizationStates.PASSIVE
-                    b_cfg.offset = torch.zeros_like(b_cfg.scale)
+                        max_range_val = float(in_var.value.max())
+                        min_range_val = float(in_var.value.min())
+
+                        if torch.all(in_var.value.to(torch.int32) - in_var.value == 0):
+                            scale = torch.tensor(1, dtype=torch.float32, device=in_var.value.device)
+                            offset = torch.tensor(0, dtype=torch.float32, device=in_var.value.device)
+                        elif min_range_val != max_range_val:
+                            scale, offset = ppq_range.minmax_to_scale_offset(min_range_val, max_range_val, in_config)
+                        elif max_range_val > 0:
+                            scale, offset = ppq_range.minmax_to_scale_offset(0, max_range_val, in_config)
+                        elif max_range_val < 0:
+                            scale, offset = ppq_range.minmax_to_scale_offset(max_range_val, 0, in_config)
+                        else:
+                            continue
+
+                        in_config.scale = convert_any_to_torch_tensor(scale)
+                        in_config.offset = convert_any_to_torch_tensor(offset)
+                        in_config.state = QuantizationStates.PASSIVE
+
+
+class BiasParameterBakingPass(QuantizationOptimizationPass):
+    def __init__(self) -> None:
+        super().__init__(name="XQuant BiasParameterBaking Pass")
+        self._quantize_function = PPQuantFunction
+
+    @staticmethod
+    def passive_parameters_quant(op: QuantableOperation):
+        def check_state(state: QuantizationStates):
+            return state in {
+                QuantizationStates.PASSIVE,
+                QuantizationStates.ACTIVATED,
+                QuantizationStates.BAKED,
+                QuantizationStates.OVERLAPPED,
+            }
+
+        if not isinstance(op, QuantableOperation):
+            return
+
+        if op.type in {"Conv", "ConvTranspose", "Gemm"}:
+            # inputs are [input value, weight, bias(optional)]
+            if op.num_of_input == 3:
+                i_cfg, w_cfg, b_cfg = op.config.input_quantization_config
+                if b_cfg.state not in {QuantizationStates.PASSIVE, QuantizationStates.PASSIVE_INIT}:
+                    return
+
+                # PATCH 2022.07.29 有的时候 bias 是个多维的东西，此时要求前面的维度都是1
+                bias = op.inputs[-1].value
+                if bias is None:
+                    raise ValueError(
+                        f"Bias Varaible {op.inputs[-1].name} must be a constant. " "Please check it again."
+                    )
+
+                assert bias.numel() == bias.shape[-1], (
+                    f"For op {op.name}, expect Bias shape to be {[bias.numel()]}, " f"however {bias.shape} was given"
+                )
+                op.inputs[-1].value = bias.squeeze()
+                # PATCH 2022.08.02 只有一个数的 bias 经过 squeeze 会变成零维的, 再给它多加一维补回来
+                if op.inputs[-1].value.ndim == 0 and op.inputs[-1].value.numel() == 1:
+                    op.inputs[-1].value = op.inputs[-1].value.unsqueeze(0)
+
+                if not check_state(i_cfg.state):
+                    raise PermissionError(
+                        f"Can not quantize bias of layer {op.name}, " "cause input has not been correctly quantized."
+                    )
+
+                b_cfg.scale = w_cfg.scale * i_cfg.scale
+                b_cfg.state = QuantizationStates.PASSIVE
+                b_cfg.offset = torch.zeros_like(b_cfg.scale)
+                assert not b_cfg.policy.has_property(
+                    QuantizationProperty.ASYMMETRICAL
+                ), "Passive parameter does not support ASYMMETRICAL quantization"
+
+            if op.type in {"Clip"}:
+                # inputs are [input value, min[optional], max[optional]]
+                i_cfg = op.config.input_quantization_config[0]
+
+                if not check_state(i_cfg.state):
+                    raise PermissionError(
+                        f"Can not quantize clip value of layer {op.name}, "
+                        "cause input has not been correctly quantized."
+                    )
+
+                for config in op.config.input_quantization_config[1:]:
+                    config.master_by = i_cfg
+                    config.visibility = QuantizationVisibility.INTERNAL
+
+            if op.type in {"Pad"}:
+                # inputs are [input value, pad[shape-related], pad value[optional]]
+                if op.num_of_input != 3:
+                    return
+                i_cfg = op.config.input_quantization_config[0]
+
+                if not check_state(i_cfg.state):
+                    raise PermissionError(
+                        f"Can not quantize pad value of layer {op.name}, "
+                        "cause input has not been correctly quantized."
+                    )
+
+                if len(op.config.input_quantization_config) > 1:
+                    pad_config = op.config.input_quantization_config[-1]
+                    pad_config.master_by = i_cfg
+                    pad_config.visibility = QuantizationVisibility.INTERNAL
+
+    @staticmethod
+    def passive_bias_quant(operation: QuantableOperation):
+        if not isinstance(operation, QuantableOperation):
+            return
+        if operation.type not in {"Conv", "ConvTranspose", "Gemm"}:
+            return
+        if operation.num_of_input == 3:
+            i_cfg, w_cfg, b_cfg = operation.config.input_quantization_config
+            o_cfg = operation.config.output_quantization_config[0]
+            if b_cfg.state not in {QuantizationStates.FP32}:
+                return
+            bias = operation.inputs[-1].value
+            if bias is None:
+                raise ValueError(
+                    f"Bias Varaible {operation.inputs[-1].name} must be a constant. " "Please check it again."
+                )
+            assert bias.numel() == bias.shape[-1], (
+                f"For op {operation.name}, expect Bias shape to be {[bias.numel()]}, " f"however {bias.shape} was given"
+            )
+            operation.inputs[-1].value = bias.squeeze()
+
+            if operation.inputs[-1].value.ndim == 0 and operation.inputs[-1].value.numel() == 1:
+                operation.inputs[-1].value = operation.inputs[-1].value.unsqueeze(0)
+            if w_cfg.scale is None or i_cfg.scale is None:
+                return
+            _b_scale = w_cfg.scale * i_cfg.scale
+            _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
+            if torch.all(torch.abs(_i_bias) < 2 ** (b_cfg.num_of_bits - 1)):
+                b_cfg.scale = _b_scale
+            else:
+                # in frac + w frac无法表示就使用 out frac
+                b_cfg.scale = o_cfg.scale
+            b_cfg.state = QuantizationStates.PASSIVE
+            b_cfg.offset = torch.zeros_like(b_cfg.scale)
+
+    @empty_ppq_cache
+    def optimize(self, graph: BaseGraph, **kwargs) -> None:
+        for _, operation in graph.operations.items():
+            BiasParameterBakingPass.passive_bias_quant(operation)
 
 
 class AsymmetricaUnsignlAlignSign(QuantizationOptimizationPass):
     def __init__(self) -> None:
-        super().__init__(name="AsymmetricalAlignS8 Pass")
+        super().__init__(name="XQuant AsymmetricalAlignS8 Pass")
 
     @empty_ppq_cache
     def optimize(self, graph: BaseGraph, **kwargs) -> None:
@@ -86,95 +207,11 @@ class AsymmetricaUnsignlAlignSign(QuantizationOptimizationPass):
 
 
 class QuantizeFusionPass(QuantizationOptimizationPass):
-    """
-    ## PPQ Quantize Fusion Pass(通用量化图融合过程)
-
-    Operation fusion (or kernel/layer fusion) is key optimization in many state-of-the-art execution frameworks.
-
-    Graph fusion can combine operations into a single op to obtain higher accuracy and performance,
-        Pattern like: Conv + Relu can be reduced to ConvRelu. This fusion will reduce memory accesses,
-        and the quantization point after conv can also be removed.
-
-    Technically we can fuse those layers before quantization, while fused layers are not supported by onnx standard.
-        So to say ConvRelu is not a valid onnx operation, no execution framework can parse it.
-
-    Therefore, PPQ will simulate the graph fusion by adjusting quantization config: if PPQ finds their is a
-        pattern like Conv + Relu, the output quantization of Conv will be disabled, pretending that the Conv + Relu
-        fusion has happened.
-
-    This Pass is designed for 2 types graph fusion:
-        1. activation fusion
-        2. passive operation fusion
-
-    For activation fusion, PPQ will identify the pattern: Computing op + Activation Op from your network. The output
-        quantization of computing op will be disabled with their state being set to QuantizationState.OVERLAPPED.
-
-    Activation fusion here supports only simple activation patterns,
-        for complex activation functions like mish, swish,
-        will be represented as mish = tanh + mul + softplus, swish = sigmoid + mul in onnx,
-        cause onnx does not have a op defination for them.
-        Identifying those complex patterns requires pattern matching, which is implemented in ppq.IR.search.py
-
-    Complex quantization fusions must be invoked manually, PPQ implemented softplus & swish fusion functions in
-        ppq.quantization.optim.refine.MishFusionPass
-        ppq.quantization.optim.refine.SwishFusionPass
-
-    For passive operation fusion, PPQ will keep the input and the output variable share a same scale for passive operations.
-        An operation is identified as passive op only if its attribute "is_active_quant_op" = False, this
-        attribute is initialized by quantizer.
-
-    If there is a passive operation having multiple input and output, the fusion procedure will make its
-    FIRST input variable and ALL output variables share the same scale(the same scale as its first input).
-    The quantization states of all output variables will be set to QuantizationState.OVERLAPPED.
-
-    ### Parameters:
-
-    * activation_type(Set[str]):
-
-            A collection contains all activation types.
-
-            The pattern will be recognized as [Computing Op -> Activation Op],
-
-            By graph fusion, the output quantization of the Computing Op and
-                the input quantization of the activation op will be disabled.
-
-    * fuse_activation(bool)
-
-            Whether to fuse activation op with computing op.
-
-    # fuse_passive_op(bool)
-
-            Whether to fuse passive op so that the input variable and output variable will share a same scale.
-
-    * fuse_matmul_add(bool)
-
-            Fuse MatMul + Bias Add
-
-    ### Usage
-    This pass is included in PPQ Quantization Setting, you can calling this optimization by:
-
-        setting = QuantizationSettingFactory.default_setting()
-
-        setting.fusion = True
-
-        # calling ppq.api.quantize_onnx_model function with this setting.
-        ir = quantize_torch_model(
-        model=model, calib_dataloader=load_calibration_dataset(), setting=setting,
-        platform=TargetPlatform.PPL_CUDA_INT8, calib_steps=8, input_shape=INPUT_SHAPE,
-        collate_fn=collate_fn)
-    """
-
     def __init__(
         self,
-        activation_type: Set[str],
-        fuse_activation: bool = True,
-        fuse_passive_op: bool = True,
         fuse_relu_clip: bool = True,
     ) -> None:
-        self.fuse_activation = fuse_activation
-        self.fuse_passive_op = fuse_passive_op
         self.fuse_relu_clip = fuse_relu_clip
-        self.activation_types = activation_type
         super().__init__(name="PPQ Quantization Fusion Pass")
 
     def is_same_platform(self, operations: List[Operation]):
@@ -184,130 +221,6 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
     @empty_ppq_cache
     def optimize(self, graph: BaseGraph, **kwargs) -> None:
         processor = SearchableGraph(graph)
-
-        # fuse computing operations and its following activation.
-        if self.fuse_activation:
-            patterns = processor.pattern_matching(
-                patterns=[lambda x: x.is_computing_op, lambda x: x.type in self.activation_types],
-                edges=[[0, 1]],
-                exclusive=True,
-            )
-
-            for computing_op, act_op in patterns:
-                if not isinstance(act_op, QuantableOperation):
-                    continue
-                if not isinstance(computing_op, QuantableOperation):
-                    continue
-
-                if (
-                    computing_op.platform != act_op.platform
-                    and computing_op.config.output_quantization_config[0].state != QuantizationStates.FP32
-                ):
-                    ppq_warning(
-                        f"Unexpected dispatching was found: "
-                        f"Op {computing_op.name} and {act_op.name} should be send to a same platform."
-                    )
-                    continue
-
-                if (
-                    len(graph.get_downstream_operations(computing_op)) == 1
-                    and len(graph.get_upstream_operations(act_op)) == 1
-                ):
-                    computing_op.config.output_quantization_config[
-                        0
-                    ].dominated_by = act_op.config.output_quantization_config[0]
-                    act_op.config.input_quantization_config[0].dominated_by = act_op.config.output_quantization_config[
-                        0
-                    ]
-
-            if "Swish" in self.activation_types:
-                search_engine = SearchableGraph(graph)
-                patterns = search_engine.pattern_matching(
-                    patterns=[lambda x: x.is_computing_op, "Sigmoid", "Mul"],
-                    edges=[[0, 1], [1, 2], [0, 2]],
-                    exclusive=True,
-                )
-
-                for pattern in patterns:
-                    if any([not isinstance(op, QuantableOperation) for op in pattern]):
-                        ppq_warning(
-                            f"There is a pattern of swish activation in your network start from {pattern[0]}, "
-                            "however part of your swish activation is not quantable, "
-                            "so that graph fusion can not merge their quantization configuration."
-                        )
-                        continue
-                    if any([op.platform != pattern[0].platform for op in pattern]):
-                        ppq_warning(
-                            f"There is a pattern of swish activation in your network start from {pattern[0]}, "
-                            "however part of your swish activation is not quantable, "
-                            "so that graph fusion can not merge their quantization configuration."
-                        )
-                        continue
-                    computing, sigmoid, mul = pattern
-
-                    assert isinstance(computing, QuantableOperation)
-                    assert isinstance(sigmoid, QuantableOperation)
-                    assert isinstance(mul, QuantableOperation)
-
-                    master_config = mul.config.output_quantization_config[0]
-                    computing.config.output_quantization_config[0].dominated_by = master_config
-                    sigmoid.config.input_quantization_config[0].dominated_by = master_config
-                    sigmoid.config.output_quantization_config[0].dominated_by = master_config
-                    mul.config.input_quantization_config[0].dominated_by = master_config
-                    mul.config.input_quantization_config[1].dominated_by = master_config
-
-            if "Mish" in self.activation_types:
-                search_engine = SearchableGraph(graph)
-                patterns = search_engine.pattern_matching(
-                    patterns=[lambda x: x.is_computing_op, "Softplus", "Tanh", "Mul"],
-                    edges=[[0, 1], [1, 2], [2, 3], [0, 3]],
-                    exclusive=True,
-                )
-
-                for pattern in patterns:
-                    if any([not isinstance(op, QuantableOperation) for op in pattern]):
-                        ppq_warning(
-                            f"There is a pattern of mish activation in your network start from {pattern[0]}, "
-                            "however part of your mish activation is not quantable, "
-                            "so that graph fusion can not merge their quantization configuration."
-                        )
-                        continue
-                    if any([op.platform != pattern[0].platform for op in pattern]):
-                        ppq_warning(
-                            f"There is a pattern of mish activation in your network start from {pattern[0]}, "
-                            "however part of your mish activation is not quantable, "
-                            "so that graph fusion can not merge their quantization configuration."
-                        )
-                        continue
-                    computing, softplus, tanh, mul = pattern
-
-                    assert isinstance(computing, QuantableOperation)
-                    assert isinstance(softplus, QuantableOperation)
-                    assert isinstance(tanh, QuantableOperation)
-                    assert isinstance(mul, QuantableOperation)
-
-                    master_config = mul.config.output_quantization_config[0]
-                    computing.config.output_quantization_config[0].dominated_by = master_config
-                    tanh.config.input_quantization_config[0].dominated_by = master_config
-                    tanh.config.output_quantization_config[0].dominated_by = master_config
-                    softplus.config.input_quantization_config[0].dominated_by = master_config
-                    softplus.config.output_quantization_config[0].dominated_by = master_config
-                    mul.config.input_quantization_config[0].dominated_by = master_config
-                    mul.config.input_quantization_config[1].dominated_by = master_config
-
-        if self.fuse_passive_op:
-            # all passive operations should never changes quantization configuration of its input
-            # so to say their input and output share a same scale.
-            for op in graph.operations.values():
-                if op.type not in PASSIVE_OPERATIONS:
-                    continue
-                source_op = op.inputs[0].source_op
-                if source_op is None:
-                    continue  # beginning op, can not merge.
-                if isinstance(op, QuantableOperation) and self.is_same_platform([op, source_op]):
-                    TQC = op.config.input_quantization_config[0]
-                    for output_cfg in op.config.output_quantization_config:
-                        output_cfg.dominated_by = TQC
 
         if self.fuse_relu_clip:
             patterns = processor.pattern_matching(
@@ -329,3 +242,53 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
                     act_op.config.input_quantization_config[0].dominated_by = act_op.config.output_quantization_config[
                         0
                     ]
+
+
+class ActivationClipRefine(QuantizationOptimizationPass):
+    def __init__(self) -> None:
+        super().__init__(name="XQuant ActivationClipRefine Pass")
+        self.act_op_set = {"HardSigmoid", "Sigmoid"}
+
+    @empty_ppq_cache
+    def optimize(self, graph: BaseGraph, **kwargs) -> None:
+        for _, operation in graph.operations.items():
+            if not isinstance(operation, QuantableOperation):
+                continue
+
+            for tqc, var in operation.config_with_variable:
+                if tqc.state in {QuantizationStates.INITIAL}:
+                    if any([dest_op.type in self.act_op_set for dest_op in var.dest_ops]):
+                        force_range_min = None
+                        force_range_max = None
+                        check_hardsigmoid = all([dest_op.type in {"HardSigmoid"} for dest_op in var.dest_ops])
+                        check_hardswish = all([dest_op.type in {"HardSigmoid", "Mul"} for dest_op in var.dest_ops])
+
+                        check_sigmoid = all([dest_op.type in {"Sigmoid"} for dest_op in var.dest_ops])
+                        check_swish = all([dest_op.type in {"Sigmoid", "Mul"} for dest_op in var.dest_ops])
+
+                        if check_hardsigmoid:
+                            alpha = var.dest_ops[0].attributes.get("alpha", 0.1666666716337204)
+                            beta = var.dest_ops[0].attributes.get("beta", 0.5)
+                            force_range_min = -beta / alpha
+                            force_range_max = (1.0 - beta) / alpha
+
+                        elif check_sigmoid or (check_swish and len(var.dest_ops) == 2):
+                            force_range_min = -10.0
+                            if check_sigmoid:
+                                force_range_max = 10.0
+
+                        elif check_hardswish and len(var.dest_ops) == 2:
+                            dest_op_type = [dest_op.type for dest_op in var.dest_ops]
+                            if "HardSigmoid" in dest_op_type and "Mul" in dest_op_type:
+                                act_index = dest_op_type.index("HardSigmoid")
+                                mul_index = dest_op_type.index("Mul")
+                                if var.dest_ops[act_index].outputs[0] in var.dest_ops[mul_index].inputs:
+                                    alpha = var.dest_ops[act_index].attributes.get("alpha", 0.1666666716337204)
+                                    beta = var.dest_ops[act_index].attributes.get("beta", 0.5)
+                                    force_range_min = -beta / alpha
+
+                        if force_range_min is not None or force_range_max is not None:
+                            operation._detail["output_force_range"] = {
+                                var.name: {"min": force_range_min, "max": force_range_max}
+                            }
+                            operation._detail["output_force_range"].update({var.name: {"min": force_range_min}})

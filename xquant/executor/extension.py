@@ -21,7 +21,8 @@ def QuantizeLinear_Forward(op: Operation, values, ctx, **kwargs):
     axis_ = op.attributes.get("axis", 0)
     x, scale, zp = values[:3]
     new_shape = x.dim() * [1]
-    new_shape[axis_] = -1
+    if len(new_shape) > axis_:
+        new_shape[axis_] = -1
     if scale.numel() > 1:
         scale = scale.reshape(new_shape)
     if zp.numel() > 1:
@@ -48,7 +49,8 @@ def DequantizeLinear_Forward(op: Operation, values, ctx, **kwargs):
     axis_ = op.attributes.get("axis", 0)
     x, scale, zp = values[:3]
     new_shape = x.dim() * [1]
-    new_shape[axis_] = -1
+    if len(new_shape) > axis_:
+        new_shape[axis_] = -1
     if scale.numel() > 1:
         scale = scale.reshape(new_shape)
     if zp.numel() > 1:
@@ -67,6 +69,30 @@ def DynamicQuantizeLinear_Forward(op: Operation, values, ctx, **kwargs):
     return [y_quant, scale, zp]
 
 
+def LRN_Forward(op: Operation, values, ctx, **kwargs):
+    input = values[0]
+    size = op.attributes.get("size")
+    alpha = op.attributes.get("alpha")
+    beta = op.attributes.get("beta")
+    k = op.attributes.get("bias")
+    output_value = torch.nn.functional.local_response_norm(input, size, alpha, beta, k)
+    return [output_value]
+
+
+def Dropout_Forward(op: Operation, values, ctx, **kwargs):
+    return [values[0], values[0]]
+
+
+register_operation_handler(
+    Dropout_Forward,
+    operation_type="Dropout",
+    platform=TargetPlatform.UNSPECIFIED,
+)
+register_operation_handler(
+    LRN_Forward,
+    operation_type="LRN",
+    platform=TargetPlatform.UNSPECIFIED,
+)
 register_operation_handler(
     QuantizeLinear_Forward,
     operation_type="QuantizeLinear",
