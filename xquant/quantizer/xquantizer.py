@@ -217,12 +217,12 @@ class XQuantizer(BaseQuantizer):
     def build_quant_pipeline(self, setting: QuantizationSetting) -> QuantizationOptimizationPipeline:
         quant_pipeline = super().build_quant_pipeline(setting)
 
-        for idx, quant_opt in enumerate(quant_pipeline):
-            if isinstance(quant_opt, RuntimeCalibrationPass):
-                quant_pipeline._pipeline[idx] = RuntimePerlayerCalibrationPass(
-                    quant_opt._method, quant_opt._override, quant_opt._calib_steps
-                )
-                break
+        # for idx, quant_opt in enumerate(quant_pipeline):
+        #    if isinstance(quant_opt, RuntimeCalibrationPass):
+        #        quant_pipeline._pipeline[idx] = RuntimePerlayerCalibrationPass(
+        #            quant_opt._method, quant_opt._override, quant_opt._calib_steps
+        #        )
+        #        break
         ppq_ver = _get_version_number(PPQ_CONFIG.VERSION)
         if ppq_ver <= _get_version_number("0.6.6"):
             for idx, quant_opt in enumerate(quant_pipeline):

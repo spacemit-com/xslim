@@ -24,7 +24,7 @@ TEST_DIR = "QuantZoo/Data/Imagenet/Test"
 REPORT_DIR = "QuantZoo/Reports"
 
 CONFIGS = [
-    {"Model": "resnet18", "Output": ["/layer4/layer4.1/relu_1/Relu_output_0"]},
+    # {"Model": "resnet18", "Output": ["/layer4/layer4.1/relu_1/Relu_output_0"]},
     # {"Model": "resnet50", "Output": ["/layer4/layer4.2/relu_2/Relu_output_0"]},
     # {
     #    "Model": "mobilenet_v2",
@@ -55,7 +55,7 @@ CONFIGS = [
     # {"Model": "shufflenet_v2_x1_0", "Output": ["978"]},
     # {"Model": "lcnet_050", "Output": ["/act2/Mul_output_0"]},
     # {"Model": "lcnet_100", "Output": ["/act2/Mul_output_0"]},
-    # {"Model": "inception_v3", "Output": ["output"]},
+    {"Model": "inception_v3", "Output": ["output"]},
     # {"Model": "seresnet50", "Output": ["output"]},
     # {"Model": "vgg16", "Output": ["output"]},
     # {
@@ -70,24 +70,39 @@ import torch
 from ppq.core import TargetPlatform
 from ppq.api import load_onnx_graph
 import xquant
-from ppq import (
-    BaseGraph,
-    QuantizationSettingFactory,
-    TargetPlatform,
-    layerwise_error_analyse,
-    graphwise_error_analyse,
-)
 from ppq.api import export_ppq_graph, quantize_onnx_model
 from QuantZoo.Data.Imagenet.Eval import (
     evaluate_ppq_module_with_imagenet,
     load_imagenet_from_directory,
 )
-from QuantZoo.Util import error_analyze
-import torchvision.transforms as transforms
-from ppq.core import common as ppq_common
 
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
+
+demo_json = {
+    "model_parameters": {
+        "onnx_model": "/home/huangjinghui/1_workspace/2_ppq/PPQQuantZoo/QuantZoo/Model/Imagenet/resnet18.onnx",
+        "output_model_file_prefix": "resnet18.q",
+        "working_dir": "/home/huangjinghui/1_workspace/2_ppq/temp_output",
+    },
+    "calibration_parameters": {
+        "calibration_step": 200,
+        "calibration_device": "cuda",
+        "calibration_type": "default",
+        "input_parametres": [
+            {
+                "input_name": "input.1",
+                "input_shape": [1, 3, 224, 224],
+                "file_type": "img",
+                "mean_value": [123.675, 116.28, 103.53],
+                "std_value": [58.395, 57.12, 57.375],
+                "preprocess_file": "IMAGENET",
+                "data_list_path": "/home/huangjinghui/1_workspace/2_ppq/quant_temp/img_list.txt",
+            }
+        ],
+    },
+    "quantization_parameters": {"precision_level": 1},
+}
 
 for config in CONFIGS:
     model = config["Model"]
@@ -99,25 +114,13 @@ for config in CONFIGS:
     float_graph = load_onnx_graph(onnx_import_file=input_model_path)
 
     custom_transforms = None
-    input_shape = [BATCHSIZE, 3, 224, 224]
-    quant_setting = QuantizationSettingFactory.default_setting()
-    quant_setting.fusion_setting.align_quantization = False
-    quant_setting.equalization = True
-
+    mean_value = [123.675, 116.28, 103.53]
+    std_value = [58.395, 57.12, 57.375]
+    input_shape = [1, 3, 224, 224]
     if model == "inception_v3":
-        input_shape = [BATCHSIZE, 3, 299, 299]
-    #
-    # if model in {"mnasnet1_0"}:
-    #    pass
-    #
-    # if model in {"efficientnet_v1_b0"}:
-    #    pass
-    #    # quant_setting.quantize_activation = False
-    #    # quant_setting.fusion_setting.align_quantization = False
-    #
-    # if model in {"lcnet_050", "lcnet_010"}:
-    #    quant_setting.quantize_activation = False
-    #    quant_setting.fusion_setting.align_quantization = False
+        input_shape = [1, 3, 299, 299]
+        mean_value = [127.5, 127.5, 127.5]
+        std_value = [127.5, 127.5, 127.5]
 
     if model in {"vit_b_16"}:
         opt_model_path = os.path.join(OUTPUT_DIR, model + "_opt.onnx")
@@ -132,15 +135,6 @@ for config in CONFIGS:
             graph_save_to=opt_model_path,
         )
 
-    calib_loader = load_imagenet_from_directory(
-        directory=CALIB_DIR,
-        batchsize=BATCHSIZE,
-        shuffle=True,
-        require_label=False,
-        num_of_workers=0,
-        custom_transforms=custom_transforms,
-    )
-
     test_loader = load_imagenet_from_directory(
         directory=TEST_DIR,
         batchsize=BATCHSIZE,
@@ -150,17 +144,15 @@ for config in CONFIGS:
         custom_transforms=custom_transforms,
     )
 
-    error_test_loader = load_imagenet_from_directory(
-        directory=TEST_DIR,
-        subset=50,
-        batchsize=BATCHSIZE,
-        shuffle=False,
-        require_label=True,
-        num_of_workers=0,
-        custom_transforms=custom_transforms,
-    )
+    demo_json["model_parameters"]["onnx_model"] = opt_model_path
+    demo_json["model_parameters"]["output_model_file_prefix"] = "{}.q".format(model)
+    demo_json["model_parameters"]["working_dir"] = OUTPUT_DIR
+    demo_json["calibration_parameters"]["input_parametres"][0]["input_shape"] = input_shape
+    demo_json["calibration_parameters"]["input_parametres"][0]["mean_value"] = mean_value
+    demo_json["calibration_parameters"]["input_parametres"][0]["std_value"] = std_value
+    demo_json["calibration_parameters"]["input_parametres"][0]["input_name"] = list(float_graph.inputs.keys())[0]
 
-    quantized_graph = xquant.quantize_onnx_model("/home/huangjinghui/1_workspace/2_ppq/xquant/demo_setting.json")
+    quantized_graph = xquant.quantize_onnx_model(demo_json)
 
     if EVAL_FP_EN:
         print(f"Evaluate float Model Accurarcy....")
@@ -174,12 +166,8 @@ for config in CONFIGS:
         )
         print(f"Model Classify Accurarcy = {acc: .4f}%")
 
-    output_model_path = os.path.join(OUTPUT_DIR, "{}.q.onnx".format(model))
-    export_ppq_graph(
-        graph=quantized_graph,
-        platform=TargetPlatform.ONNXRUNTIME,
-        graph_save_to=output_model_path,
-        config_save_to=os.path.join(OUTPUT_DIR, "{}.json".format(model)),
+    output_model_path = os.path.join(
+        OUTPUT_DIR, "{}.onnx".format(demo_json["model_parameters"]["output_model_file_prefix"])
     )
 
     if EVAL_QUANT_EN:

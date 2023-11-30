@@ -68,7 +68,7 @@ class CalibrationCollect:
             std_value = np.array(std_value) / 255
             self.imagenet_transforms = transforms.Compose(
                 [
-                    transforms.Resize(int(input_shape[-1] / 0.75)),
+                    transforms.Resize(int(input_shape[-1] / 0.875)),
                     transforms.CenterCrop(input_shape[-1]),
                     transforms.ToTensor(),
                     transforms.Normalize(mean=mean_value.tolist(), std=std_value.tolist()),
@@ -88,6 +88,8 @@ class CalibrationCollect:
             for batch_item in v:
                 if file_type == "img" and self.imagenet_transforms is not None:
                     img = Image.open(batch_item)
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
                     img = self.imagenet_transforms(img)
                     img = torch.unsqueeze(img, 0)
                     batch_list.append(img)
