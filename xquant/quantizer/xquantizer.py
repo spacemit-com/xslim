@@ -1,39 +1,48 @@
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
+from enum import Enum
 import torch
 import numpy as np
 import ppq
 import functools
+from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.core import (
     PPQ_CONFIG,
-    OBSERVER_MSE_HIST_BINS,
     PASSIVE_OPERATIONS,
     OperationQuantizationConfig,
     QuantizationPolicy,
     QuantizationProperty,
     QuantizationStates,
     RoundingPolicy,
-    TargetPlatform,
-    empty_ppq_cache,
-    ppq_warning,
     common as ppq_common,
 )
-from ppq.quantization.quantizer.base import BaseQuantizer
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
+from ppq.quantization.quantizer import BaseQuantizer
 from ppq.api.setting import QuantizationSetting
 from ppq.executor import BaseGraphExecutor
 from ppq.quantization.optim import (
+    HorizontalLayerSplitPass,
+    ChannelwiseSplitPass,
     QuantizationOptimizationPipeline,
-    RuntimeCalibrationPass,
+    SSDEqualizationPass,
     QuantizeFusionPass as PPQQuantizeFusionPass,
+    QuantizeSimplifyPass,
+    ParameterQuantizePass,
+    QuantAlignmentPass,
+    PassiveParameterQuantizePass,
+    ParameterBakingPass,
 )
 from ..optimizer import (
+    ActivationClipRefine,
     HardSwishFusionPass,
     SwishFusionPass,
     QuantizeFusionPass,
     BiasParameterBakingPass,
     AsymmetricaUnsignlAlignSign,
-    RuntimePerlayerCalibrationPass,
+    RuntimeBlockWiseCalibrationPass,
+    ComputingFusionPass,
+    PassiveParameterBakingPass,
+    CustomLayerwiseEqualizationPass,
 )
+from . import XQUANT_CONFIG
 
 
 def _get_quant_min_max(num_of_bits: int, signed: bool = True):
@@ -49,11 +58,20 @@ def _get_version_number(ver_str):
     )
 
 
+class AutoFinetuneLevel(Enum):
+    DO_NOTHING = 0
+    LEVEL_1 = 1
+    LEVEL_2 = 2
+    LEVEL_3 = 3
+
+
 class XQuantizer(BaseQuantizer):
     def __init__(self, graph: BaseGraph) -> Union[torch.Tensor, list, dict]:
         super().__init__(graph=graph)
         self._precision_level = 0
         self._num_of_bits = 8
+        self._auto_finetune_level = AutoFinetuneLevel.DO_NOTHING
+        self._gemm_bits = 8
         self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits, False)
         perchannel_policy = QuantizationPolicy(
             QuantizationProperty.SYMMETRICAL + QuantizationProperty.PER_CHANNEL + QuantizationProperty.LINEAR
@@ -70,6 +88,12 @@ class XQuantizer(BaseQuantizer):
             "Gemm": pertensor_policy,
             "MatMul": pertensor_policy,
         }
+        self._observer_mapping = {
+            "default": "percentile",
+            "kl": "xquant",
+            "minmax": "minmax",
+            "percentile": "percentile",
+        }
 
     def quantize(
         self,
@@ -80,20 +104,25 @@ class XQuantizer(BaseQuantizer):
         **kwargs,
     ) -> None:
         self._setting = setting
-        self._set_asymmetrical = getattr(self._setting.quantize_activation_setting, "asymmetrical", True)
-        self._set_percentile = getattr(self._setting.quantize_activation_setting, "percentile", None)
+        self._set_max_percentile = getattr(self._setting.quantize_activation_setting, "max_percentile", None)
+        self._calibration_type = getattr(self._setting.quantize_activation_setting, "calib_algorithm", None)
+        self._auto_finetune_level = AutoFinetuneLevel(
+            getattr(self._setting, "auto_finetune_level", self._auto_finetune_level)
+        )
         self._gemm_bits = 8
-
         self._precision_level = getattr(self._setting, "precision_level", 0)
         if self._precision_level == 2:
             self._gemm_bits = 12
 
-        if not self._set_asymmetrical:
-            self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits)
-
         return super().quantize(inputs, calib_dataloader, executor, setting, **kwargs)
 
+    def report(self) -> str:
+        debug_str = ""
+
+        return debug_str
+
     def init_quantize_config(self, operation: Operation) -> OperationQuantizationConfig:
+        observer = "default" if self._calibration_type is None else self._calibration_type
         base_quant_config = self.create_default_quant_config(
             policy=self.quantize_policy,
             rounding=self.rounding_policy,
@@ -102,15 +131,20 @@ class XQuantizer(BaseQuantizer):
             exponent_bits=0,
             quant_max=self._quant_max,
             quant_min=self._quant_min,
-            observer_algorithm="percentile",
+            observer_algorithm=self._observer_mapping.get(observer),
         )
-        if self._set_percentile is not None:
+        # 对常量输入永远采用minmax
+        for in_var, in_tqc in zip(operation.inputs, base_quant_config.input_quantization_config):
+            if in_var.is_parameter:
+                in_tqc.observer_algorithm = "minmax"
+
+        if isinstance(self._set_max_percentile, float):
             for in_var, in_tqc in zip(operation.inputs, base_quant_config.input_quantization_config):
                 if not in_var.is_parameter:
-                    in_tqc.detail[ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE] = self._set_percentile
+                    in_tqc.detail[ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE] = self._set_max_percentile
             for out_var, out_tqc in zip(operation.outputs, base_quant_config.output_quantization_config):
                 if not out_var.is_parameter:
-                    out_tqc.detail[ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE] = self._set_percentile
+                    out_tqc.detail[ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE] = self._set_max_percentile
 
         if operation.type in {"Conv", "ConvTranspose", "Gemm", "MatMul"}:
             # set all parameters within Conv, ConvTranspose, Gemm to per-channel quant-config.
@@ -135,7 +169,7 @@ class XQuantizer(BaseQuantizer):
                     break
 
             # if operation has bias
-            if operation.num_of_input > 2:
+            if operation.num_of_input > 2 and operation.inputs[-1].is_parameter:
                 in_tqc = base_quant_config.input_quantization_config[-1]
                 in_tqc.policy = self._op_type_to_policy[operation.type]
                 in_tqc.num_of_bits = 32
@@ -161,11 +195,11 @@ class XQuantizer(BaseQuantizer):
             "AveragePool",
             "GlobalMaxPool",
             "GlobalAveragePool",
-            "Mul",
             "Add",
-            "Max",
             "Sub",
+            "Mul",
             "Div",
+            "Max",
             "Reshape",
             "LeakyRelu",
             "Concat",
@@ -178,6 +212,7 @@ class XQuantizer(BaseQuantizer):
             "HardSigmoid",
             "MatMul",
             "Gelu",
+            "LRN",
         }
         QUANTTYPE.update(PASSIVE_OPERATIONS)
 
@@ -191,20 +226,12 @@ class XQuantizer(BaseQuantizer):
 
     @property
     def quantize_policy(self) -> QuantizationPolicy:
-        if self._set_asymmetrical:
-            return QuantizationPolicy(
-                QuantizationProperty.ASYMMETRICAL
-                + QuantizationProperty.POWER_OF_2
-                + QuantizationProperty.PER_TENSOR
-                + QuantizationProperty.LINEAR
-            )
-        else:
-            return QuantizationPolicy(
-                QuantizationProperty.SYMMETRICAL
-                + QuantizationProperty.POWER_OF_2
-                + QuantizationProperty.PER_TENSOR
-                + QuantizationProperty.LINEAR
-            )
+        return QuantizationPolicy(
+            QuantizationProperty.ASYMMETRICAL
+            + QuantizationProperty.POWER_OF_2
+            + QuantizationProperty.PER_TENSOR
+            + QuantizationProperty.LINEAR
+        )
 
     @property
     def rounding_policy(self) -> RoundingPolicy:
@@ -215,28 +242,106 @@ class XQuantizer(BaseQuantizer):
         return {"Relu", "Clip"}
 
     def build_quant_pipeline(self, setting: QuantizationSetting) -> QuantizationOptimizationPipeline:
-        quant_pipeline = super().build_quant_pipeline(setting)
-
-        # for idx, quant_opt in enumerate(quant_pipeline):
-        #    if isinstance(quant_opt, RuntimeCalibrationPass):
-        #        quant_pipeline._pipeline[idx] = RuntimePerlayerCalibrationPass(
-        #            quant_opt._method, quant_opt._override, quant_opt._calib_steps
-        #        )
-        #        break
+        assert isinstance(setting, QuantizationSetting), (
+            f"PPQ needs a OptimSetting instance to initialize optimization pipeline,"
+            f" however {type(setting)} was given."
+        )
         ppq_ver = _get_version_number(PPQ_CONFIG.VERSION)
-        if ppq_ver <= _get_version_number("0.6.6"):
-            for idx, quant_opt in enumerate(quant_pipeline):
-                if isinstance(quant_opt, PPQQuantizeFusionPass):
-                    quant_pipeline._pipeline[idx] = QuantizeFusionPass(
-                        quant_opt.activation_types,
-                        quant_opt.fuse_activation,
-                        quant_opt.fuse_passive_op,
-                        True,
-                    )
-                    break
 
-        # quant_pipeline.append_optimization_to_pipeline(HardSwishFusionPass(), True)
-        # quant_pipeline.append_optimization_to_pipeline(SwishFusionPass(), True)
-        quant_pipeline.append_optimization_to_pipeline(BiasParameterBakingPass())
-        quant_pipeline.append_optimization_to_pipeline(AsymmetricaUnsignlAlignSign())
-        return quant_pipeline
+        list_of_passes = []
+
+        list_of_passes.append(PassiveParameterBakingPass())
+
+        list_of_passes.append(
+            PPQQuantizeFusionPass(
+                fuse_activation=True,
+                fuse_passive_op=True,
+                activation_type=self.activation_fusion_types,
+            )
+        )
+
+        if ppq_ver <= _get_version_number("0.6.6"):
+            list_of_passes.append(QuantizeFusionPass(True))
+
+        list_of_passes.append(QuantizeSimplifyPass())
+
+        list_of_passes.append(ActivationClipRefine())
+
+        param_setting = setting.quantize_parameter_setting
+        list_of_passes.append(ParameterQuantizePass(method=param_setting.calib_algorithm))
+
+        if setting.quantize_activation:
+            act_setting = setting.quantize_activation_setting
+            list_of_passes.append(
+                RuntimeBlockWiseCalibrationPass(
+                    act_setting.calib_algorithm,
+                    calib_block_size=XQUANT_CONFIG.default_block_size,
+                    block_wise=True,
+                    fintune_epoch=XQUANT_CONFIG.fine_tune_epoch,
+                    auto_finetune_level=self._auto_finetune_level.value,
+                )
+            )
+
+        if setting.quantize_parameter:
+            param_setting = setting.quantize_parameter_setting
+            if param_setting.quantize_passive_parameter:
+                list_of_passes.append(PassiveParameterQuantizePass())
+
+        if setting.quantize_parameter:
+            if param_setting.baking_parameter:
+                list_of_passes.append(ParameterBakingPass())
+                list_of_passes.append(BiasParameterBakingPass())
+        list_of_passes.append(AsymmetricaUnsignlAlignSign())
+        return QuantizationOptimizationPipeline(passes=list_of_passes)
+
+    def build_prequant_pipeline(
+        self, setting: QuantizationSetting, executor: BaseGraphExecutor
+    ) -> QuantizationOptimizationPipeline:
+        assert isinstance(setting, QuantizationSetting), (
+            f"PPQ needs a OptimSetting instance to initialize optimization pipeline,"
+            f" however {type(setting)} was given."
+        )
+
+        list_of_passes = []
+
+        list_of_passes.append(ComputingFusionPass())
+
+        if setting.weight_split:
+            weight_split_setting = setting.weight_split_setting
+            list_of_passes.append(
+                HorizontalLayerSplitPass(
+                    interested_layers=weight_split_setting.interested_layers,
+                    method=weight_split_setting.method,
+                    value_threshold=weight_split_setting.value_threshold,
+                )
+            )
+
+        if setting.channel_split:
+            channel_split_setting = setting.channel_split_setting
+            list_of_passes.append(
+                ChannelwiseSplitPass(
+                    optimize_level=channel_split_setting.opt_level,
+                    iterations=channel_split_setting.iterations,
+                    threshold=channel_split_setting.value_threshold,
+                    including_bias=channel_split_setting.including_bias,
+                    including_act=channel_split_setting.including_act,
+                    bias_multiplier=channel_split_setting.bias_multiplier,
+                    act_multiplier=channel_split_setting.act_multiplier,
+                )
+            )
+
+        if self._auto_finetune_level.value >= AutoFinetuneLevel.DO_NOTHING.value:
+            equalization_setting = setting.equalization_setting
+            list_of_passes.append(
+                CustomLayerwiseEqualizationPass(
+                    optimize_level=1,
+                    iterations=10,
+                    weight_threshold=equalization_setting.value_threshold,
+                    including_bias=True,
+                    including_act=True,
+                    bias_multiplier=equalization_setting.bias_multiplier,
+                    act_multiplier=equalization_setting.act_multiplier,
+                )
+            )
+
+        return QuantizationOptimizationPipeline(passes=list_of_passes)
