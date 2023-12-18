@@ -10,9 +10,10 @@ from ppq.quantization.observer import (
 )
 from ppq.quantization import optim as ppq_optim
 from .onnxruntime_exporter import ONNXRUNTIMExporter
-from ppq.core import TargetPlatform
+from ppq.core import TargetPlatform, defs as ppq_defs
 from ..quantizer import XQuantizer
 from ..optimizer import TorchXQuantObserver, CustomTrainingBasedPass
+
 
 ppq_optim.training.TrainingBasedPass.initialize_checkpoints = CustomTrainingBasedPass.initialize_checkpoints
 ppq_optim.training.TrainingBasedPass.collect = CustomTrainingBasedPass.collect

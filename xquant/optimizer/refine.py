@@ -174,9 +174,11 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
             _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
             if torch.all(torch.abs(_i_bias) < 2 ** (b_cfg.num_of_bits - 1)):
                 b_cfg.scale = _b_scale
-            else:
+            elif o_cfg.scale is not None:
                 # in frac + w frac无法表示就使用 out frac
                 b_cfg.scale = o_cfg.scale
+            else:
+                return
             b_cfg.state = QuantizationStates.PASSIVE
             b_cfg.offset = torch.zeros_like(b_cfg.scale)
 

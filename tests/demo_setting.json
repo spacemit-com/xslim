@@ -1,13 +1,8 @@
 {
     "model_parameters": {
-        "onnx_model": "/home/huangjinghui/1_workspace/2_ppq/PPQQuantZoo/QuantZoo/Model/Imagenet/resnet18.onnx",
-        "output_model_file_prefix": "resnet18.q",
-        "working_dir": "/home/huangjinghui/1_workspace/2_ppq/temp_output"
+        "onnx_model": "resnet18.onnx"
     },
     "calibration_parameters": {
-        "calibration_step": 100,
-        "calibration_device": "cuda",
-        "calibration_type": "default",
         "input_parametres": [
             {
                 "input_name": "input.1",
@@ -29,11 +24,8 @@
                     57.375
                 ],
                 "preprocess_file": "IMAGENET",
-                "data_list_path": "/home/huangjinghui/1_workspace/2_ppq/xquant/tests/imagenet_calib/img_list.txt"
+                "data_list_path": "calib_img_list.txt"
             }
         ]
-    },
-    "quantization_parameters": {
-        "precision_level": 2
     }
 }

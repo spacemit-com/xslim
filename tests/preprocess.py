@@ -16,8 +16,8 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
         torch.Tensor: 一个batch的校准数据
     """
     batch_list = []
-    mean_value = input_parametr.get("mean_value")
-    std_value = input_parametr.get("std_value")
+    mean_value = input_parametr["mean_value"]
+    std_value = input_parametr["std_value"]
     for file_path in path_list:
         img = cv2.imread(file_path)
         img = img.astype(np.float32)

@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
 from enum import Enum
 import torch
 import numpy as np
-import ppq
 import functools
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.core import (
@@ -15,6 +16,7 @@ from ppq.core import (
     RoundingPolicy,
     common as ppq_common,
 )
+from ppq import QuantizationSettingFactory
 from ppq.quantization.quantizer import BaseQuantizer
 from ppq.api.setting import QuantizationSetting
 from ppq.executor import BaseGraphExecutor
@@ -42,7 +44,8 @@ from ..optimizer import (
     PassiveParameterBakingPass,
     CustomLayerwiseEqualizationPass,
 )
-from . import XQUANT_CONFIG
+from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel
+from ..xquant_setting import XQuantSetting
 
 
 def _get_quant_min_max(num_of_bits: int, signed: bool = True):
@@ -58,17 +61,10 @@ def _get_version_number(ver_str):
     )
 
 
-class AutoFinetuneLevel(Enum):
-    DO_NOTHING = 0
-    LEVEL_1 = 1
-    LEVEL_2 = 2
-    LEVEL_3 = 3
-
-
 class XQuantizer(BaseQuantizer):
     def __init__(self, graph: BaseGraph) -> Union[torch.Tensor, list, dict]:
         super().__init__(graph=graph)
-        self._precision_level = 0
+        self._precision_level = PrecisionLevel.BIT_8
         self._num_of_bits = 8
         self._auto_finetune_level = AutoFinetuneLevel.DO_NOTHING
         self._gemm_bits = 8
@@ -89,7 +85,7 @@ class XQuantizer(BaseQuantizer):
             "MatMul": pertensor_policy,
         }
         self._observer_mapping = {
-            "default": "percentile",
+            "default": "xquant",
             "kl": "xquant",
             "minmax": "minmax",
             "percentile": "percentile",
@@ -100,21 +96,23 @@ class XQuantizer(BaseQuantizer):
         inputs: Union[torch.Tensor, list, dict],
         calib_dataloader: Iterable,
         executor: BaseGraphExecutor,
-        setting: QuantizationSetting,
+        xquant_setting: XQuantSetting,
         **kwargs,
     ) -> None:
-        self._setting = setting
-        self._set_max_percentile = getattr(self._setting.quantize_activation_setting, "max_percentile", None)
-        self._calibration_type = getattr(self._setting.quantize_activation_setting, "calib_algorithm", None)
-        self._auto_finetune_level = AutoFinetuneLevel(
-            getattr(self._setting, "auto_finetune_level", self._auto_finetune_level)
-        )
+        self._xquant_setting = xquant_setting
+        self._set_max_percentile = xquant_setting.quantization_parameters.max_percentile
+        self._calibration_type = xquant_setting.calibration_parameters.calibration_type
+        self._auto_finetune_level = xquant_setting.quantization_parameters.finetune_level
+        self._precision_level = xquant_setting.quantization_parameters.precision_level
+
         self._gemm_bits = 8
-        self._precision_level = getattr(self._setting, "precision_level", 0)
-        if self._precision_level == 2:
+        if self._precision_level.value == PrecisionLevel.GEMM_16.value:
             self._gemm_bits = 12
 
-        return super().quantize(inputs, calib_dataloader, executor, setting, **kwargs)
+        quant_setting = QuantizationSettingFactory.default_setting()
+        quant_setting.fusion_setting.align_quantization = False
+
+        return super().quantize(inputs, calib_dataloader, executor, quant_setting, **kwargs)
 
     def report(self) -> str:
         debug_str = ""
@@ -186,37 +184,46 @@ class XQuantizer(BaseQuantizer):
             "Conv",
             "ConvTranspose",
             "Gemm",
+            "MatMul",
+            #
             "Relu",
             "PRelu",
+            "LeakyRelu",
+            "Sigmoid",
+            "HardSwish",
+            "HardSigmoid",
+            "Gelu",
+            # "LRN",
             "Clip",
+            #
             "Pad",
+            #
             "Resize",
+            #
             "MaxPool",
             "AveragePool",
             "GlobalMaxPool",
             "GlobalAveragePool",
+            "ReduceMean",
+            #
             "Add",
             "Sub",
             "Mul",
-            "Div",
-            "Max",
+            # "Div",
+            # "Max",
+            #
+            "LayerNormalization",
+            #
             "Reshape",
-            "LeakyRelu",
             "Concat",
-            "Sigmoid",
-            "ReduceMean",
+            "Split",
             "Transpose",
             "Slice",
             "Flatten",
-            "HardSwish",
-            "HardSigmoid",
-            "MatMul",
-            "Gelu",
-            "LRN",
         }
         QUANTTYPE.update(PASSIVE_OPERATIONS)
 
-        if self._precision_level == 2:
+        if self._precision_level.value == PrecisionLevel.GEMM_16.value:
             return {
                 "Conv",
                 "ConvTranspose",
@@ -288,9 +295,8 @@ class XQuantizer(BaseQuantizer):
                 list_of_passes.append(PassiveParameterQuantizePass())
 
         if setting.quantize_parameter:
-            if param_setting.baking_parameter:
-                list_of_passes.append(ParameterBakingPass())
-                list_of_passes.append(BiasParameterBakingPass())
+            list_of_passes.append(ParameterBakingPass())
+            list_of_passes.append(BiasParameterBakingPass())
         list_of_passes.append(AsymmetricaUnsignlAlignSign())
         return QuantizationOptimizationPipeline(passes=list_of_passes)
 
@@ -303,8 +309,6 @@ class XQuantizer(BaseQuantizer):
         )
 
         list_of_passes = []
-
-        list_of_passes.append(ComputingFusionPass())
 
         if setting.weight_split:
             weight_split_setting = setting.weight_split_setting

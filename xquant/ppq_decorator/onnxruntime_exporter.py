@@ -705,8 +705,8 @@ class ONNXRUNTIMExporter(OnnxExporter):
             op.version = value
             opsets.append(op)
 
-        onnx_model = helper.make_model(graph_def, producer_name=PPQ_CONFIG.NAME, opset_imports=opsets)
-        onnx_model.ir_version = 7
+        onnx_model = helper.make_model(graph_def, producer_name="xquant", opset_imports=opsets)
+        onnx_model.ir_version = 8
         # onnx.checker.check_model(onnx_model)
         size_threshold = 0 if save_as_external_data else 1024
         onnx.save(

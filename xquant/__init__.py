@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT
 from .optimizer import *
 from .executor import *
 from .quantizer import *

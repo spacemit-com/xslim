@@ -51,8 +51,6 @@ class TorchXQuantObserver(TorchHistObserver):
             self._scale_threshold = ppq_common.OBSERVER_MIN_SCALE
 
         self._hist_bins = hist_bins
-        self._last_hist = torch.zeros([self._hist_bins], dtype=torch.float32)
-        self._hist_history = []
         self._channel_min_max = []
 
         self._force_range_min = -(2**16)
@@ -106,14 +104,10 @@ class TorchXQuantObserver(TorchHistObserver):
         elif self._phase == "Collating Hist":
             if self._hist is None:
                 self._hist = torch.zeros(size=(self._hist_bins,), dtype=torch.int32, device=value.device)
-                self._hist_min = 0
-                self._hist_max = 0
 
             if self._quant_cfg.policy.has_property(QuantizationProperty.ASYMMETRICAL):
-                hist = torch.histc(value, self._hist_bins, min=self._percentile_min_val, max=self._percentile_max_val)
+                hist = torch.histc(value, self._hist_bins, min=self._abs_min_val, max=self._abs_max_val)
                 self._hist += hist.int()
-                self._hist_min += int(torch.sum(value < self._percentile_min_val))
-                self._hist_max += int(torch.sum(value > self._percentile_max_val))
 
             elif self._quant_cfg.policy.has_property(QuantizationProperty.SYMMETRICAL):
                 hist = torch.histc(torch.abs(value), self._hist_bins, min=0, max=self._hist_scale * self._hist_bins)
@@ -135,10 +129,10 @@ class TorchXQuantObserver(TorchHistObserver):
         if self._phase == "Detecting Minmax":
             self._abs_min_val = torch.min(torch.cat(self._min_val_collector, dim=0)).cpu().item()
             self._abs_max_val = torch.max(torch.cat(self._max_val_collector, dim=0)).cpu().item()
-            self._percentile_collector = torch.cat(self._percentile_collector, dim=0).float().mean(dim=0).cpu()
+            percentile_reduce = torch.cat(self._percentile_collector, dim=0).float().mean(dim=0).cpu()
 
-            self._percentile_min_val = self._percentile_collector[1].item()
-            self._percentile_max_val = self._percentile_collector[0].item()
+            self._percentile_min_val = percentile_reduce[1].item()
+            self._percentile_max_val = percentile_reduce[0].item()
 
             if self._quant_cfg.policy.has_property(QuantizationProperty.SYMMETRICAL):
                 hist_range = float(max(abs(self._abs_max_val), abs(self._abs_min_val)))
@@ -207,16 +201,14 @@ class TorchXQuantObserver(TorchHistObserver):
             num_of_quant_levels = (self._quant_cfg.quant_max - self._quant_cfg.quant_min) + 1
             losses = []
 
-            histogram[: int(hist_bins * self._hist_edge)] = 0
-
-            histogram[-int(hist_bins * self._hist_edge) :] = 0
-
             hist_sum = histogram.sum()
-            for bin_start in range(0, hist_bins, num_of_quant_levels):
+            offset_step = num_of_quant_levels // 2
+            range_step = num_of_quant_levels
+            for bin_start in range(0, hist_bins, offset_step):
                 for bin_range in range(
                     num_of_quant_levels,
-                    hist_bins - bin_start + num_of_quant_levels - 1,
-                    num_of_quant_levels,
+                    hist_bins - bin_start + offset_step - 1,
+                    range_step,
                 ):
                     p_hist = torch.zeros(size=(bin_range,), dtype=torch.float, device="cpu")
                     p_hist[:bin_range].copy_(histogram[bin_start : bin_start + bin_range])
@@ -237,22 +229,39 @@ class TorchXQuantObserver(TorchHistObserver):
                     q_hist = q_hist / torch.sum(q_hist)
                     q_hist = q_hist.flatten()
 
+                    min_range_val = max(self._force_range_min, self._abs_min_val + bin_start * hist_scale)
+                    max_range_val = min(self._force_range_max, min_range_val + bin_range * hist_scale)
+                    scale, offset = ppq_range.minmax_to_scale_offset(
+                        min_range_val, max_range_val, config, self._scale_threshold
+                    )
+
+                    mse_loss = self.compute_mse_loss(
+                        histogram.numpy(),
+                        bin_start,
+                        int(bin_range / num_of_quant_levels),
+                        bin_start + bin_range,
+                    )
+
                     losses.append(
                         {
+                            "mse": mse_loss / hist_sum,
                             "kl": torch_KL_divergence(p_hist, q_hist),
                             "bin_range": bin_range,
                             "bin_start": bin_start,
+                            "percentile": histogram[bin_start : bin_start + bin_range].sum() / hist_sum,
+                            "scale": scale,
+                            "offset": offset,
                         }
                     )
 
-            losses = sorted(losses, key=lambda x: x["kl"])
-            bin_start = losses[0]["bin_start"]
-            bin_range = losses[0]["bin_range"]
-            min_range_val = max(self._force_range_min, self._abs_min_val + bin_start * hist_scale)
-            max_range_val = min(self._force_range_max, min_range_val + bin_range * hist_scale)
-            scale, offset = ppq_range.minmax_to_scale_offset(
-                min_range_val, max_range_val, config, self._scale_threshold
-            )
+            losses = sorted(losses, key=lambda x: x["kl"] + x["mse"] * 0.01)
+            scale = losses[0]["scale"]
+            offset = losses[0]["offset"]
+
+            ## 矫正offset
+            if scale == full_scale:
+                offset = full_offset
+
             return scale, offset
 
         elif config.policy.has_property(QuantizationProperty.PER_CHANNEL):

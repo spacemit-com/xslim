@@ -1,41 +1,13 @@
 # Test Quantization System Performace on Image Classification Models with ILSVRC2012 Dataset
-#
-#   1. How to use:
-#      Run this script with python directly.
-OUTPUT_DIR = "/home/huangjinghui/1_workspace/2_ppq/Output/imagenet"
-MODEL_QUANTIZE_EN = False
-# 开启浮点模型精度评估
-EVAL_FP_EN = False
-# 开启量化模型精度评估
-EVAL_QUANT_EN = True
-EVAL_VERBOSE = False
-EVAL_ERROR_PERFORMANCE = False
-TEST_BATCH_SIZE = 1
-COLLECT_DEVICE = "cuda"
-
-# Should contains model file(.onnx)
-MODEL_DIR = "QuantZoo/Model/Imagenet"
-
-# Should contains Calib & Test Img Folder
-CALIB_DIR = "QuantZoo/Data/Imagenet/Calib"
-TEST_DIR = "QuantZoo/Data/Imagenet/Test"
-
-# write report to here
-REPORT_DIR = "QuantZoo/Reports"
-
-MODEL_FILTER = {"vit_b_16"}
-
 CONFIGS = [
     {
         "Model": "resnet18",
         "Output": ["/layer4/layer4.1/relu_1/Relu_output_0"],
-        "auto_finetune_level": 0,
     },
     {
         "Model": "resnet50",
         "Output": ["/layer4/layer4.2/relu_2/Relu_output_0"],
-        "calibration_type": "percentile",
-        "auto_finetune_level": 0,
+        # "calibration_type": "percentile",
     },
     {
         "Model": "resnet50-v1.5",
@@ -43,7 +15,6 @@ CONFIGS = [
         "mean_value": [123.68, 116.78, 103.94],
         "std_value": [1, 1, 1],
         "preprocess_file": "IMAGENET",
-        "calibration_type": "percentile",
     },
     {
         "Model": "resnext50",
@@ -60,14 +31,12 @@ CONFIGS = [
     {
         "Model": "mobilenet_v2",
         "Output": ["/features/features.18/features.18.2/Clip_output_0"],
-        "calibration_type": "percentile",
-        "auto_finetune_level": 1,
+        # "calibration_type": "percentile",
     },
     {
         "Model": "mobilenet_v3_large",
         "Output": ["/classifier/classifier.1/Mul_output_0"],
         "calibration_type": "percentile",
-        "auto_finetune_level": 0,
     },
     {
         "Model": "mobilenet_v3_small",
@@ -82,26 +51,47 @@ CONFIGS = [
     {
         "Model": "efficientnet_v1_b1",
         "Output": ["/features/features.8/features.8.2/Mul_output_0"],
+        "calibration_type": "percentile",
     },
-    {"Model": "efficientnet_v2_s", "Output": ["/features/features.7/features.7.2/Mul_output_0"]},
+    {
+        "Model": "efficientnet_v2_s",
+        "Output": ["/features/features.7/features.7.2/Mul_output_0"],
+        "calibration_type": "percentile",
+    },
     {
         "Model": "mnasnet0_5",
         "Output": ["/layers/layers.16/Relu_output_0"],
-        "calibration_type": "percentile",
-        "auto_finetune_level": 0,
     },
     {"Model": "mnasnet1_0", "Output": ["/layers/layers.16/Relu_output_0"]},
-    {"Model": "repvgg", "Output": ["output"]},
-    {"Model": "v100_gpu64@5ms_top1@71.6_finetune@25", "Output": ["471"]},
-    {"Model": "v100_gpu64@6ms_top1@73.0_finetune@25", "Output": ["471"]},
-    {"Model": "shufflenet_v2_x1_0", "Output": ["978"]},
+    {
+        "Model": "repvgg",
+        "Output": ["output"],
+        "calibration_type": "percentile",
+        "auto_finetune_level": 2,
+    },
+    {
+        "Model": "v100_gpu64@5ms_top1@71.6_finetune@25",
+        "Output": ["471"],
+        "calibration_type": "percentile",
+    },
+    {
+        "Model": "v100_gpu64@6ms_top1@73.0_finetune@25",
+        "Output": ["471"],
+        "calibration_type": "percentile",
+    },
+    {
+        "Model": "shufflenet_v2_x1_0",
+        "Output": ["978"],
+        "calibration_type": "percentile",
+    },
     {"Model": "lcnet_050", "Output": ["/act2/Mul_output_0"]},
     {"Model": "lcnet_100", "Output": ["/act2/Mul_output_0"]},
     {
         "Model": "inception_v1",
         "Output": ["output"],
-        "mean_value": [127.5, 127.5, 127.5],
-        "std_value": [127.5, 127.5, 127.5],
+        "mean_value": [104, 117, 123],
+        "std_value": [1.0, 1.0, 1.0],
+        "preprocess_file": "IMAGENET",
     },
     {
         "Model": "inception_resnet_v2",
@@ -117,12 +107,24 @@ CONFIGS = [
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
     },
-    {"Model": "squeezenet1.1", "Output": ["output"], "auto_finetune_level": 0},
+    {
+        "Model": "squeezenet1.1",
+        "Output": ["output"],
+    },
     {
         "Model": "vit_b_16",
         "Output": ["onnx::Gather_1703"],
+        "calibration_type": "percentile",
     },
     {"Model": "vgg16", "Output": ["output"]},
+    {
+        "Model": "swin_small_patch4_window7_224",
+        "calibration_type": "percentile",
+    },
+    {
+        "Model": "swinv2_small_window8_256",
+        "calibration_type": "percentile",
+    },
 ]
 
 from typing import Callable, Optional
@@ -147,10 +149,23 @@ import torchvision.transforms as transforms
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--dataset_dir", required=False, default=os.getcwd(), help="Path to the Imagenet Dataset directory."
+    "--base_dir",
+    required=False,
+    default="/home/huangjinghui/1_workspace/2_ppq/PPQQuantZoo/QuantZoo",
+    help="Path to the QuantZoo Base directory.",
 )
-parser.add_argument("--output_dir", required=False, default=os.getcwd(), help="Path to the Output directory.")
-parser.add_argument("--filter", required=False, default=None, help="model name filter.")
+parser.add_argument(
+    "--output_dir",
+    required=False,
+    default="/home/huangjinghui/1_workspace/2_ppq/Output/imagenet",
+    help="Path to the Output directory.",
+)
+parser.add_argument("--filter", required=False, default="resnet18", help="model name filter.")
+parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
+parser.add_argument("--device", required=False, default="cuda", help="device.")
+parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
+parser.add_argument("--eval_fp", action="store_true", help="eval_fp.")
+parser.add_argument("--eval_quant", action="store_true", help="eval_quant.")
 
 
 def imagenet_preprocess(input_shape, mean_value, std_value):
@@ -285,11 +300,13 @@ def _evaluate_any_module_with_imagenet(
 
     loss_fn = torch.nn.CrossEntropyLoss().to("cpu")
 
-    for batch_idx, (batch_input, batch_label) in tqdm(
+    eval_range = tqdm(
         enumerate(imagenet_validation_loader),
         desc="Evaluating Model...",
         total=len(imagenet_validation_loader),
-    ):
+    )
+
+    for batch_idx, (batch_input, batch_label) in eval_range:
         batch_input = batch_input.to(device)
         batch_label = batch_label.to(device)
         batch_time_mark_point = time.time()
@@ -304,10 +321,11 @@ def _evaluate_any_module_with_imagenet(
                     batch_pred = [torch.from_numpy(item).to(device) for item in batch_pred]
                 dtypes = [item.dtype for item in batch_pred]
                 argmax_idx = dtypes.index(torch.int64)
+                batch_pred_conf = batch_pred_conf
                 batch_pred_conf = batch_pred[1 - argmax_idx]
                 batch_pred_index = batch_pred[argmax_idx]
             elif len(batch_pred) == 1:
-                batch_pred_conf = batch_pred[0]
+                batch_pred_conf = batch_pred[0].reshape(1, -1)
 
         _, cls_num = batch_pred_conf.size()
         batch_pred_conf = batch_pred_conf[:, cls_num - 1000 :]
@@ -319,6 +337,9 @@ def _evaluate_any_module_with_imagenet(
         recorder["top1_accuracy"].append(prec1.item())
         recorder["top5_accuracy"].append(prec5.item())
 
+        eval_range.desc = "Evaluating Model Prec@1 {:.2f}".format(
+            sum(recorder["top1_accuracy"]) / len(recorder["top1_accuracy"])
+        )
         if batch_idx % 100 == 0 and verbose:
             print(
                 "Test: [{0} / {1}]\t"
@@ -343,8 +364,23 @@ def _evaluate_any_module_with_imagenet(
 
 
 if __name__ == "__main__":
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    args = parser.parse_args()
+
+    output_dir = args.output_dir
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    model_dir = os.path.join(args.base_dir, "Model", "Imagenet")
+    calib_dir = os.path.join(args.base_dir, "Data", "Imagenet", "Calib")
+    test_dir = os.path.join(args.base_dir, "Data", "Imagenet", "Test")
+
+    test_batch_size = args.batch_size
+    collect_device = args.device
+
+    model_filter = args.filter
+
+    MODEL_FILTER = set(model_filter.strip().split(";"))
+
     demo_json = {
         "model_parameters": {
             "onnx_model": "resnet18.onnx",
@@ -363,7 +399,7 @@ if __name__ == "__main__":
                     "mean_value": [123.675, 116.28, 103.53],
                     "std_value": [58.395, 57.12, 57.375],
                     "preprocess_file": "PT_IMAGENET",
-                    "data_list_path": "img_list.txt",
+                    "data_list_path": os.path.join(args.base_dir, "Data", "Imagenet", "calib_img_list.txt"),
                 }
             ],
         },
@@ -376,14 +412,13 @@ if __name__ == "__main__":
         if len(MODEL_FILTER) > 0:
             if model not in MODEL_FILTER:
                 continue
-
-        monitoring_vars = config["Output"]
         print(f"Ready to run quant benchmark on {model}")
 
-        input_model_path = os.path.join(MODEL_DIR, model + ".onnx")
+        input_model_path = os.path.join(model_dir, model + ".onnx")
 
         opt_model_path = input_model_path
         float_graph = load_onnx_graph(onnx_import_file=input_model_path)
+
         xquant.GraphLegalized(float_graph)()
         custom_transforms = None
         custom_loader = None
@@ -394,13 +429,22 @@ if __name__ == "__main__":
         calibration_type = config.get("calibration_type", "default")
         auto_finetune_level = config.get("auto_finetune_level", None)
 
+        # onnx_model = osg.import_onnx(onnx.load(input_model_path))
+        # for idx, in_var in enumerate(onnx_model.inputs):
+        #    in_var.name = "input_{}".format(idx)
+        #    in_var.shape = input_shape
+        #    in_var.dtype = np.float32
+        # new_onnx_model = osg.export_onnx(onnx_model)
+        # onnx.save_model(new_onnx_model, input_model_path)
+        # continue
+
         custom_transforms = pytorch_imagenet_preprocess(input_shape, mean_value, std_value)
         if preprocess_file == "IMAGENET":
             custom_transforms = imagenet_preprocess(input_shape, mean_value, std_value)
 
         test_loader = load_imagenet_from_directory(
-            directory=TEST_DIR,
-            batchsize=TEST_BATCH_SIZE,
+            directory=test_dir,
+            batchsize=test_batch_size,
             shuffle=False,
             require_label=True,
             num_of_workers=0,
@@ -410,9 +454,9 @@ if __name__ == "__main__":
 
         demo_json["model_parameters"]["onnx_model"] = opt_model_path
         demo_json["model_parameters"]["output_prefix"] = "{}.q".format(model)
-        demo_json["model_parameters"]["working_dir"] = OUTPUT_DIR
+        demo_json["model_parameters"]["working_dir"] = output_dir
         demo_json["calibration_parameters"]["calibration_type"] = calibration_type
-        demo_json["calibration_parameters"]["calibration_device"] = COLLECT_DEVICE
+        demo_json["calibration_parameters"]["calibration_device"] = collect_device
         demo_json["calibration_parameters"]["input_parametres"][0]["input_shape"] = input_shape
         demo_json["calibration_parameters"]["input_parametres"][0]["mean_value"] = mean_value
         demo_json["calibration_parameters"]["input_parametres"][0]["std_value"] = std_value
@@ -420,24 +464,24 @@ if __name__ == "__main__":
         demo_json["calibration_parameters"]["input_parametres"][0]["preprocess_file"] = preprocess_file
         if isinstance(auto_finetune_level, int):
             demo_json["quantization_parameters"]["auto_finetune_level"] = auto_finetune_level
-        if MODEL_QUANTIZE_EN:
+        if not args.quant_disable:
             quantized_graph = xquant.quantize_onnx_model(demo_json)
 
-        if EVAL_FP_EN:
+        if args.eval_fp:
             print(f"Evaluate float Model Accurarcy....")
             # evaluation
             acc = evaluate_ppq_module_with_imagenet(
                 model=float_graph,
                 imagenet_validation_loader=test_loader,
-                batchsize=TEST_BATCH_SIZE,
-                device=COLLECT_DEVICE,
-                verbose=EVAL_VERBOSE,
+                batchsize=test_batch_size,
+                device=collect_device,
+                verbose=False,
             )
             print(f"Model Classify Accurarcy = {acc: .4f}%")
 
-        output_model_path = os.path.join(OUTPUT_DIR, "{}.onnx".format(demo_json["model_parameters"]["output_prefix"]))
+        output_model_path = os.path.join(output_dir, "{}.onnx".format(demo_json["model_parameters"]["output_prefix"]))
 
-        if EVAL_QUANT_EN:
+        if args.eval_quant:
             # 需要使用导出后的ONNX模型推理 保持与ORT的算子一致
             quantized_export_graph = load_onnx_graph(onnx_import_file=output_model_path)
 
@@ -446,8 +490,8 @@ if __name__ == "__main__":
             acc = evaluate_ppq_module_with_imagenet(
                 model=quantized_export_graph,
                 imagenet_validation_loader=test_loader,
-                batchsize=TEST_BATCH_SIZE,
-                device=COLLECT_DEVICE,
-                verbose=EVAL_VERBOSE,
+                batchsize=test_batch_size,
+                device=collect_device,
+                verbose=False,
             )
             print(f"Model Classify Accurarcy = {acc: .4f}%")

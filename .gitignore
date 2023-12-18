@@ -4,4 +4,6 @@
 **/*.out
 **/*.csv
 **/*.model
+**/*.log
+**/*.txt
 __pycache__/
