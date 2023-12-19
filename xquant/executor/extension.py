@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import time
 import math
@@ -24,6 +26,7 @@ def _get_quant_min_max(num_of_bits: int, signed: bool = True):
 
 def QuantizeLinear_Forward(op: Operation, values, ctx, **kwargs):
     axis_ = op.attributes.get("axis", 0)
+    domain = op.attributes.get("domain", None)
     x, scale, zp = values[:3]
     new_shape = x.dim() * [1]
     if len(new_shape) > axis_:
@@ -41,7 +44,9 @@ def QuantizeLinear_Forward(op: Operation, values, ctx, **kwargs):
     elif zp.dtype == torch.uint8:
         quant_min, quant_max = _get_quant_min_max(8, False)
     elif zp.dtype == torch.int16:
-        quant_min, quant_max = _get_quant_min_max(12)
+        quant_min, quant_max = _get_quant_min_max(16)
+        if domain == "spacemit_ops":
+            quant_min, quant_max = _get_quant_min_max(13)
     elif zp.dtype == torch.int32:
         quant_min, quant_max = _get_quant_min_max(32)
     else:

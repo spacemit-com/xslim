@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
 from tqdm import tqdm
@@ -109,6 +111,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         block_wise: bool = True,
         fintune_epoch: int = 2,
         auto_finetune_level: int = 1,
+        report_context: dict = None,
     ) -> None:
         super().__init__(method, override, calib_steps)
         self.name = "XQuant Runtime Calibration Pass(BlockWise)"
@@ -117,6 +120,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         self._fintune_epoch = fintune_epoch
         self._block_wise_loss = []
         self._auto_finetune_level = auto_finetune_level
+        self._report_context = report_context
 
     def split_graph_into_blocks(
         self,
@@ -194,7 +198,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                 raise RuntimeError("missing input {} for block".format(var_name))
 
         with torch.no_grad():
-            for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Collect"):
+            for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Collect", disable=True):
                 inputs_feed = {
                     var_name: dataloader_cache[var_name][idx].to(executor._executing_context.executing_device)
                     for var_name in block_input_names
@@ -241,7 +245,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             pass
         else:
             with torch.no_grad():
-                for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Collect"):
+                for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Collect", disable=True):
                     inputs_feed = {
                         var_name: dataloader_cache[var_name][idx].to(executor._executing_context.executing_device)
                         for var_name in block_input_names
@@ -335,7 +339,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         means = {o_name: 0 for o_name in block_output_names}
 
         with torch.no_grad():
-            for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Quant Check"):
+            for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Quant Check", disable=True):
                 inputs_feed = {
                     var_name: dataloader_cache[var_name][idx].to(executor._executing_context.executing_device)
                     for var_name in block_input_names_set
@@ -388,7 +392,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         operation_cache = [operation for operation in block.rps]
         bias_quant_cache = {}
         output_names = list(bias_op_var_names.keys())
-        for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Finetune"):
+        for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Finetune", disable=True):
             inputs_feed = {
                 var_name: dataloader_cache[var_name][idx].to(executor._executing_context.executing_device)
                 for var_name in block_input_names_set
@@ -424,11 +428,15 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         }
 
     def report_block_loss(self, block_losses: Sequence[dict], top_k=5):
-        for loss_info in block_losses[:top_k]:
-            loss_str = "{} -> {}: mse = {:.4f}, snr = {:.4f}\n".format(
-                loss_info["start_op"], loss_info["end_op"], loss_info["snr"], loss_info["mse"]
-            )
-            print(loss_str)
+        if self._report_context is not None:
+            self._report_context["calibration"] = block_losses
+        else:
+            for loss_info in block_losses[:top_k]:
+                loss_str = "{} -> {}: mse = {:.4f}, snr = {:.4f}".format(
+                    loss_info["start_op"], loss_info["end_op"], loss_info["snr"], loss_info["mse"]
+                )
+
+                print(loss_str)
 
     def finetune(
         self,

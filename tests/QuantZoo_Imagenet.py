@@ -2,121 +2,98 @@
 CONFIGS = [
     {
         "Model": "resnet18",
-        "Output": ["/layer4/layer4.1/relu_1/Relu_output_0"],
     },
     {
         "Model": "resnet50",
-        "Output": ["/layer4/layer4.2/relu_2/Relu_output_0"],
-        # "calibration_type": "percentile",
     },
     {
         "Model": "resnet50-v1.5",
-        "Output": ["output"],
         "mean_value": [123.68, 116.78, 103.94],
         "std_value": [1, 1, 1],
         "preprocess_file": "IMAGENET",
     },
     {
         "Model": "resnext50",
-        "Output": ["output"],
     },
-    {"Model": "seresnet50", "Output": ["output"]},
+    {"Model": "seresnet50"},
     {
         "Model": "mobilenet_v1",
-        "Output": ["output"],
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
         "preprocess_file": "IMAGENET",
     },
     {
         "Model": "mobilenet_v2",
-        "Output": ["/features/features.18/features.18.2/Clip_output_0"],
-        # "calibration_type": "percentile",
     },
     {
         "Model": "mobilenet_v3_large",
-        "Output": ["/classifier/classifier.1/Mul_output_0"],
-        "calibration_type": "percentile",
     },
     {
         "Model": "mobilenet_v3_small",
-        "Output": ["/classifier/classifier.1/Mul_output_0"],
     },
     {
         "Model": "efficientnet_v1_b0",
-        "Output": ["/features/features.8/features.8.2/Mul_output_0"],
-        "calibration_type": "percentile",
-        "auto_finetune_level": 2,
+        # "calibration_type": "percentile",
+        # "finetune_level": 2,
     },
     {
         "Model": "efficientnet_v1_b1",
-        "Output": ["/features/features.8/features.8.2/Mul_output_0"],
         "calibration_type": "percentile",
     },
     {
         "Model": "efficientnet_v2_s",
-        "Output": ["/features/features.7/features.7.2/Mul_output_0"],
         "calibration_type": "percentile",
     },
     {
         "Model": "mnasnet0_5",
-        "Output": ["/layers/layers.16/Relu_output_0"],
     },
-    {"Model": "mnasnet1_0", "Output": ["/layers/layers.16/Relu_output_0"]},
+    {"Model": "mnasnet1_0"},
     {
         "Model": "repvgg",
-        "Output": ["output"],
         "calibration_type": "percentile",
-        "auto_finetune_level": 2,
+        "finetune_level": 2,
     },
     {
         "Model": "v100_gpu64@5ms_top1@71.6_finetune@25",
-        "Output": ["471"],
         "calibration_type": "percentile",
     },
     {
         "Model": "v100_gpu64@6ms_top1@73.0_finetune@25",
-        "Output": ["471"],
         "calibration_type": "percentile",
     },
     {
         "Model": "shufflenet_v2_x1_0",
-        "Output": ["978"],
         "calibration_type": "percentile",
     },
-    {"Model": "lcnet_050", "Output": ["/act2/Mul_output_0"]},
-    {"Model": "lcnet_100", "Output": ["/act2/Mul_output_0"]},
+    {"Model": "lcnet_050"},
+    {"Model": "lcnet_100"},
     {
         "Model": "inception_v1",
-        "Output": ["output"],
         "mean_value": [104, 117, 123],
         "std_value": [1.0, 1.0, 1.0],
         "preprocess_file": "IMAGENET",
+        "color_format": "bgr",
     },
     {
         "Model": "inception_resnet_v2",
-        "Output": ["output"],
         "input_shape": [1, 3, 299, 299],
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
     },
     {
         "Model": "inception_v3",
-        "Output": ["output"],
         "input_shape": [1, 3, 299, 299],
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
     },
     {
         "Model": "squeezenet1.1",
-        "Output": ["output"],
     },
     {
         "Model": "vit_b_16",
-        "Output": ["onnx::Gather_1703"],
         "calibration_type": "percentile",
     },
-    {"Model": "vgg16", "Output": ["output"]},
+    {"Model": "vgg16"},
     {
         "Model": "swin_small_patch4_window7_224",
         "calibration_type": "percentile",
@@ -160,7 +137,7 @@ parser.add_argument(
     default="/home/huangjinghui/1_workspace/2_ppq/Output/imagenet",
     help="Path to the Output directory.",
 )
-parser.add_argument("--filter", required=False, default="resnet18", help="model name filter.")
+parser.add_argument("--filter", required=False, default="mobilenet_v3_small", help="model name filter.")
 parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
 parser.add_argument("--device", required=False, default="cuda", help="device.")
 parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
@@ -381,32 +358,33 @@ if __name__ == "__main__":
 
     MODEL_FILTER = set(model_filter.strip().split(";"))
 
-    demo_json = {
-        "model_parameters": {
-            "onnx_model": "resnet18.onnx",
-            "output_prefix": "resnet18.q",
-            "working_dir": "temp_output",
-        },
-        "calibration_parameters": {
-            "calibration_step": 500,
-            "calibration_device": "cuda",
-            "calibration_type": "default",
-            "input_parametres": [
-                {
-                    "input_name": "input.1",
-                    "input_shape": [1, 3, 224, 224],
-                    "file_type": "img",
-                    "mean_value": [123.675, 116.28, 103.53],
-                    "std_value": [58.395, 57.12, 57.375],
-                    "preprocess_file": "PT_IMAGENET",
-                    "data_list_path": os.path.join(args.base_dir, "Data", "Imagenet", "calib_img_list.txt"),
-                }
-            ],
-        },
-        "quantization_parameters": {"precision_level": 0},
-    }
-
     for config in CONFIGS:
+        demo_json = {
+            "model_parameters": {
+                "onnx_model": "resnet18.onnx",
+                "output_prefix": "resnet18.q",
+                "working_dir": "temp_output",
+            },
+            "calibration_parameters": {
+                "calibration_step": 500,
+                "calibration_device": "cuda",
+                "calibration_type": "default",
+                "input_parametres": [
+                    {
+                        "input_name": "input.1",
+                        "input_shape": [1, 3, 224, 224],
+                        "file_type": "img",
+                        "color_format": "rgb",
+                        "mean_value": [123.675, 116.28, 103.53],
+                        "std_value": [58.395, 57.12, 57.375],
+                        "preprocess_file": "PT_IMAGENET",
+                        "data_list_path": os.path.join(args.base_dir, "Data", "Imagenet", "calib_img_list.txt"),
+                    }
+                ],
+            },
+            "quantization_parameters": {"precision_level": 0},
+        }
+
         model = config["Model"]
 
         if len(MODEL_FILTER) > 0:
@@ -420,14 +398,14 @@ if __name__ == "__main__":
         float_graph = load_onnx_graph(onnx_import_file=input_model_path)
 
         xquant.GraphLegalized(float_graph)()
-        custom_transforms = None
-        custom_loader = None
         mean_value = config.get("mean_value", [123.675, 116.28, 103.53])
         std_value = config.get("std_value", [58.395, 57.12, 57.375])
         input_shape = config.get("input_shape", [1, 3, 224, 224])
         preprocess_file = config.get("preprocess_file", "PT_IMAGENET")
         calibration_type = config.get("calibration_type", "default")
-        auto_finetune_level = config.get("auto_finetune_level", None)
+        color_format = config.get("color_format", "rgb")
+        finetune_level = config.get("finetune_level", None)
+        max_percentile = config.get("max_percentile", None)
 
         # onnx_model = osg.import_onnx(onnx.load(input_model_path))
         # for idx, in_var in enumerate(onnx_model.inputs):
@@ -442,6 +420,12 @@ if __name__ == "__main__":
         if preprocess_file == "IMAGENET":
             custom_transforms = imagenet_preprocess(input_shape, mean_value, std_value)
 
+        def custom_loader(x):
+            img = cv2.imread(x)
+            if color_format == "rgb":
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return img
+
         test_loader = load_imagenet_from_directory(
             directory=test_dir,
             batchsize=test_batch_size,
@@ -449,7 +433,7 @@ if __name__ == "__main__":
             require_label=True,
             num_of_workers=0,
             custom_transforms=custom_transforms,
-            custom_loader=lambda x: cv2.imread(x),
+            custom_loader=custom_loader,
         )
 
         demo_json["model_parameters"]["onnx_model"] = opt_model_path
@@ -460,10 +444,17 @@ if __name__ == "__main__":
         demo_json["calibration_parameters"]["input_parametres"][0]["input_shape"] = input_shape
         demo_json["calibration_parameters"]["input_parametres"][0]["mean_value"] = mean_value
         demo_json["calibration_parameters"]["input_parametres"][0]["std_value"] = std_value
+        demo_json["calibration_parameters"]["input_parametres"][0]["color_format"] = color_format
         demo_json["calibration_parameters"]["input_parametres"][0]["input_name"] = list(float_graph.inputs.keys())[0]
         demo_json["calibration_parameters"]["input_parametres"][0]["preprocess_file"] = preprocess_file
-        if isinstance(auto_finetune_level, int):
-            demo_json["quantization_parameters"]["auto_finetune_level"] = auto_finetune_level
+
+        precision_level = config.get("precision_level", None)
+        if isinstance(precision_level, int):
+            demo_json["quantization_parameters"]["precision_level"] = precision_level
+        if isinstance(finetune_level, int):
+            demo_json["quantization_parameters"]["finetune_level"] = finetune_level
+        if isinstance(max_percentile, float):
+            demo_json["quantization_parameters"]["max_percentile"] = max_percentile
         if not args.quant_disable:
             quantized_graph = xquant.quantize_onnx_model(demo_json)
 

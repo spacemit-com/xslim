@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
+from collections import OrderedDict
 from enum import Enum
 import torch
 import numpy as np
@@ -44,7 +45,7 @@ from ..optimizer import (
     PassiveParameterBakingPass,
     CustomLayerwiseEqualizationPass,
 )
-from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel
+from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, xquant_info, xquant_warning
 from ..xquant_setting import XQuantSetting
 
 
@@ -67,7 +68,6 @@ class XQuantizer(BaseQuantizer):
         self._precision_level = PrecisionLevel.BIT_8
         self._num_of_bits = 8
         self._auto_finetune_level = AutoFinetuneLevel.DO_NOTHING
-        self._gemm_bits = 8
         self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits, False)
         perchannel_policy = QuantizationPolicy(
             QuantizationProperty.SYMMETRICAL + QuantizationProperty.PER_CHANNEL + QuantizationProperty.LINEAR
@@ -90,6 +90,8 @@ class XQuantizer(BaseQuantizer):
             "minmax": "minmax",
             "percentile": "percentile",
         }
+        self.report_context = OrderedDict()
+        self._verbose = False
 
     def quantize(
         self,
@@ -105,19 +107,23 @@ class XQuantizer(BaseQuantizer):
         self._auto_finetune_level = xquant_setting.quantization_parameters.finetune_level
         self._precision_level = xquant_setting.quantization_parameters.precision_level
 
-        self._gemm_bits = 8
+        self._num_of_bits = 8
         if self._precision_level.value == PrecisionLevel.GEMM_16.value:
-            self._gemm_bits = 12
+            self._num_of_bits = 13
+        self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits, False)
 
         quant_setting = QuantizationSettingFactory.default_setting()
         quant_setting.fusion_setting.align_quantization = False
 
         return super().quantize(inputs, calib_dataloader, executor, quant_setting, **kwargs)
 
-    def report(self) -> str:
-        debug_str = ""
-
-        return debug_str
+    def report(self):
+        xquant_info("blockwise compute loss...")
+        for loss_info in self.report_context["calibration"][:5]:
+            loss_str = "{} -> {}: mse = {:.4f}, snr = {:.4f}".format(
+                loss_info["start_op"], loss_info["end_op"], loss_info["snr"], loss_info["mse"]
+            )
+            xquant_info(loss_str)
 
     def init_quantize_config(self, operation: Operation) -> OperationQuantizationConfig:
         observer = "default" if self._calibration_type is None else self._calibration_type
@@ -147,14 +153,6 @@ class XQuantizer(BaseQuantizer):
         if operation.type in {"Conv", "ConvTranspose", "Gemm", "MatMul"}:
             # set all parameters within Conv, ConvTranspose, Gemm to per-channel quant-config.
             assert operation.num_of_input > 0, "Seems you got a Conv layer with no parameters."
-
-            # set act tqc
-            for in_var, in_tqc in zip(operation.inputs, base_quant_config.input_quantization_config):
-                if not in_var.is_parameter:
-                    in_tqc.num_of_bits = self._gemm_bits
-                    in_tqc._quant_min, in_tqc._quant_max = _get_quant_min_max(in_tqc.num_of_bits, False)
-                    break
-
             # set weight tqc
             for in_var, in_tqc in zip(operation.inputs, base_quant_config.input_quantization_config):
                 if in_var.is_parameter:
@@ -226,8 +224,17 @@ class XQuantizer(BaseQuantizer):
         if self._precision_level.value == PrecisionLevel.GEMM_16.value:
             return {
                 "Conv",
-                "ConvTranspose",
-                "Gemm",
+                # "ConvTranspose",
+                # "Gemm",
+                # "MatMul",
+                "Relu",
+                "Clip",
+                "Reshape",
+                "Concat",
+                "Split",
+                "Transpose",
+                "Slice",
+                "Flatten",
             }
         return QUANTTYPE
 
@@ -286,6 +293,7 @@ class XQuantizer(BaseQuantizer):
                     block_wise=True,
                     fintune_epoch=XQUANT_CONFIG.fine_tune_epoch,
                     auto_finetune_level=self._auto_finetune_level.value,
+                    report_context=self.report_context,
                 )
             )
 

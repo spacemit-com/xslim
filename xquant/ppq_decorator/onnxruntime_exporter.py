@@ -123,6 +123,9 @@ class ONNXRUNTIMExporter(OnnxExporter):
             else:
                 created.attributes["axis"] = None
 
+            if value_type in {torch.int16}:
+                created.attributes["domain"] = "spacemit_ops"
+
             if var in op.inputs:
                 graph.insert_op_before(A=created, B=op, input_idx=op.inputs.index(var))
             elif var in op.outputs:
@@ -202,6 +205,9 @@ class ONNXRUNTIMExporter(OnnxExporter):
                 created.attributes["axis"] = 0
             else:
                 created.attributes["axis"] = None
+
+            if value_type in {torch.int16}:
+                created.attributes["domain"] = "spacemit_ops"
 
             if var in op.inputs:
                 graph.insert_op_before(A=created, B=op, input_idx=op.inputs.index(var))
@@ -663,9 +669,13 @@ class ONNXRUNTIMExporter(OnnxExporter):
         if not name:
             name = "PPL Quantization Tool - Onnx Export"
 
+        add_spacemit_ep = False
         # Ready to export onnx graph definition.
         _inputs, _outputs, _initilizers, _nodes, _value_info = [], [], [], [], []
         for operation in graph.topological_sort():
+            if not add_spacemit_ep and operation.attributes.get("domain", None) == "spacemit_ops":
+                add_spacemit_ep = True
+
             _nodes.append(super().build_operator_proto(operation))
 
         for variable in graph.variables.values():
@@ -688,6 +698,9 @@ class ONNXRUNTIMExporter(OnnxExporter):
             value_info=_value_info,
         )
         extra_opsets = self.required_opsets
+
+        if add_spacemit_ep:
+            extra_opsets["spacemit_ops"] = 1
 
         opsets = []
         if GRAPH_OPSET_ATTRIB in graph._detail:
