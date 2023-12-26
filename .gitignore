@@ -7,3 +7,6 @@
 **/*.log
 **/*.txt
 __pycache__/
+/build
+/dist
+/xquant.egg-info

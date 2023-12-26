@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from enum import Enum
 
 
@@ -12,6 +12,8 @@ class XQUANT_GLOBAL_CONFIGURATION:
         self.default_block_size = 8
 
         self.fine_tune_epoch = 2
+
+        self.version = "1.0.0"
 
 
 class AutoFinetuneLevel(Enum):

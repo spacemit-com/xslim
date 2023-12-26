@@ -3,9 +3,7 @@ CONFIGS = [
     {
         "Model": "resnet18",
     },
-    {
-        "Model": "resnet50",
-    },
+    {"Model": "resnet50", "calibration_type": "percentile"},
     {
         "Model": "resnet50-v1.5",
         "mean_value": [123.68, 116.78, 103.94],
@@ -15,7 +13,7 @@ CONFIGS = [
     {
         "Model": "resnext50",
     },
-    {"Model": "seresnet50"},
+    {"Model": "seresnet50", "calibration_type": "percentile"},
     {
         "Model": "mobilenet_v1",
         "mean_value": [127.5, 127.5, 127.5],
@@ -25,46 +23,25 @@ CONFIGS = [
     {
         "Model": "mobilenet_v2",
     },
-    {
-        "Model": "mobilenet_v3_large",
-    },
-    {
-        "Model": "mobilenet_v3_small",
-    },
-    {
-        "Model": "efficientnet_v1_b0",
-        # "calibration_type": "percentile",
-        # "finetune_level": 2,
-    },
-    {
-        "Model": "efficientnet_v1_b1",
-        "calibration_type": "percentile",
-    },
-    {
-        "Model": "efficientnet_v2_s",
-        "calibration_type": "percentile",
-    },
+    {"Model": "mobilenet_v3_large", "calibration_type": "percentile"},
+    {"Model": "mobilenet_v3_small"},
+    {"Model": "efficientnet_v1_b0"},
+    {"Model": "efficientnet_v1_b1", "calibration_type": "percentile"},
+    {"Model": "efficientnet_v2_s", "calibration_type": "percentile"},
     {
         "Model": "mnasnet0_5",
     },
     {"Model": "mnasnet1_0"},
     {
         "Model": "repvgg",
-        "calibration_type": "percentile",
-        "finetune_level": 2,
     },
     {
         "Model": "v100_gpu64@5ms_top1@71.6_finetune@25",
-        "calibration_type": "percentile",
     },
     {
         "Model": "v100_gpu64@6ms_top1@73.0_finetune@25",
-        "calibration_type": "percentile",
     },
-    {
-        "Model": "shufflenet_v2_x1_0",
-        "calibration_type": "percentile",
-    },
+    {"Model": "shufflenet_v2_x1_0", "calibration_type": "percentile"},
     {"Model": "lcnet_050"},
     {"Model": "lcnet_100"},
     {
@@ -86,22 +63,20 @@ CONFIGS = [
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
     },
-    {
-        "Model": "squeezenet1.1",
-    },
-    {
-        "Model": "vit_b_16",
-        "calibration_type": "percentile",
-    },
-    {"Model": "vgg16"},
-    {
-        "Model": "swin_small_patch4_window7_224",
-        "calibration_type": "percentile",
-    },
-    {
-        "Model": "swinv2_small_window8_256",
-        "calibration_type": "percentile",
-    },
+    {"Model": "squeezenet1.1", "calibration_type": "percentile"},
+    # {
+    #    "Model": "vit_b_16",
+    #    "calibration_type": "percentile",
+    # },
+    # {"Model": "vgg16"},
+    # {
+    #    "Model": "swin_small_patch4_window7_224",
+    #    "calibration_type": "percentile",
+    # },
+    # {
+    #    "Model": "swinv2_small_window8_256",
+    #    "calibration_type": "percentile",
+    # },
 ]
 
 from typing import Callable, Optional
@@ -109,35 +84,34 @@ import os
 import torch
 import cv2
 import numpy as np
-from ppq.core import TargetPlatform
-from ppq.api import load_onnx_graph
-import xquant
 import time
+import argparse
 from tqdm import tqdm
-from xquant.calibration_helper import PTImagenetPreprocess, ImagenetPreprocess
 import torchvision.datasets as datasets
 from torch.utils.data.dataloader import DataLoader
+from ppq.api import load_onnx_graph
+import xquant
+from xquant.calibration_helper import PTImagenetPreprocess, ImagenetPreprocess
 from ppq.api import export_ppq_graph
 from ppq.executor.torch import TorchExecutor
 from torch.utils.data.dataset import Subset
 from ppq.IR import BaseGraph
-import argparse
 import torchvision.transforms as transforms
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--base_dir",
     required=False,
-    default="/home/huangjinghui/1_workspace/2_ppq/PPQQuantZoo/QuantZoo",
+    default="/home/share/modelzoo",
     help="Path to the QuantZoo Base directory.",
 )
 parser.add_argument(
     "--output_dir",
     required=False,
-    default="/home/huangjinghui/1_workspace/2_ppq/Output/imagenet",
+    default="output",
     help="Path to the Output directory.",
 )
-parser.add_argument("--filter", required=False, default="mobilenet_v3_small", help="model name filter.")
+parser.add_argument("--filter", required=False, default=None, help="model name filter.")
 parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
 parser.add_argument("--device", required=False, default="cuda", help="device.")
 parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
@@ -347,16 +321,17 @@ if __name__ == "__main__":
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    model_dir = os.path.join(args.base_dir, "Model", "Imagenet")
-    calib_dir = os.path.join(args.base_dir, "Data", "Imagenet", "Calib")
-    test_dir = os.path.join(args.base_dir, "Data", "Imagenet", "Test")
+    model_dir = os.path.join(args.base_dir, "classification")
+    calib_dir = os.path.join(args.base_dir, "dataset", "Imagenet", "Calib")
+    test_dir = os.path.join(args.base_dir, "dataset", "Imagenet", "Test")
 
     test_batch_size = args.batch_size
     collect_device = args.device
 
     model_filter = args.filter
 
-    MODEL_FILTER = set(model_filter.strip().split(";"))
+    MODEL_FILTER = set(model_filter.strip().split(";")) if model_filter is not None else set()
+    MODEL_FILTER = {i for i in MODEL_FILTER if i != ""}
 
     for config in CONFIGS:
         demo_json = {
@@ -366,19 +341,19 @@ if __name__ == "__main__":
                 "working_dir": "temp_output",
             },
             "calibration_parameters": {
-                "calibration_step": 500,
+                "calibration_step": 100,
                 "calibration_device": "cuda",
                 "calibration_type": "default",
                 "input_parametres": [
                     {
-                        "input_name": "input.1",
+                        "input_name": "input_0",
                         "input_shape": [1, 3, 224, 224],
                         "file_type": "img",
                         "color_format": "rgb",
                         "mean_value": [123.675, 116.28, 103.53],
                         "std_value": [58.395, 57.12, 57.375],
                         "preprocess_file": "PT_IMAGENET",
-                        "data_list_path": os.path.join(args.base_dir, "Data", "Imagenet", "calib_img_list.txt"),
+                        "data_list_path": os.path.join(args.base_dir, "dataset", "Imagenet", "calib_img_list.txt"),
                     }
                 ],
             },
@@ -392,7 +367,7 @@ if __name__ == "__main__":
                 continue
         print(f"Ready to run quant benchmark on {model}")
 
-        input_model_path = os.path.join(model_dir, model + ".onnx")
+        input_model_path = os.path.join(model_dir, model, model + ".onnx")
 
         opt_model_path = input_model_path
         float_graph = load_onnx_graph(onnx_import_file=input_model_path)
@@ -473,7 +448,6 @@ if __name__ == "__main__":
         output_model_path = os.path.join(output_dir, "{}.onnx".format(demo_json["model_parameters"]["output_prefix"]))
 
         if args.eval_quant:
-            # 需要使用导出后的ONNX模型推理 保持与ORT的算子一致
             quantized_export_graph = load_onnx_graph(onnx_import_file=output_model_path)
 
             print(f"Evaluate quantized Model Accurarcy....")

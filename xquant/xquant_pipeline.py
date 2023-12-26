@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Union, Dict, Sequence
 from collections import OrderedDict
 import json
 import torch
 import os
+from pandas import DataFrame
 from ppq import TargetPlatform, BaseQuantizer
 from ppq.api import load_onnx_graph, dispatch_graph, export_ppq_graph
 from ppq.executor import TorchExecutor
+from ppq.quantization.analyse import graphwise_error_analyse, statistical_analyse
 import ppq.lib as PFL
+from .defs import xquant_info, xquant_warning
 from .calibration_helper import XQuantDataset, CalibrationCollect
 from .optimizer import GraphLegalized
 from .xquant_setting import XQuantSettingFactory, XQuantSetting
@@ -33,6 +36,10 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
     calibration_step = config_setting.calibration_parameters.calibration_step
     calibration_device = config_setting.calibration_parameters.calibration_device
     input_parametres = config_setting.calibration_parameters.input_parametres
+
+    if not os.path.exists(working_dir):
+        xquant_info("{} not existed and make new one.".format(working_dir))
+        os.makedirs(working_dir)
 
     inputs_list = []
     for input_item in input_parametres:
@@ -66,13 +73,49 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
         calib_steps=calibration_step,
         collate_fn=CalibrationCollect(input_parametres, calibration_device),
     )
-    quantizer.report()
+
+    if config_setting.quantization_parameters.analysis_enable:
+        test_dataloader = torch.utils.data.DataLoader(data_set, shuffle=True)
+        graphwise_analyse_results = statistical_analyse(
+            quantizer._graph,
+            calibration_device,
+            test_dataloader,
+            CalibrationCollect(input_parametres, calibration_device),
+            steps=16,
+        )
+        result_keys = [
+            "Op name",
+            "Variable name",
+            "Noise:Signal Power Ratio",
+            "Quantized Max",
+            "Quantized Min",
+            "Float Max",
+            "Float Min",
+        ]
+        variable_reports = []
+        for report_info in graphwise_analyse_results:
+            if not report_info["Is parameter"]:
+                variable_reports.append({k: report_info[k] for k in result_keys})
+                variable_reports[-1]["Float Hist"] = ",".join([str(int(i)) for i in report_info["Float Hist"]])
+        sort_variable_reports = sorted(variable_reports, key=lambda x: x["Noise:Signal Power Ratio"], reverse=True)
+
+        snr_topk = [x["Noise:Signal Power Ratio"] for x in sort_variable_reports[:10]]
+        if sum(snr_topk) / len(snr_topk) > 2.0:
+            xquant_warning("Noise check error, quantization may be failed.")
+        for report_info in sort_variable_reports:
+            snr_value = report_info["Noise:Signal Power Ratio"]
+            if snr_value > 2.0:
+                report_info["Noise:Signal Power Ratio"] = "=={}==".format(snr_value)
+        sort_variable_reports_df = DataFrame(sort_variable_reports)
+        report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
+        xquant_info("export quantization statistical results file to {}".format(report_path))
+        reports_md = sort_variable_reports_df.to_markdown(report_path)
 
     export_ppq_graph(
         graph=quantizer._graph,
         platform=platform,
         graph_save_to=os.path.join(working_dir, "{}.onnx".format(output_prefix)),
-        config_save_to=os.path.join(working_dir, "{}.json".format(output_prefix)),
+        # config_save_to=os.path.join(working_dir, "{}.json".format(output_prefix)),
     )
 
     return quantizer._graph

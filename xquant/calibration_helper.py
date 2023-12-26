@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Any, Union, Dict, Sequence, Callable
 from collections import OrderedDict
 import os
@@ -167,6 +167,7 @@ class CalibrationCollect:
             file_type = input_info.file_type
             file_type = input_info.file_type
             color_format = input_info.color_format
+            input_shape = input_info.input_shape
             mean_value = np.array(input_info.mean_value) if input_info.mean_value is not None else 0
             std_value = np.array(input_info.std_value) if input_info.std_value is not None else 1
             batch_list = []
@@ -189,6 +190,8 @@ class CalibrationCollect:
                             img = np.expand_dims(img, -1)
                         elif color_format == "rgb":
                             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+                        img = cv2.resize(img, (input_shape[-1], input_shape[-2]), interpolation=cv2.INTER_AREA)
 
                         img = img.astype(np.float32)
                         img = (img - mean_value) / std_value

@@ -1,7 +1,13 @@
 numpy
 protobuf
-torch >= 1.6.0
+torch>=1.6.0
+torchvision
 tqdm
 ppq==0.6.6
-cv2
-onnx >= 1.14.0
+opencv-python
+onnx>=1.14.0
+tabulate
+pandas
+nvidia-pyindex
+onnx-graphsurgeon
+onnxconverter_common>=1.14.0

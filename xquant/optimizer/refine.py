@@ -1,29 +1,25 @@
-from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT. All rights reserved.
+from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
 from ppq.core import (
-    OBSERVER_MSE_HIST_BINS,
-    PASSIVE_OPERATIONS,
-    OperationQuantizationConfig,
-    QuantizationPolicy,
     QuantizationProperty,
     QuantizationStates,
-    RoundingPolicy,
-    TargetPlatform,
     empty_ppq_cache,
-    ppq_warning,
     QuantizationVisibility,
     convert_any_to_torch_tensor,
+    common as ppq_common,
 )
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.quantization.optim import (
-    QuantizationOptimizationPipeline,
     QuantizationOptimizationPass,
-    RuntimeCalibrationPass,
 )
 from ppq.IR.search import SearchableGraph
 from ppq.executor import BaseGraphExecutor
 from ppq.quantization.qfunction import PPQuantFunction
 from ppq.quantization.observer import range as ppq_range
+from ..defs import PrecisionLevel, AutoFinetuneLevel
+from ..xquant_setting import CustomQuantizationParameterSetting
 
 
 class PassiveParameterBakingPass(QuantizationOptimizationPass):
@@ -149,12 +145,12 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
     def passive_bias_quant(operation: QuantableOperation):
         if not isinstance(operation, QuantableOperation):
             return
-        if operation.type not in {"Conv", "ConvTranspose", "Gemm"}:
+        if operation.type not in {"Conv"}:
             return
         if operation.num_of_input == 3:
             i_cfg, w_cfg, b_cfg = operation.config.input_quantization_config
             o_cfg = operation.config.output_quantization_config[0]
-            if b_cfg.state not in {QuantizationStates.FP32}:
+            if b_cfg.state not in {QuantizationStates.FP32} or w_cfg.num_of_bits != 8:
                 return
             bias = operation.inputs[-1].value
             if bias is None:
@@ -170,6 +166,15 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
                 operation.inputs[-1].value = operation.inputs[-1].value.unsqueeze(0)
             if w_cfg.scale is None or i_cfg.scale is None:
                 return
+            if w_cfg.scale.numel() > 1:
+                zero_channel = torch.where(w_cfg.scale < 2**-16)[0]
+                if zero_channel.numel() > 0:
+                    operation.inputs[1].value[zero_channel] = 0
+                    store_state = w_cfg.state
+                    w_cfg.state = QuantizationStates.INITIAL
+                    w_cfg.scale[zero_channel] = 1.0
+                    w_cfg.state = store_state
+
             _b_scale = w_cfg.scale * i_cfg.scale
             _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
             if torch.all(torch.abs(_i_bias) < 2 ** (b_cfg.num_of_bits - 1)):
@@ -177,6 +182,7 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
             elif o_cfg.scale is not None:
                 # in frac + w frac无法表示就使用 out frac
                 b_cfg.scale = o_cfg.scale
+                operation.attributes["quant_bias_apply"] = 1
             else:
                 return
             b_cfg.state = QuantizationStates.PASSIVE
@@ -275,9 +281,9 @@ class ActivationClipRefine(QuantizationOptimizationPass):
                             force_range_max = (1.0 - beta) / alpha
 
                         elif check_sigmoid or (check_swish and len(var.dest_ops) == 2):
-                            force_range_min = -10.0
+                            force_range_min = -12.0
                             if check_sigmoid:
-                                force_range_max = 10.0
+                                force_range_max = 12.0
 
                         elif check_hardswish and len(var.dest_ops) == 2:
                             dest_op_type = [dest_op.type for dest_op in var.dest_ops]
@@ -294,3 +300,121 @@ class ActivationClipRefine(QuantizationOptimizationPass):
                                 var.name: {"min": force_range_min, "max": force_range_max}
                             }
                             operation._detail["output_force_range"].update({var.name: {"min": force_range_min}})
+
+
+class QuantizeConfigRefinePass(QuantizationOptimizationPass):
+    def __init__(
+        self, precision_level: int = 0, custom_setting: Sequence[CustomQuantizationParameterSetting] = None
+    ) -> None:
+        super().__init__(name="XQuant QuantizeConfigRefine Pass")
+        self._precision_level = precision_level
+        self._max_bits = 12
+        self._quant_max = 2**self._max_bits - 1
+        self._quant_min = 0
+        self._custom_setting = custom_setting
+
+    def precesion_level_2(self, operation: QuantableOperation):
+        if operation.type in {"Conv"}:
+            in_var = operation.inputs[0]
+            in_tqc = operation.input_quant_config[0]
+            out_var = operation.outputs[0]
+            out_tqc = operation.output_quant_config[0]
+            if in_tqc.dominated_by is in_tqc:
+                in_tqc.num_of_bits = self._max_bits
+                in_tqc._quant_min, in_tqc._quant_max = self._quant_min, self._quant_max
+            else:
+                in_tqc.num_of_bits = self._max_bits
+                in_tqc._quant_min, in_tqc._quant_max = self._quant_min, self._quant_max
+                in_tqc.dominated_by.num_of_bits = self._max_bits
+                in_tqc.dominated_by._quant_min, in_tqc.dominated_by._quant_max = (
+                    self._quant_min,
+                    self._quant_max,
+                )
+                in_tqc.dominated_by.state = QuantizationStates.INITIAL
+            if out_tqc.dominated_by is out_tqc:
+                out_tqc.num_of_bits = self._max_bits
+                out_tqc._quant_min, out_tqc._quant_max = self._quant_min, self._quant_max
+            else:
+                out_tqc.num_of_bits = self._max_bits
+                out_tqc._quant_min, out_tqc._quant_max = self._quant_min, self._quant_max
+                out_tqc.dominated_by.num_of_bits = self._max_bits
+                out_tqc.dominated_by._quant_min, out_tqc.dominated_by._quant_max = (
+                    self._quant_min,
+                    self._quant_max,
+                )
+        else:
+            for tqc, var in operation.config_with_variable:
+                if tqc.dominated_by is tqc and tqc.num_of_bits != self._max_bits:
+                    tqc.state = QuantizationStates.FP32
+
+    def custom_tqc_set(self, graph: BaseGraph, custom_tqc: CustomQuantizationParameterSetting):
+        var_dict = graph.variables
+        input_names = custom_tqc.input_names
+        output_names = custom_tqc.output_names
+        precision_level = custom_tqc.precision_level
+        max_percentile = custom_tqc.max_percentile
+        calibration_type = custom_tqc.calibration_type
+
+        input_tensors = []
+        for var_name in input_names:
+            var = graph.variables.get(var_name, None)
+            if var is None:
+                raise ValueError("var name {} not in the graph.".format(var_name))
+            if not var.is_parameter:
+                input_tensors.append(var)
+
+        output_tensors = []
+        for var_name in output_names:
+            var = graph.variables.get(var_name, None)
+            if var is None:
+                raise ValueError("var name {} not in the graph.".format(var_name))
+            output_tensors.append(var)
+
+        if len(input_tensors) < 1 or len(output_tensors) < 1:
+            raise ValueError("input_names and output_names should be set.")
+
+        visited_ops = []
+        output_tensors_set = set(output_tensors)
+
+        def get_op_blocks(in_vars: Sequence[Variable]):
+            for var in in_vars:
+                if var in output_tensors_set:
+                    return
+                for op in var.dest_ops:
+                    visited_ops.append(op)
+                    get_op_blocks(op.outputs)
+
+        get_op_blocks(input_tensors)
+
+        for op in visited_ops:
+            if not isinstance(op, QuantableOperation):
+                continue
+            if isinstance(precision_level, int) and precision_level >= 2:
+                self.precesion_level_2(op)
+            tqc = op.config
+
+            for in_var, in_tqc in zip(op.inputs, tqc.input_quantization_config):
+                if not in_var.is_parameter:
+                    if isinstance(max_percentile, float):
+                        in_tqc.detail[ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE] = max_percentile
+                    if isinstance(calibration_type, str):
+                        in_tqc.observer_algorithm = calibration_type
+            for out_var, out_tqc in zip(op.outputs, tqc.output_quantization_config):
+                if not out_var.is_parameter:
+                    if isinstance(max_percentile, float):
+                        out_tqc.detail[ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE] = max_percentile
+                    if isinstance(calibration_type, str):
+                        out_tqc.observer_algorithm = calibration_type
+
+    @empty_ppq_cache
+    def optimize(self, graph: BaseGraph, **kwargs) -> None:
+        if self._precision_level >= 2:
+            sorted_ops = graph.topological_sort()
+            for operation in sorted_ops:
+                if not isinstance(operation, QuantableOperation):
+                    continue
+                self.precesion_level_2(operation)
+
+        if isinstance(self._custom_setting, Sequence):
+            for tqc_setting in self._custom_setting:
+                self.custom_tqc_set(graph, tqc_setting)

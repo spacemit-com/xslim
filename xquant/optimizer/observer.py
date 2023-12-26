@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
 import torch
 import functools
@@ -9,8 +9,6 @@ from ppq.core import (
     TensorQuantizationConfig,
     QuantizationProperty,
     QuantizationStates,
-    empty_ppq_cache,
-    ppq_warning,
     ppq_quant_param_computing_function,
     common as ppq_common,
     convert_any_to_numpy,
@@ -29,6 +27,7 @@ class TorchXQuantObserver(TorchHistObserver):
         watch_on: Variable,
         quant_cfg: TensorQuantizationConfig,
         hist_bins: int = ppq_common.OBSERVER_FLOATING_MSE_FETCHES,
+        single_alg: str = None,
     ):
         super().__init__(watch_on, quant_cfg)
         if not ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE in quant_cfg.detail:
@@ -41,11 +40,12 @@ class TorchXQuantObserver(TorchHistObserver):
         else:
             self._scale_threshold = ppq_common.OBSERVER_MIN_SCALE
 
+        self._single_alg = single_alg
         self._hist_bins = hist_bins
         self._channel_min_max = []
 
-        self._force_range_min = -(2**16)
-        self._force_range_max = 2**16
+        self._force_range_min = -(2**31)
+        self._force_range_max = 2**31
         if watch_on.source_op is not None:
             self._force_range_min = (
                 watch_on.source_op._detail.get("output_force_range", {})
@@ -162,9 +162,11 @@ class TorchXQuantObserver(TorchHistObserver):
         idx_range[:bin_start] = bin_start - idx_range[:bin_start] - 0.5
         idx_range[bin_end:] = idx_range[bin_end:] - bin_end + 0.5
 
+        histogram = histogram / hist_sum
+
         loss = (idx_range * idx_range * histogram).sum()
 
-        return float(loss) / hist_sum
+        return float(loss)
 
     def compute_kl_loss(
         self, histogram: torch.Tensor, bin_start: int, bin_range: int, num_of_quant_levels: int, hist_sum: float
@@ -208,7 +210,7 @@ class TorchXQuantObserver(TorchHistObserver):
         hist_bins: int,
         hist_scale: float,
         config: TensorQuantizationConfig,
-        scale_threshold: float = ppq_common.OBSERVER_MIN_SCALE,
+        scale_threshold: float = 2**-24,
     ) -> Tuple[float, int]:
         if config.policy.has_property(QuantizationProperty.ASYMMETRICAL) and config.policy.has_property(
             QuantizationProperty.PER_TENSOR
@@ -235,7 +237,7 @@ class TorchXQuantObserver(TorchHistObserver):
                 self._scale_threshold,
             )
 
-            if num_of_quant_levels > 2**10:
+            if num_of_quant_levels > 2**10 or hist_scale == 0:
                 return percentile_scale, percentile_offset
 
             hist_sum = float(histogram.sum())
@@ -263,7 +265,6 @@ class TorchXQuantObserver(TorchHistObserver):
                     "scale": percentile_scale,
                     "offset": percentile_offset,
                     "percentile_loss": True,
-                    "time": 0,
                 }
             )
 
@@ -299,18 +300,29 @@ class TorchXQuantObserver(TorchHistObserver):
                         }
                     )
 
-            # 调和mse loss与kl loss
-            valid_topk = 10
             losses_kl = sorted(losses, key=lambda x: x["kl"])
             losses_mse = sorted(losses_kl, key=lambda x: x["mse"])
-            loss_scale = sum([x["mse"] for x in losses_mse[:valid_topk]]) / sum(
-                [x["kl"] for x in losses_kl[:valid_topk]]
-            )
-            losses = sorted(losses, key=lambda x: x["kl"] + x["mse"] / loss_scale)
-            scale = losses[0]["scale"]
-            offset = losses[0]["offset"]
 
-            return scale, offset
+            if self._single_alg == "mse":
+                scale = losses_mse[0]["scale"]
+                offset = losses_mse[0]["offset"]
+                return scale, offset
+            elif self._single_alg == "kl":
+                scale = losses_kl[0]["scale"]
+                offset = losses_kl[0]["offset"]
+                return scale, offset
+            else:
+                valid_topk = 10
+                loss_scale = [
+                    x["kl"] * x["kl"] / (x["mse"] * x["mse"])
+                    for x, y in zip(losses_mse[:valid_topk], losses_mse[:valid_topk])
+                ]
+                loss_scale = math.sqrt(sum(loss_scale) / len(loss_scale))
+                losses = sorted(losses, key=lambda x: x["kl"] + x["mse"] * loss_scale)
+                scale = losses[0]["scale"]
+                offset = losses[0]["offset"]
+
+                return scale, offset
 
         elif config.policy.has_property(QuantizationProperty.PER_CHANNEL):
             raise PermissionError("Torch Mse observer do not support PER_CHANNEL policy now, please wait.")
@@ -321,3 +333,23 @@ class TorchXQuantObserver(TorchHistObserver):
             return super().hist_to_scale_offset(histogram, hist_bins, hist_scale, config, scale_threshold)
 
         raise Exception("Oops, there might be some mistakes.")
+
+
+class TorchXQuantMSEObserver(TorchXQuantObserver):
+    def __init__(
+        self,
+        watch_on: Variable,
+        quant_cfg: TensorQuantizationConfig,
+        hist_bins: int = ppq_common.OBSERVER_FLOATING_MSE_FETCHES,
+    ):
+        super().__init__(watch_on, quant_cfg, hist_bins, "mse")
+
+
+class TorchXQuantKLObserver(TorchXQuantObserver):
+    def __init__(
+        self,
+        watch_on: Variable,
+        quant_cfg: TensorQuantizationConfig,
+        hist_bins: int = ppq_common.OBSERVER_FLOATING_MSE_FETCHES,
+    ):
+        super().__init__(watch_on, quant_cfg, hist_bins, "kl")

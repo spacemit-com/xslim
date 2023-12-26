@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
-from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
+# Copyright (c) 2023 SpacemiT. All rights reserved.
+from typing import Iterable, List, Set, Dict, Callable, Tuple, Sequence
 import time
 import math
 import numpy as np
 from ppq.lib import (
     register_operation_handler,
 )
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
+from ppq.IR import Operation
 from ppq.core import TargetPlatform
 from ppq.executor.op.torch import Conv_forward
 from ppq.executor.op.torch.base import *
@@ -35,8 +35,6 @@ def QuantizeLinear_Forward(op: Operation, values, ctx, **kwargs):
         scale = scale.reshape(new_shape)
     if zp.numel() > 1:
         zp = zp.reshape(new_shape)
-    y = x / scale + zp
-    y = torch.round(y)
 
     quant_min, quant_max = _get_quant_min_max(8)
     if zp.dtype == torch.int8:
@@ -44,14 +42,16 @@ def QuantizeLinear_Forward(op: Operation, values, ctx, **kwargs):
     elif zp.dtype == torch.uint8:
         quant_min, quant_max = _get_quant_min_max(8, False)
     elif zp.dtype == torch.int16:
-        quant_min, quant_max = _get_quant_min_max(16)
-        if domain == "spacemit_ops":
-            quant_min, quant_max = _get_quant_min_max(13)
+        quant_min, quant_max = -(2**11), 2**11
     elif zp.dtype == torch.int32:
         quant_min, quant_max = _get_quant_min_max(32)
     else:
         raise NotImplementedError(zp.dtype)
+
+    y = x / scale + zp
+    y = torch.round(y)
     y = torch.clip(y, quant_min, quant_max)
+
     return y
 
 

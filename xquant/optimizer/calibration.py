@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
 from tqdm import tqdm
@@ -111,7 +111,6 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         block_wise: bool = True,
         fintune_epoch: int = 2,
         auto_finetune_level: int = 1,
-        report_context: dict = None,
     ) -> None:
         super().__init__(method, override, calib_steps)
         self.name = "XQuant Runtime Calibration Pass(BlockWise)"
@@ -120,7 +119,6 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         self._fintune_epoch = fintune_epoch
         self._block_wise_loss = []
         self._auto_finetune_level = auto_finetune_level
-        self._report_context = report_context
 
     def split_graph_into_blocks(
         self,
@@ -407,14 +405,35 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                 else:
                     bias_quant_cache[o_name].append(reduce_bias)
 
+        def get_bias_valid_mean(value: torch.Tensor):
+            target_device = value.device
+            percentile = 0.999
+            value = value.cpu()
+            batch, channel = value.size()
+            value = value.permute(1, 0)
+            new_bias = []
+
+            min_idx, max_idx = int(batch * (1 - percentile)), int(batch * (percentile))
+            min_idx = max(0, min_idx) + 1
+            max_idx = min(max_idx, batch - 1) + 1
+
+            for i in range(channel):
+                temp_val = value[i].flatten()
+                _min = torch.kthvalue(temp_val, k=min_idx, dim=0)[0].item()
+                _max = torch.kthvalue(temp_val, k=max_idx, dim=0)[0].item()
+                temp_val = temp_val[torch.where(temp_val >= _min)]
+                temp_val = temp_val[torch.where(temp_val <= _max)]
+                new_bias.append(temp_val.mean().item())
+            return torch.tensor(new_bias, dtype=value.dtype, device=target_device)
+
         for o_name in bias_op_var_names:
             DC_term_fp = bias_fp_cache[o_name]
             DC_term_qt = bias_quant_cache[o_name]
 
             if len(DC_term_fp) == 0 or len(DC_term_qt) == 0:
                 continue
-            DC_term_fp = torch.mean(torch.cat(DC_term_fp, axis=0), dim=0)
-            DC_term_qt = torch.mean(torch.cat(DC_term_qt, axis=0), dim=0)
+            DC_term_fp = get_bias_valid_mean(torch.cat(DC_term_fp, axis=0))
+            DC_term_qt = get_bias_valid_mean(torch.cat(DC_term_qt, axis=0))
             bias_error = DC_term_fp - DC_term_qt
             bias_op_var_names[o_name].inputs[-1].value += bias_error
 
@@ -428,15 +447,11 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         }
 
     def report_block_loss(self, block_losses: Sequence[dict], top_k=5):
-        if self._report_context is not None:
-            self._report_context["calibration"] = block_losses
-        else:
-            for loss_info in block_losses[:top_k]:
-                loss_str = "{} -> {}: mse = {:.4f}, snr = {:.4f}".format(
-                    loss_info["start_op"], loss_info["end_op"], loss_info["snr"], loss_info["mse"]
-                )
-
-                print(loss_str)
+        for loss_info in block_losses[:top_k]:
+            loss_str = "{} -> {}: mse = {:.4f}, snr = {:.4f}".format(
+                loss_info["start_op"], loss_info["end_op"], loss_info["snr"], loss_info["mse"]
+            )
+            print(loss_str)
 
     def finetune(
         self,
@@ -542,7 +557,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             for block in tqdm(op_blocks, desc="Runtime Calibration(BlockWise)"):
                 self.calib_single_block(block, dataloader_cache, var_to_operations, executor, calib_step)
 
-            self._block_wise_loss = sorted(self._block_wise_loss, key=lambda x: x["mse"], reverse=True)
+            self._block_wise_loss = sorted(self._block_wise_loss, key=lambda x: x["snr"], reverse=True)
 
             if self._auto_finetune_level >= 2:
                 _auto_finetune_blocks = 10 if self._auto_finetune_level >= 3 else 3
@@ -556,6 +571,6 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                     calib_step,
                     collate_fn,
                 )
-            self.report_block_loss(self._block_wise_loss)
+            # self.report_block_loss(self._block_wise_loss)
         else:
             raise NotImplementedError

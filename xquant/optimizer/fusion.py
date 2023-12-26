@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
 import torch
 from ppq.core import (

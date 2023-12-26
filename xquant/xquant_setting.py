@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Union, Sequence, Dict, Literal, Pattern
+from enum import Enum
 import json
 import copy
 import os
@@ -21,6 +22,8 @@ class SettingSerialize:
                         self.__dict__[key] = getattr(self, "from_list")(key, value, qsetting)
                     else:
                         self.__dict__[key] = copy.deepcopy(value)
+                elif isinstance(self.__dict__[key], Enum):
+                    self.__dict__[key] = self.__dict__[key].__class__(value)
                 else:
                     assert isinstance(value, dict)
                     if isinstance(self.__dict__[key], SettingSerialize):
@@ -98,10 +101,11 @@ class CustomQuantizationParameterSetting(SettingSerialize):
 
 class QuantizationParameterSetting(SettingSerialize):
     def __init__(self) -> None:
-        self.precision_level: int = PrecisionLevel.BIT_8.value
+        self.precision_level: PrecisionLevel = PrecisionLevel.BIT_8
         self.max_percentile: float = None
-        self.finetune_level: int = AutoFinetuneLevel.LEVEL_1.value
+        self.finetune_level: AutoFinetuneLevel = AutoFinetuneLevel.LEVEL_1
         self.custom_setting: Sequence[CustomQuantizationParameterSetting] = None
+        self.analysis_enable: bool = True
 
     def from_list(self, value_name, obj_setting, qsetting):
         if value_name == "custom_setting":
@@ -115,14 +119,16 @@ class QuantizationParameterSetting(SettingSerialize):
             return obj_setting
 
     def check(self, qsetting):
-        self.precision_level = PrecisionLevel(self.precision_level)
-        self.finetune_level = AutoFinetuneLevel(self.finetune_level)
+        if self.precision_level.value > PrecisionLevel.BIT_8.value:
+            xquant_info("set higher precision level.")
+        if self.finetune_level.value > AutoFinetuneLevel.LEVEL_1.value:
+            xquant_info("set higher finetune level.")
 
 
 class CalibrationParameterSetting(SettingSerialize):
     def __init__(self) -> None:
         self.calibration_step: int = 100
-        self.calibration_device: str = None
+        self.calibration_device: str = "cuda" if XQUANT_CONFIG.cuda_support else "cpu"
         self.calibration_type: str = "default"
         self.input_parametres: Sequence[InputParameterSetting] = None
 
@@ -147,8 +153,11 @@ class CalibrationParameterSetting(SettingSerialize):
 
         assert len(self.input_parametres) > 0, "Calibration input_parametres setting not detected."
 
-        if self.calibration_type not in {"default", "minmax", "percentile"}:
+        if self.calibration_type not in {"default", "minmax", "percentile", "kl", "mse"}:
             raise NotImplementedError("calibration_type {} not implemented yet.".format(self.calibration_type))
+
+        if self.calibration_type != "default":
+            xquant_info("set calibration_type {}.".format(self.calibration_type))
 
         if isinstance(qsetting, XQuantSetting):
             onnx_model_path = qsetting.model_parameters.onnx_model

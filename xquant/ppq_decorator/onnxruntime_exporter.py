@@ -20,6 +20,7 @@ from ppq.IR import BaseGraph, Operation, QuantableOperation, QuantableVariable, 
 from ppq.utils.round import ppq_tensor_round
 from ppq.parser.onnx_exporter import OnnxExporter, OP_CONVERTERS, OperationExporter
 from ppq.lib import register_network_exporter
+import onnxmltools
 
 
 def CustomLinearQuant_toInt(tensor: torch.Tensor, config: TensorQuantizationConfig) -> torch.Tensor:
@@ -609,6 +610,17 @@ class ONNXRUNTIMExporter(OnnxExporter):
         if remove_activation_fn:
             # remove useless activation.
             self.remove_activation_ops(graph)
+
+        for op_name, op in graph.operations.items():
+            if (
+                op.type in {"Conv"}
+                and "quant_bias_apply" in op.attributes
+                and len(op.inputs) > 2
+                and isinstance(op.inputs[-1].source_op, Operation)
+                and op.inputs[-1].source_op.type == "DequantizeLinear"
+            ):
+                op.inputs[-1].source_op.attributes["quant_bias_apply"] = op.attributes.pop("quant_bias_apply")
+                op.inputs[-1].source_op.attributes["domain"] = "spacemit_ops"
 
         return self.remove_duplicated_quant_op(graph)
 

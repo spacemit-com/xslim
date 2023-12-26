@@ -1,28 +1,14 @@
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Any, Iterable, List, Set, Union, Dict, Callable, Tuple
 import torch
 from ppq.core import (
-    OBSERVER_MSE_HIST_BINS,
-    PASSIVE_OPERATIONS,
-    OperationQuantizationConfig,
-    QuantizationPolicy,
-    QuantizationProperty,
-    QuantizationStates,
-    RoundingPolicy,
-    TargetPlatform,
-    empty_ppq_cache,
     ppq_warning,
-    convert_any_to_numpy,
     convert_any_to_torch_tensor,
 )
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
-from ppq.quantization.optim import (
-    QuantizationOptimizationPipeline,
-    QuantizationOptimizationPass,
-    RuntimeCalibrationPass,
-)
+from ppq.IR import Operation, Variable
 from ppq.IR import GraphMerger
 from ppq.IR.search import SearchableGraph
-from ppq.executor import BaseGraphExecutor
 
 
 class GraphLegalized:

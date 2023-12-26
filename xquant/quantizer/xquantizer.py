@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2023 SpacemiT
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
 from collections import OrderedDict
 from enum import Enum
@@ -44,6 +44,7 @@ from ..optimizer import (
     ComputingFusionPass,
     PassiveParameterBakingPass,
     CustomLayerwiseEqualizationPass,
+    QuantizeConfigRefinePass,
 )
 from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, xquant_info, xquant_warning
 from ..xquant_setting import XQuantSetting
@@ -81,16 +82,16 @@ class XQuantizer(BaseQuantizer):
         self._op_type_to_policy = {
             "Conv": perchannel_policy,
             "ConvTranspose": pertensor_policy,
-            "Gemm": pertensor_policy,
+            "Gemm": perchannel_policy,
             "MatMul": pertensor_policy,
         }
         self._observer_mapping = {
             "default": "xquant",
-            "kl": "xquant",
+            "kl": "kl",
+            "mse": "mse",
             "minmax": "minmax",
             "percentile": "percentile",
         }
-        self.report_context = OrderedDict()
         self._verbose = False
 
     def quantize(
@@ -107,23 +108,13 @@ class XQuantizer(BaseQuantizer):
         self._auto_finetune_level = xquant_setting.quantization_parameters.finetune_level
         self._precision_level = xquant_setting.quantization_parameters.precision_level
 
-        self._num_of_bits = 8
-        if self._precision_level.value == PrecisionLevel.GEMM_16.value:
-            self._num_of_bits = 13
-        self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits, False)
-
         quant_setting = QuantizationSettingFactory.default_setting()
         quant_setting.fusion_setting.align_quantization = False
 
         return super().quantize(inputs, calib_dataloader, executor, quant_setting, **kwargs)
 
     def report(self):
-        xquant_info("blockwise compute loss...")
-        for loss_info in self.report_context["calibration"][:5]:
-            loss_str = "{} -> {}: mse = {:.4f}, snr = {:.4f}".format(
-                loss_info["start_op"], loss_info["end_op"], loss_info["snr"], loss_info["mse"]
-            )
-            xquant_info(loss_str)
+        pass
 
     def init_quantize_config(self, operation: Operation) -> OperationQuantizationConfig:
         observer = "default" if self._calibration_type is None else self._calibration_type
@@ -191,7 +182,7 @@ class XQuantizer(BaseQuantizer):
             "HardSwish",
             "HardSigmoid",
             "Gelu",
-            # "LRN",
+            "LRN",
             "Clip",
             #
             "Pad",
@@ -207,8 +198,8 @@ class XQuantizer(BaseQuantizer):
             "Add",
             "Sub",
             "Mul",
-            # "Div",
-            # "Max",
+            "Div",
+            "Max",
             #
             "LayerNormalization",
             #
@@ -220,22 +211,6 @@ class XQuantizer(BaseQuantizer):
             "Flatten",
         }
         QUANTTYPE.update(PASSIVE_OPERATIONS)
-
-        if self._precision_level.value == PrecisionLevel.GEMM_16.value:
-            return {
-                "Conv",
-                # "ConvTranspose",
-                # "Gemm",
-                # "MatMul",
-                "Relu",
-                "Clip",
-                "Reshape",
-                "Concat",
-                "Split",
-                "Transpose",
-                "Slice",
-                "Flatten",
-            }
         return QUANTTYPE
 
     @property
@@ -284,6 +259,12 @@ class XQuantizer(BaseQuantizer):
         param_setting = setting.quantize_parameter_setting
         list_of_passes.append(ParameterQuantizePass(method=param_setting.calib_algorithm))
 
+        list_of_passes.append(
+            QuantizeConfigRefinePass(
+                self._precision_level.value, self._xquant_setting.quantization_parameters.custom_setting
+            )
+        )
+
         if setting.quantize_activation:
             act_setting = setting.quantize_activation_setting
             list_of_passes.append(
@@ -293,7 +274,6 @@ class XQuantizer(BaseQuantizer):
                     block_wise=True,
                     fintune_epoch=XQUANT_CONFIG.fine_tune_epoch,
                     auto_finetune_level=self._auto_finetune_level.value,
-                    report_context=self.report_context,
                 )
             )
 
