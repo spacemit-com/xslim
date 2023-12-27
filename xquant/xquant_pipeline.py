@@ -9,11 +9,11 @@ from pandas import DataFrame
 from ppq import TargetPlatform, BaseQuantizer
 from ppq.api import load_onnx_graph, dispatch_graph, export_ppq_graph
 from ppq.executor import TorchExecutor
-from ppq.quantization.analyse import graphwise_error_analyse, statistical_analyse
 import ppq.lib as PFL
 from .defs import xquant_info, xquant_warning
 from .calibration_helper import XQuantDataset, CalibrationCollect
 from .optimizer import GraphLegalized
+from .analyse import statistical_analyse
 from .xquant_setting import XQuantSettingFactory, XQuantSetting
 
 
@@ -100,8 +100,8 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
         sort_variable_reports = sorted(variable_reports, key=lambda x: x["Noise:Signal Power Ratio"], reverse=True)
 
         snr_topk = [x["Noise:Signal Power Ratio"] for x in sort_variable_reports[:10]]
-        if sum(snr_topk) / len(snr_topk) > 2.0:
-            xquant_warning("Noise check error, quantization may be failed.")
+        # if sum(snr_topk) / len(snr_topk) > 2.0:
+        #    xquant_warning("Noise check error, quantization may be failed.")
         for report_info in sort_variable_reports:
             snr_value = report_info["Noise:Signal Power Ratio"]
             if snr_value > 2.0:

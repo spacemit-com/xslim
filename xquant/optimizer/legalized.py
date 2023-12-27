@@ -22,8 +22,89 @@ class GraphLegalized:
         self._merger.fuse_bias_add()
         self.remove_dropout()
         self.format_ms_domain()
+        self.fuse_matmul_add()
         self.fuse_mul_add()
         self.fuse_mul_add()
+        self.format_gemm()
+
+    def fuse_matmul_add(self):
+        graph = self._graph
+        pass
+        # for current_op in [_ for _ in graph.operations.values()]:
+        #    if current_op.type != "MatMul":
+        #        continue
+
+    #
+    #    if current_op.inputs[1].is_parameter:
+    #        pass
+
+    # check down-stream op is add
+    # next_ops = graph.get_downstream_operations(current_op)
+    # if len(next_ops) != 1:
+    #    continue
+    # if next_ops[0].type != "Add":
+    #    continue
+    ## check if is a constant add
+    # fusing_op = next_ops[0]
+    # if current_op.inputs[1].is_parameter and fusing_op.num_of_parameter == 1:
+    #    pass
+    # elif fusing_op.num_of_parameter == 1:
+    #    # do graph fusion
+    #    bias = fusing_op.parameters[0].value
+    #    graph.remove_operation(fusing_op, keep_coherence=True)
+    #    graph.create_variable(value=bias, is_parameter=True, dest_ops=[current_op])
+    #    current_op.type = "PPQBiasFusedMatMul"
+
+    def format_gemm(self):
+        search_engine = SearchableGraph(graph=self._graph)
+        paths = search_engine.path_matching(
+            sp_expr=lambda x: x.type in {"Flatten"} and x.attributes.get("axis", 0) == 1,
+            rp_expr=lambda x, y: False,
+            ep_expr=lambda x: x.type in {"Gemm"}
+            and x.attributes.get("alpha", 1) == 1
+            and x.attributes.get("transA", 0) == 0
+            and len(x.inputs) >= 2
+            and x.inputs[1].is_parameter,
+            direction="down",
+        )
+
+        for path in paths:
+            path = path.tolist()
+            assert len(path) == 2, "Oops seems we got something unexpected."
+
+            flatten_op, gemm_op = path
+            assert isinstance(flatten_op, Operation) and isinstance(gemm_op, Operation)
+
+            transB = gemm_op.attributes.get("transB", 1)
+
+            w = gemm_op.parameters[0].value
+            if transB != 1:
+                w = torch.transpose(w, (1, 0))
+
+            w = torch.unsqueeze(w, -1)
+            w = torch.unsqueeze(w, -1)
+
+            gemm_op.inputs[1].value = w
+            conv_attributes = {"dilations": [1, 1], "kernel_shape": [1, 1], "strides": [1, 1], "group": 1}
+            gemm_op.type = "Conv"
+            gemm_op.attributes.clear()
+            for k, v in conv_attributes.items():
+                gemm_op.attributes[k] = v
+
+            gemm_op.inputs[0] = flatten_op.inputs[0]
+            gemm_op.inputs[0].dest_ops.remove(flatten_op)
+            gemm_op.inputs[0].dest_ops.append(gemm_op)
+
+            temp_var = flatten_op.outputs[0]
+            flatten_op.outputs[0] = gemm_op.outputs[0]
+            gemm_op.outputs[0] = temp_var
+            flatten_op.inputs[0] = gemm_op.outputs[0]
+
+            flatten_op.inputs[0].dest_ops.remove(gemm_op)
+            flatten_op.inputs[0].dest_ops.append(flatten_op)
+
+            gemm_op.outputs[0].source_op = gemm_op
+            flatten_op.outputs[0].source_op = flatten_op
 
     def remove_dropout(self):
         removing_ops = []
