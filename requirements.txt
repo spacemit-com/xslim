@@ -3,6 +3,7 @@ protobuf
 torch>=1.6.0
 torchvision
 tqdm
+pandas
 ppq==0.6.6
 opencv-python
 onnx>=1.14.0

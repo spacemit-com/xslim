@@ -20,7 +20,6 @@ from ppq.IR import BaseGraph, Operation, QuantableOperation, QuantableVariable, 
 from ppq.utils.round import ppq_tensor_round
 from ppq.parser.onnx_exporter import OnnxExporter, OP_CONVERTERS, OperationExporter
 from ppq.lib import register_network_exporter
-import onnxmltools
 
 
 def CustomLinearQuant_toInt(tensor: torch.Tensor, config: TensorQuantizationConfig) -> torch.Tensor:
