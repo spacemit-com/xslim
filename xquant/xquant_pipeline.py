@@ -137,5 +137,5 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
         # config_save_to=os.path.join(working_dir, "{}.json".format(output_prefix)),
     )
 
-    xquant_info("quantization eplased time {:.2f}".format(time.time() - time_start))
+    xquant_info("quantization eplased time {:.2f} s".format(time.time() - time_start))
     return quantizer._graph
