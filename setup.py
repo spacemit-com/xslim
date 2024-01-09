@@ -7,14 +7,16 @@ def readme():
         content = f.read()
     return content
 
-def version()
+
+def version():
     with open("VERSION_NUMBER", encoding="utf-8") as f:
         content = f.read()
     return content
 
+
 setup(
     author="SpacemiT",
-    version=version()
+    version=version(),
     description="XQuant is an offline quantization tools based on PPQ",
     long_description=readme(),
     long_description_content_type="text/markdown",
@@ -33,6 +35,5 @@ setup(
     ],
     license="Apache License 2.0",
     include_package_data=True,
-    version=XQUANT_CONFIG.version,
     zip_safe=False,
 )
