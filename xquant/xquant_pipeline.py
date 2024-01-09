@@ -5,16 +5,31 @@ from collections import OrderedDict
 import json
 import torch
 import os
+import onnx
+import time
+import onnxsim
 from pandas import DataFrame
-from ppq import TargetPlatform, BaseQuantizer
-from ppq.api import load_onnx_graph, dispatch_graph, export_ppq_graph
+from ppq import TargetPlatform, BaseQuantizer, BaseGraph
+from ppq.api import dispatch_graph, export_ppq_graph
+from ppq.parser.onnx_parser import OnnxParser
 from ppq.executor import TorchExecutor
 import ppq.lib as PFL
+from ppq.api.interface import format_graph as ppq_format_graph
 from .defs import xquant_info, xquant_warning
 from .calibration_helper import XQuantDataset, CalibrationCollect
 from .optimizer import GraphLegalized
 from .analyse import statistical_analyse
 from .xquant_setting import XQuantSettingFactory, XQuantSetting
+
+
+def xquant_load_onnx_graph(file: str, sim_en=True) -> BaseGraph:
+    onnx_model = onnx.load(file)
+    if sim_en:
+        xquant_info("simplify onnx model...")
+        onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
+    graph = OnnxParser().build(onnx_model)
+    graph = ppq_format_graph(graph)
+    return graph
 
 
 def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
@@ -27,6 +42,7 @@ def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
 
 
 def quantize_onnx_model(path_or_config: Union[str, dict]):
+    time_start = time.time()
     config_setting = parse_xquant_config(path_or_config)
     data_set = XQuantDataset(config_setting.calibration_parameters)
 
@@ -49,7 +65,7 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
     calib_dataloader = torch.utils.data.DataLoader(data_set)
 
     platform = TargetPlatform.ONNXRUNTIME
-    ppq_ir = load_onnx_graph(onnx_import_file=model_path)
+    ppq_ir = xquant_load_onnx_graph(model_path, not config_setting.model_parameters.skip_onnxsim)
 
     GraphLegalized(ppq_ir)()
 
@@ -83,29 +99,32 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
             CalibrationCollect(input_parametres, calibration_device),
             steps=16,
         )
-        result_keys = [
-            "Op name",
-            "Variable name",
-            "Noise:Signal Power Ratio",
-            "Quantized Max",
-            "Quantized Min",
-            "Float Max",
-            "Float Min",
-        ]
         variable_reports = []
         for report_info in graphwise_analyse_results:
             if not report_info["Is parameter"]:
-                variable_reports.append({k: report_info[k] for k in result_keys})
-                variable_reports[-1]["Float Hist"] = ",".join([str(int(i)) for i in report_info["Float Hist"]])
-        sort_variable_reports = sorted(variable_reports, key=lambda x: x["Noise:Signal Power Ratio"], reverse=True)
+                variable_reports.append(report_info)
+                variable_reports[-1]["F.Hist"] = ",".join([str(int(i)) for i in report_info["F.Hist"]])
+        sort_variable_reports = sorted(variable_reports, key=lambda x: x["SNR"], reverse=True)
+        snr_topk = [x["SNR"] for x in sort_variable_reports[:10]]
 
-        snr_topk = [x["Noise:Signal Power Ratio"] for x in sort_variable_reports[:10]]
-        # if sum(snr_topk) / len(snr_topk) > 2.0:
-        #    xquant_warning("Noise check error, quantization may be failed.")
+        def md_red_float(value):
+            return '<font color="red">{:.4f}</font>'.format(value)
+
         for report_info in sort_variable_reports:
-            snr_value = report_info["Noise:Signal Power Ratio"]
-            if snr_value > 2.0:
-                report_info["Noise:Signal Power Ratio"] = "=={}==".format(snr_value)
+            snr_value = report_info["SNR"]
+            if snr_value > 0.1:
+                report_info["SNR"] = md_red_float(snr_value)
+            else:
+                report_info["SNR"] = "{:.4f}".format(snr_value)
+
+            report_info["MSE"] = "{:.4f}".format(report_info["MSE"])
+
+            cos_value = report_info["Cosine"]
+            if cos_value < 0.99:
+                report_info["Cosine"] = md_red_float(cos_value)
+            else:
+                report_info["Cosine"] = "{:.4f}".format(cos_value)
+
         sort_variable_reports_df = DataFrame(sort_variable_reports)
         report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
         xquant_info("export quantization statistical results file to {}".format(report_path))
@@ -118,4 +137,5 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
         # config_save_to=os.path.join(working_dir, "{}.json".format(output_prefix)),
     )
 
+    xquant_info("quantization eplased time {:.2f}".format(time.time() - time_start))
     return quantizer._graph

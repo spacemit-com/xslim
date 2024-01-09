@@ -25,43 +25,6 @@ from ..xquant_setting import CustomQuantizationParameterSetting
 class PassiveParameterBakingPass(QuantizationOptimizationPass):
     def __init__(self) -> None:
         super().__init__(name="XQuant PassiveParameterBakingPass Pass")
-        self._quantize_function = PPQuantFunction
-
-    @empty_ppq_cache
-    def optimize(self, graph: BaseGraph, **kwargs) -> None:
-        for _, operation in graph.operations.items():
-            if not isinstance(operation, QuantableOperation):
-                continue
-            if operation.type not in {"Conv", "ConvTranspose", "Gemm", "MatMul"}:
-                for in_config, in_var in operation.config_with_variable:
-                    if in_var.is_parameter and in_config.state == QuantizationStates.INITIAL:
-                        if in_config.policy.has_property(QuantizationProperty.PER_CHANNEL):
-                            raise NotImplementedError("only Computing Ops have perchannel parameters")
-
-                        max_range_val = float(in_var.value.max())
-                        min_range_val = float(in_var.value.min())
-
-                        if torch.all(in_var.value.to(torch.int32) - in_var.value == 0):
-                            scale = torch.tensor(1, dtype=torch.float32, device=in_var.value.device)
-                            offset = torch.tensor(0, dtype=torch.float32, device=in_var.value.device)
-                        elif min_range_val != max_range_val:
-                            scale, offset = ppq_range.minmax_to_scale_offset(min_range_val, max_range_val, in_config)
-                        elif max_range_val > 0:
-                            scale, offset = ppq_range.minmax_to_scale_offset(0, max_range_val, in_config)
-                        elif max_range_val < 0:
-                            scale, offset = ppq_range.minmax_to_scale_offset(max_range_val, 0, in_config)
-                        else:
-                            continue
-
-                        in_config.scale = convert_any_to_torch_tensor(scale)
-                        in_config.offset = convert_any_to_torch_tensor(offset)
-                        in_config.state = QuantizationStates.PASSIVE
-
-
-class BiasParameterBakingPass(QuantizationOptimizationPass):
-    def __init__(self) -> None:
-        super().__init__(name="XQuant BiasParameterBaking Pass")
-        self._quantize_function = PPQuantFunction
 
     @staticmethod
     def passive_parameters_quant(op: QuantableOperation):
@@ -76,81 +39,57 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
         if not isinstance(op, QuantableOperation):
             return
 
-        if op.type in {"Conv", "ConvTranspose", "Gemm"}:
-            # inputs are [input value, weight, bias(optional)]
-            if op.num_of_input == 3:
-                i_cfg, w_cfg, b_cfg = op.config.input_quantization_config
-                if b_cfg.state not in {QuantizationStates.PASSIVE, QuantizationStates.PASSIVE_INIT}:
-                    return
-
-                # PATCH 2022.07.29 有的时候 bias 是个多维的东西，此时要求前面的维度都是1
-                bias = op.inputs[-1].value
-                if bias is None:
-                    raise ValueError(
-                        f"Bias Varaible {op.inputs[-1].name} must be a constant. " "Please check it again."
-                    )
-
-                assert bias.numel() == bias.shape[-1], (
-                    f"For op {op.name}, expect Bias shape to be {[bias.numel()]}, " f"however {bias.shape} was given"
-                )
-                op.inputs[-1].value = bias.squeeze()
-                # PATCH 2022.08.02 只有一个数的 bias 经过 squeeze 会变成零维的, 再给它多加一维补回来
-                if op.inputs[-1].value.ndim == 0 and op.inputs[-1].value.numel() == 1:
-                    op.inputs[-1].value = op.inputs[-1].value.unsqueeze(0)
-
-                if not check_state(i_cfg.state):
-                    raise PermissionError(
-                        f"Can not quantize bias of layer {op.name}, " "cause input has not been correctly quantized."
-                    )
-
-                b_cfg.scale = w_cfg.scale * i_cfg.scale
-                b_cfg.state = QuantizationStates.PASSIVE
-                b_cfg.offset = torch.zeros_like(b_cfg.scale)
-                assert not b_cfg.policy.has_property(
-                    QuantizationProperty.ASYMMETRICAL
-                ), "Passive parameter does not support ASYMMETRICAL quantization"
-
-            if op.type in {"Clip"}:
-                # inputs are [input value, min[optional], max[optional]]
-                i_cfg = op.config.input_quantization_config[0]
-
-                if not check_state(i_cfg.state):
-                    raise PermissionError(
-                        f"Can not quantize clip value of layer {op.name}, "
-                        "cause input has not been correctly quantized."
-                    )
-
-                for config in op.config.input_quantization_config[1:]:
-                    config.master_by = i_cfg
-                    config.visibility = QuantizationVisibility.INTERNAL
-
-            if op.type in {"Pad"}:
-                # inputs are [input value, pad[shape-related], pad value[optional]]
-                if op.num_of_input != 3:
-                    return
-                i_cfg = op.config.input_quantization_config[0]
-
-                if not check_state(i_cfg.state):
-                    raise PermissionError(
-                        f"Can not quantize pad value of layer {op.name}, "
-                        "cause input has not been correctly quantized."
-                    )
-
-                if len(op.config.input_quantization_config) > 1:
-                    pad_config = op.config.input_quantization_config[-1]
-                    pad_config.master_by = i_cfg
-                    pad_config.visibility = QuantizationVisibility.INTERNAL
+        if op.type in {"Clip"}:
+            # inputs are [input value, min[optional], max[optional]]
+            i_cfg = op.config.input_quantization_config[0]
+            if not check_state(i_cfg.state):
+                return
+            for config in op.config.input_quantization_config[1:]:
+                config.master_by = i_cfg
+                config.visibility = QuantizationVisibility.INTERNAL
+        elif op.type in {"Pad"}:
+            # inputs are [input value, pad[shape-related], pad value[optional]]
+            if op.num_of_input != 3:
+                return
+            i_cfg = op.config.input_quantization_config[0]
+            if not check_state(i_cfg.state):
+                return
+            if len(op.config.input_quantization_config) > 1:
+                pad_config = op.config.input_quantization_config[-1]
+                pad_config.master_by = i_cfg
+                pad_config.visibility = QuantizationVisibility.INTERNAL
+        elif op.type not in {"Conv", "ConvTranspose", "Gemm", "MatMul"}:
+            for in_config, in_var in op.config_with_variable:
+                if in_var.is_parameter and in_config.state == QuantizationStates.INITIAL:
+                    if in_config.policy.has_property(QuantizationProperty.PER_CHANNEL):
+                        raise NotImplementedError("only Computing Ops have perchannel parameters")
+                    max_range_val = float(in_var.value.max())
+                    min_range_val = float(in_var.value.min())
+                    if torch.all(in_var.value.to(torch.int32) - in_var.value == 0):
+                        scale = torch.tensor(1, dtype=torch.float32, device=in_var.value.device)
+                        offset = torch.tensor(0, dtype=torch.float32, device=in_var.value.device)
+                    elif min_range_val != max_range_val:
+                        scale, offset = ppq_range.minmax_to_scale_offset(min_range_val, max_range_val, in_config)
+                    elif max_range_val > 0:
+                        scale, offset = ppq_range.minmax_to_scale_offset(0, max_range_val, in_config)
+                    elif max_range_val < 0:
+                        scale, offset = ppq_range.minmax_to_scale_offset(max_range_val, 0, in_config)
+                    else:
+                        continue
+                    in_config.scale = convert_any_to_torch_tensor(scale)
+                    in_config.offset = convert_any_to_torch_tensor(offset)
+                    in_config.state = QuantizationStates.PASSIVE
 
     @staticmethod
     def passive_bias_quant(operation: QuantableOperation):
         if not isinstance(operation, QuantableOperation):
             return
-        if operation.type not in {"Conv"}:
+        if operation.type not in {"Conv", "ConvTranspose", "Gemm"}:
             return
         if operation.num_of_input == 3:
             i_cfg, w_cfg, b_cfg = operation.config.input_quantization_config
             o_cfg = operation.config.output_quantization_config[0]
-            if b_cfg.state not in {QuantizationStates.FP32} or w_cfg.num_of_bits != 8:
+            if b_cfg.state not in {QuantizationStates.PASSIVE_INIT}:
                 return
             bias = operation.inputs[-1].value
             if bias is None:
@@ -166,8 +105,9 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
                 operation.inputs[-1].value = operation.inputs[-1].value.unsqueeze(0)
             if w_cfg.scale is None or i_cfg.scale is None:
                 return
-            if w_cfg.scale.numel() > 1:
-                zero_channel = torch.where(w_cfg.scale < 2**-16)[0]
+
+            if w_cfg.scale.numel() > 1 and operation.type in {"Conv"}:
+                zero_channel = torch.where(w_cfg.scale < 2**-24)[0]
                 if zero_channel.numel() > 0:
                     operation.inputs[1].value[zero_channel] = 0
                     store_state = w_cfg.state
@@ -177,7 +117,7 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
 
             _b_scale = w_cfg.scale * i_cfg.scale
             _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
-            if torch.all(torch.abs(_i_bias) < 2 ** (b_cfg.num_of_bits - 1)):
+            if torch.all(torch.abs(_i_bias) < 2 ** (b_cfg.num_of_bits - 1)) or operation.type not in {"Conv"}:
                 b_cfg.scale = _b_scale
             elif o_cfg.scale is not None:
                 # in frac + w frac无法表示就使用 out frac
@@ -191,7 +131,8 @@ class BiasParameterBakingPass(QuantizationOptimizationPass):
     @empty_ppq_cache
     def optimize(self, graph: BaseGraph, **kwargs) -> None:
         for _, operation in graph.operations.items():
-            BiasParameterBakingPass.passive_bias_quant(operation)
+            PassiveParameterBakingPass.passive_parameters_quant(operation)
+            PassiveParameterBakingPass.passive_bias_quant(operation)
 
 
 class AsymmetricaUnsignlAlignSign(QuantizationOptimizationPass):
@@ -235,9 +176,7 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
                 patterns=[lambda x: True, lambda x: x.type in {"Relu", "Clip"}], edges=[[0, 1]], exclusive=True
             )
             for computing_op, act_op in patterns:
-                if not isinstance(act_op, QuantableOperation):
-                    continue
-                if not isinstance(computing_op, QuantableOperation):
+                if not isinstance(act_op, QuantableOperation) or not isinstance(computing_op, QuantableOperation):
                     continue
 
                 if (

@@ -220,8 +220,8 @@ class TorchXQuantObserver(TorchHistObserver):
 
             losses = []
             num_of_quant_levels = (self._quant_cfg.quant_max - self._quant_cfg.quant_min) + 1
-            offset_step = num_of_quant_levels // 2
-            range_step = num_of_quant_levels // 2
+            offset_step = hist_bins // num_of_quant_levels * 2
+            range_step = hist_bins // num_of_quant_levels * 2
 
             full_scale, full_offset = ppq_range.minmax_to_scale_offset(
                 max(self._force_range_min, self._full_min_val),
@@ -325,7 +325,7 @@ class TorchXQuantObserver(TorchHistObserver):
                 return scale, offset
 
         elif config.policy.has_property(QuantizationProperty.PER_CHANNEL):
-            raise PermissionError("Torch Mse observer do not support PER_CHANNEL policy now, please wait.")
+            raise PermissionError("XQuant observer do not support PER_CHANNEL policy now, please wait.")
 
         elif config.policy.has_property(QuantizationProperty.SYMMETRICAL) and config.policy.has_property(
             QuantizationProperty.PER_TENSOR

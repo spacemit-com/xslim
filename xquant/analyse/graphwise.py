@@ -4,8 +4,8 @@ import torch
 from ppq.core import PASSIVE_OPERATIONS, ppq_warning
 from ppq.executor import RuntimeHook, TorchExecutor
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
-from ppq.quantization.measure.norm import torch_snr_error
-from ppq.utils.fetch import batch_random_fetch, tensor_random_fetch
+from ppq.quantization.measure import torch_snr_error, torch_cosine_similarity, torch_mean_square_error
+from ppq.utils.fetch import batch_random_fetch, tensor_random_fetch, generate_torch_indexer
 from tqdm import tqdm
 
 from ppq.quantization.analyse.util import MeasurePrinter, MeasureRecorder
@@ -37,16 +37,22 @@ class DetailedRecorder(RuntimeHook):
         self.fetchs = fetchs
         self.i_storage = [[] for _ in range(operation.num_of_input)]
         self.o_storage = [[] for _ in range(operation.num_of_output)]
+        self.i_indexer = [None for _ in range(operation.num_of_input)]
+        self.o_indexer = [None for _ in range(operation.num_of_output)]
         super().__init__(operation)
 
     def pre_forward_hook(self, inputs: List[torch.Tensor], **kwargs) -> list:
         for idx, input in enumerate(inputs):
-            self.i_storage[idx].append(tensor_random_fetch(input, seed=10086, num_of_fetches=self.fetchs).to("cpu"))
+            if self.i_indexer[idx] is None:
+                self.i_indexer[idx] = generate_torch_indexer(self.fetchs, input.numel())
+            self.i_storage[idx].append(input.flatten()[self.i_indexer[idx]].to("cpu"))
         return super().pre_forward_hook(inputs, **kwargs)
 
     def post_forward_hook(self, outputs: List[torch.Tensor], **kwargs) -> list:
         for idx, output in enumerate(outputs):
-            self.o_storage[idx].append(tensor_random_fetch(output, seed=10086, num_of_fetches=self.fetchs).to("cpu"))
+            if self.o_indexer[idx] is None:
+                self.o_indexer[idx] = generate_torch_indexer(self.fetchs, output.numel())
+            self.o_storage[idx].append(output.flatten()[self.o_indexer[idx]].to("cpu"))
         return super().post_forward_hook(outputs, **kwargs)
 
     def clear(self):
@@ -267,35 +273,41 @@ def statistical_analyse(
             fp_hist = torch.histc(x_fp, bins=32, min=x_fp.min(), max=x_fp.max()).cpu().tolist()
 
             snr = torch_snr_error(x_qt, x_fp).item()
+            cosine = torch_cosine_similarity(x_qt, x_fp).item()
+            mse = torch_mean_square_error(x_qt, x_fp).item()
             return {
-                "Op name": self.op.name,
-                "Op type": self.op.type,
+                "Op": "{}[{}]".format(self.op.name, self.op.type),
+                # "Op type": self.op.type,
                 "Is parameter": self.var.is_parameter,
-                "Is input": self.var in self.op.inputs,
-                "Is output": self.var in self.op.outputs,
-                "Variable name": self.var.name,
-                "Noise:Signal Power Ratio": snr,
-                "Noise Mean": er_mean,
-                "Noise Std": er_std,
-                "Noise Skewness": er_skew,
-                "Noise Kurtosis": er_kurtosis,
-                "Noise Hist": er_hist,
-                "Noise Max": er_max,
-                "Noise Min": er_min,
-                "Quantized Mean": qt_mean,
-                "Quantized Std": qt_std,
-                "Quantized Skewness": qt_skew,
-                "Quantized Kurtosis": qt_kurtosis,
-                "Quantized Hist": qt_hist,
-                "Quantized Max": qt_max,
-                "Quantized Min": qt_min,
-                "Float Mean": fp_mean,
-                "Float Std": fp_std,
-                "Float Skewness": fp_skew,
-                "Float Kurtosis": fp_kurtosis,
-                "Float Hist": fp_hist,
-                "Float Max": fp_max,
-                "Float Min": fp_min,
+                # "Is input": self.var in self.op.inputs,
+                # "Is output": self.var in self.op.outputs,
+                "Var": self.var.name,
+                "SNR": snr,
+                "MSE": mse,
+                "Cosine": cosine,
+                "Q.MinMax": "{:.3f}, {:.3f}".format(qt_min, qt_max),
+                "F.MinMax": "{:.3f}, {:.3f}".format(fp_min, fp_max),
+                # "Noise Mean": er_mean,
+                # "Noise Std": er_std,
+                # "Noise Skewness": er_skew,
+                # "Noise Kurtosis": er_kurtosis,
+                # "Noise Hist": er_hist,
+                # "Noise Max": er_max,
+                # "Noise Min": er_min,
+                # "Quantized Mean": qt_mean,
+                # "Quantized Std": qt_std,
+                # "Quantized Skewness": qt_skew,
+                # "Quantized Kurtosis": qt_kurtosis,
+                # "Quantized Hist": qt_hist,
+                # "Quantized Max": qt_max,
+                # "Quantized Min": qt_min,
+                # "Float Mean": fp_mean,
+                # "Float Std": fp_std,
+                # "Float Skewness": fp_skew,
+                # "Float Kurtosis": fp_kurtosis,
+                "F.Hist": fp_hist,
+                # "Float Max": fp_max,
+                # "Float Min": fp_min,
             }
 
         def solve_skewness(self, x: torch.Tensor, mean: float, std: float) -> torch.Tensor:
@@ -320,7 +332,7 @@ def statistical_analyse(
     hooks, caches = {}, {}
     for operation in interested_op:
         if isinstance(operation, QuantableOperation):
-            hooks[operation.name] = DetailedRecorder(operation=operation)
+            hooks[operation.name] = DetailedRecorder(operation=operation, fetchs=2048)
             caches[operation.name] = {
                 "Quantized Input": [],
                 "Quantized Output": [],
@@ -334,12 +346,16 @@ def statistical_analyse(
             operation.dequantize()
 
     # run for each quantable operations:
-    for idx, batch in tqdm(enumerate(dataloader), desc="Analysing Phrase 1", total=(min(len(dataloader), steps))):
+    analyse_data_list = []
+    for idx, batch in enumerate(dataloader):
         if collate_fn is not None:
             batch = collate_fn(batch)
-        executor.forward(inputs=batch, hooks=hooks)
+        analyse_data_list.append(batch)
         if idx >= steps:
             break
+
+    for batch in tqdm(analyse_data_list, desc="Analysing Phrase 1"):
+        executor.forward(inputs=batch, hooks=hooks)
 
     for operation in interested_op:
         hook = hooks[operation.name]
@@ -354,12 +370,8 @@ def statistical_analyse(
             operation.restore_quantize_state()
 
     # run for each quantable operations:
-    for idx, batch in tqdm(enumerate(dataloader), desc="Analysing Phrase 2", total=(min(len(dataloader), steps))):
-        if collate_fn is not None:
-            batch = collate_fn(batch)
+    for batch in tqdm(analyse_data_list, desc="Analysing Phrase 2"):
         executor.forward(inputs=batch, hooks=hooks)
-        if idx >= steps:
-            break
 
     for operation in interested_op:
         hook = hooks[operation.name]

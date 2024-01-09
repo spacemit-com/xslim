@@ -43,6 +43,7 @@ class ModelParameterSetting(SettingSerialize):
         self.onnx_model: str = None
         self.output_prefix: str = None
         self.working_dir: str = None
+        self.skip_onnxsim: bool = False
 
     def check(self, qsetting):
         if not os.path.exists(self.onnx_model):

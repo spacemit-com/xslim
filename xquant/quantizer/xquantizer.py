@@ -38,7 +38,7 @@ from ..optimizer import (
     HardSwishFusionPass,
     SwishFusionPass,
     QuantizeFusionPass,
-    BiasParameterBakingPass,
+    PassiveParameterBakingPass,
     AsymmetricaUnsignlAlignSign,
     RuntimeBlockWiseCalibrationPass,
     ComputingFusionPass,
@@ -153,6 +153,8 @@ class XQuantizer(BaseQuantizer):
                     in_tqc.observer_algorithm = "minmax"
                     if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
                         in_tqc.channel_axis = 1 if operation.type == "ConvTranspose" else 0
+                        if operation.type == "Gemm" and operation.attributes.get("transB", 0) == 0:
+                            in_tqc.channel_axis = 1
                     break
 
             # if operation has bias
@@ -161,7 +163,7 @@ class XQuantizer(BaseQuantizer):
                 in_tqc.policy = self._op_type_to_policy[operation.type]
                 in_tqc.num_of_bits = 32
                 in_tqc._quant_min, in_tqc._quant_max = _get_quant_min_max(in_tqc.num_of_bits)
-                in_tqc.state = QuantizationStates.FP32
+                in_tqc.state = QuantizationStates.PASSIVE_INIT
                 if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
                     in_tqc.channel_axis = 0
 
@@ -216,10 +218,7 @@ class XQuantizer(BaseQuantizer):
     @property
     def quantize_policy(self) -> QuantizationPolicy:
         return QuantizationPolicy(
-            QuantizationProperty.ASYMMETRICAL
-            + QuantizationProperty.POWER_OF_2
-            + QuantizationProperty.PER_TENSOR
-            + QuantizationProperty.LINEAR
+            QuantizationProperty.ASYMMETRICAL + QuantizationProperty.PER_TENSOR + QuantizationProperty.LINEAR
         )
 
     @property
@@ -277,14 +276,8 @@ class XQuantizer(BaseQuantizer):
                 )
             )
 
-        if setting.quantize_parameter:
-            param_setting = setting.quantize_parameter_setting
-            if param_setting.quantize_passive_parameter:
-                list_of_passes.append(PassiveParameterQuantizePass())
-
-        if setting.quantize_parameter:
-            list_of_passes.append(ParameterBakingPass())
-            list_of_passes.append(BiasParameterBakingPass())
+        list_of_passes.append(ParameterBakingPass())
+        list_of_passes.append(PassiveParameterBakingPass())
         list_of_passes.append(AsymmetricaUnsignlAlignSign())
         return QuantizationOptimizationPipeline(passes=list_of_passes)
 

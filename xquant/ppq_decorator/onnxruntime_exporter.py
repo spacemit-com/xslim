@@ -700,6 +700,10 @@ class ONNXRUNTIMExporter(OnnxExporter):
             else:
                 _value_info.append(tensor_proto)
 
+        pb_inputs = graph._detail.get("pb_inputs", [])
+        pb_outputs = graph._detail.get("pb_outputs", [])
+        _inputs = sorted(_inputs, key=lambda x: pb_inputs.index(x.name) if x.name in pb_inputs else len(_inputs))
+        _outputs = sorted(_outputs, key=lambda x: pb_outputs.index(x.name) if x.name in pb_outputs else len(pb_outputs))
         graph_def = helper.make_graph(
             name=name,
             nodes=_nodes,
@@ -730,7 +734,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
             opsets.append(op)
 
         onnx_model = helper.make_model(graph_def, producer_name="xquant", opset_imports=opsets)
-        onnx_model.ir_version = 8
+        onnx_model.ir_version = graph._detail["ir_version"]
         # onnx.checker.check_model(onnx_model)
         size_threshold = 0 if save_as_external_data else 1024
         onnx.save(

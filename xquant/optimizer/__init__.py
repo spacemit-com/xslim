@@ -2,7 +2,6 @@
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 from .fusion import HardSwishFusionPass, SwishFusionPass, ComputingFusionPass
 from .refine import (
-    BiasParameterBakingPass,
     AsymmetricaUnsignlAlignSign,
     QuantizeFusionPass,
     ActivationClipRefine,
@@ -11,6 +10,6 @@ from .refine import (
 )
 from .calibration import RuntimeBlockWiseCalibrationPass
 from .observer import TorchXQuantObserver, TorchXQuantKLObserver, TorchXQuantMSEObserver
-from .training import CustomTrainingBasedPass
+from .training import LearnedStepSizePassDecorator, LSQDelegatorDecorator
 from .legalized import GraphLegalized
 from .equalization import CustomLayerwiseEqualizationPass

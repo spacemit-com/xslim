@@ -2,46 +2,77 @@
 CONFIGS = [
     {
         "Model": "resnet18",
+        "finetune_level": 2,
     },
-    {"Model": "resnet50", "calibration_type": "percentile"},
+    {
+        "Model": "resnet50",
+        "finetune_level": 2,
+    },
     {
         "Model": "resnet50-v1.5",
         "mean_value": [123.68, 116.78, 103.94],
         "std_value": [1, 1, 1],
         "preprocess_file": "IMAGENET",
+        "finetune_level": 2,
     },
     {
         "Model": "resnext50",
     },
-    {"Model": "seresnet50", "calibration_type": "percentile"},
+    {
+        "Model": "seresnet50",
+        "finetune_level": 2,
+    },
     {
         "Model": "mobilenet_v1",
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
         "preprocess_file": "IMAGENET",
+        "finetune_level": 2,
     },
     {
         "Model": "mobilenet_v2",
+        "finetune_level": 2,
     },
-    {"Model": "mobilenet_v3_large", "calibration_type": "percentile"},
+    {
+        "Model": "mobilenet_v3_large",
+        "finetune_level": 2,
+    },
     {"Model": "mobilenet_v3_small"},
-    {"Model": "efficientnet_v1_b0"},
-    {"Model": "efficientnet_v1_b1", "calibration_type": "percentile"},
-    {"Model": "efficientnet_v2_s", "calibration_type": "percentile"},
+    {
+        "Model": "efficientnet_v1_b0",
+        "finetune_level": 2,
+    },
+    {
+        "Model": "efficientnet_v1_b1",
+        "finetune_level": 2,
+    },
+    {
+        "Model": "efficientnet_v2_s",
+        "finetune_level": 2,
+    },
     {
         "Model": "mnasnet0_5",
+        "finetune_level": 2,
     },
-    {"Model": "mnasnet1_0"},
+    {
+        "Model": "mnasnet1_0",
+        "finetune_level": 2,
+    },
     {
         "Model": "repvgg",
     },
     {
         "Model": "v100_gpu64@5ms_top1@71.6_finetune@25",
+        "finetune_level": 2,
     },
     {
         "Model": "v100_gpu64@6ms_top1@73.0_finetune@25",
+        "finetune_level": 2,
     },
-    {"Model": "shufflenet_v2_x1_0", "calibration_type": "percentile"},
+    {
+        "Model": "shufflenet_v2_x1_0",
+        "finetune_level": 2,
+    },
     {"Model": "lcnet_050"},
     {"Model": "lcnet_100"},
     {
@@ -50,20 +81,26 @@ CONFIGS = [
         "std_value": [1.0, 1.0, 1.0],
         "preprocess_file": "IMAGENET",
         "color_format": "bgr",
+        "finetune_level": 2,
     },
     {
         "Model": "inception_resnet_v2",
         "input_shape": [1, 3, 299, 299],
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
+        "finetune_level": 2,
     },
     {
         "Model": "inception_v3",
         "input_shape": [1, 3, 299, 299],
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
+        "finetune_level": 2,
     },
-    {"Model": "squeezenet1.1", "calibration_type": "percentile"},
+    {
+        "Model": "squeezenet1.1",
+        "finetune_level": 2,
+    },
     # {
     #    "Model": "vit_b_16",
     #    "calibration_type": "percentile",
@@ -111,7 +148,7 @@ parser.add_argument(
     default="output",
     help="Path to the Output directory.",
 )
-parser.add_argument("--filter", required=False, default=None, help="model name filter.")
+parser.add_argument("--filter", required=False, default="mobilenet_v2", help="model name filter.")
 parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
 parser.add_argument("--device", required=False, default="cuda", help="device.")
 parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
@@ -341,7 +378,7 @@ if __name__ == "__main__":
                 "working_dir": "temp_output",
             },
             "calibration_parameters": {
-                "calibration_step": 100,
+                "calibration_step": 500,
                 "calibration_device": "cuda",
                 "calibration_type": "default",
                 "input_parametres": [

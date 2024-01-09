@@ -17,6 +17,7 @@ class GraphLegalized:
         self._merger = GraphMerger(self._graph)
 
     def __call__(self) -> Any:
+        self.format_reshape_squeeze()
         self.fuse_layernorm()
         self.fuse_gelu()
         self._merger.fuse_bias_add()
@@ -25,6 +26,7 @@ class GraphLegalized:
         self.fuse_matmul_add()
         self.fuse_mul_add()
         self.fuse_mul_add()
+        self.format_gemm()
         self.format_gemm()
 
     def fuse_matmul_add(self):
@@ -55,6 +57,45 @@ class GraphLegalized:
     #    graph.create_variable(value=bias, is_parameter=True, dest_ops=[current_op])
     #    current_op.type = "PPQBiasFusedMatMul"
 
+    def format_reshape_squeeze(self):
+        search_engine = SearchableGraph(graph=self._graph)
+        paths = search_engine.path_matching(
+            sp_expr=lambda x: x.type in {"Reshape"}
+            and len(x.inputs) > 1
+            and x.inputs[1].is_parameter
+            and len(x.outputs[0].dest_ops) == 1
+            and x.outputs[0].name not in self._graph.outputs,
+            rp_expr=lambda x, y: False,
+            ep_expr=lambda x: x.type in {"Squeeze"},
+            direction="down",
+        )
+
+        for path in paths:
+            path = path.tolist()
+            assert len(path) == 2, "Oops seems we got something unexpected."
+            reshape_op, squeeze_op = path
+            assert isinstance(reshape_op, Operation) and isinstance(squeeze_op, Operation)
+            reshape_size = reshape_op.inputs[1].value
+            squeeze_axes = squeeze_op.attributes["axes"]
+
+            if all([reshape_size[axes] == 1 for axes in squeeze_axes]):
+                new_shape = [int(s) for i, s in enumerate(reshape_size) if i not in squeeze_axes]
+
+                reshape_op.outputs[0] = squeeze_op.outputs[0]
+                squeeze_op.outputs[0].source_op = reshape_op
+                reshape_op.inputs[1].value = convert_any_to_torch_tensor(
+                    new_shape, device=reshape_size.device, dtype=reshape_size.dtype
+                )
+
+                for in_var in squeeze_op.inputs:
+                    in_var.dest_ops.clear()
+                    in_var.source_op = None
+                    self._graph.remove_variable(in_var)
+
+                squeeze_op.inputs.clear()
+                squeeze_op.outputs.clear()
+                self._graph.remove_operation(squeeze_op)
+
     def format_gemm(self):
         search_engine = SearchableGraph(graph=self._graph)
         paths = search_engine.path_matching(
@@ -75,11 +116,11 @@ class GraphLegalized:
             flatten_op, gemm_op = path
             assert isinstance(flatten_op, Operation) and isinstance(gemm_op, Operation)
 
-            transB = gemm_op.attributes.get("transB", 1)
+            transB = gemm_op.attributes.get("transB", 0)
 
             w = gemm_op.parameters[0].value
             if transB != 1:
-                w = torch.transpose(w, (1, 0))
+                w = torch.permute(w, [1, 0])
 
             w = torch.unsqueeze(w, -1)
             w = torch.unsqueeze(w, -1)
@@ -105,6 +146,12 @@ class GraphLegalized:
 
             gemm_op.outputs[0].source_op = gemm_op
             flatten_op.outputs[0].source_op = flatten_op
+
+        for op_name, op in self._graph.operations.items():
+            if op.type in {"Gemm"}:
+                if op.inputs[1].is_parameter and op.attributes.get("transB", 0) == 0:
+                    op.attributes["transB"] = 1
+                    op.inputs[1].value = torch.permute(op.inputs[1].value, [1, 0])
 
     def remove_dropout(self):
         removing_ops = []

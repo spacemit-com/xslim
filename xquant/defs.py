@@ -13,7 +13,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.fine_tune_epoch = 2
 
-        self.version = "1.0.0"
+        self.version = "1.0.1"
 
 
 class AutoFinetuneLevel(Enum):
