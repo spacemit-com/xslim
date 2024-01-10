@@ -43,16 +43,22 @@ class DetailedRecorder(RuntimeHook):
 
     def pre_forward_hook(self, inputs: List[torch.Tensor], **kwargs) -> list:
         for idx, input in enumerate(inputs):
-            if self.i_indexer[idx] is None:
-                self.i_indexer[idx] = generate_torch_indexer(self.fetchs, input.numel())
-            self.i_storage[idx].append(input.flatten()[self.i_indexer[idx]].to("cpu"))
+            if input.numel() > 0:
+                if self.i_indexer[idx] is None:
+                    self.i_indexer[idx] = generate_torch_indexer(self.fetchs, input.numel())
+                self.i_storage[idx].append(input.flatten()[self.i_indexer[idx]].to("cpu"))
+            else:
+                self.i_storage[idx].append(torch.ones([1]))
         return super().pre_forward_hook(inputs, **kwargs)
 
     def post_forward_hook(self, outputs: List[torch.Tensor], **kwargs) -> list:
         for idx, output in enumerate(outputs):
-            if self.o_indexer[idx] is None:
-                self.o_indexer[idx] = generate_torch_indexer(self.fetchs, output.numel())
-            self.o_storage[idx].append(output.flatten()[self.o_indexer[idx]].to("cpu"))
+            if output.numel() > 0:
+                if self.o_indexer[idx] is None:
+                    self.o_indexer[idx] = generate_torch_indexer(self.fetchs, output.numel())
+                self.o_storage[idx].append(output.flatten()[self.o_indexer[idx]].to("cpu"))
+            else:
+                self.o_storage[idx].append(torch.ones([1]))
         return super().post_forward_hook(outputs, **kwargs)
 
     def clear(self):

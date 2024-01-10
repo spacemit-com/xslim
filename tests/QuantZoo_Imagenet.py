@@ -31,7 +31,7 @@ CONFIGS = [
     },
     {
         "Model": "mobilenet_v2",
-        "finetune_level": 2,
+        "finetune_level": 3,
     },
     {
         "Model": "mobilenet_v3_large",
@@ -48,6 +48,7 @@ CONFIGS = [
     },
     {
         "Model": "efficientnet_v2_s",
+        "calibration_type": "percentile",
         "finetune_level": 2,
     },
     {
@@ -148,7 +149,7 @@ parser.add_argument(
     default="output",
     help="Path to the Output directory.",
 )
-parser.add_argument("--filter", required=False, default="mobilenet_v2", help="model name filter.")
+parser.add_argument("--filter", required=False, default="resnet18", help="model name filter.")
 parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
 parser.add_argument("--device", required=False, default="cuda", help="device.")
 parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
