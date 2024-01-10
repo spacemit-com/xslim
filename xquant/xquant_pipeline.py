@@ -7,29 +7,146 @@ import torch
 import os
 import onnx
 import time
+import copy
 import onnxsim
+import onnx_graphsurgeon as osg
 from pandas import DataFrame
 from ppq import TargetPlatform, BaseQuantizer, BaseGraph
-from ppq.api import dispatch_graph, export_ppq_graph
-from ppq.parser.onnx_parser import OnnxParser
 from ppq.executor import TorchExecutor
-import ppq.lib as PFL
 from ppq.api.interface import format_graph as ppq_format_graph
+from ppq.scheduler import DISPATCHER_TABLE, GraphDispatcher
 from .defs import xquant_info, xquant_warning
 from .calibration_helper import XQuantDataset, CalibrationCollect
 from .optimizer import GraphLegalized
 from .analyse import statistical_analyse
+from .ppq_decorator.onnxruntime_exporter import ONNXRUNTIMExporter
+from .ppq_decorator.onnx_parser import OnnxParserDecorator
 from .xquant_setting import XQuantSettingFactory, XQuantSetting
+from .quantizer import XQuantizer
 
 
-def xquant_load_onnx_graph(file: str, sim_en=True) -> BaseGraph:
+def dispatch_graph(graph: BaseGraph, dispatcher: Union[str, GraphDispatcher] = "conservative") -> BaseGraph:
+    quantizer = XQuantizer(graph)
+    if isinstance(dispatcher, str):
+        dispatcher = dispatcher.lower()
+        if dispatcher not in DISPATCHER_TABLE:
+            raise ValueError(f'Can not found dispatcher type "{dispatcher}", check your input again.')
+        dispatcher = DISPATCHER_TABLE[dispatcher](graph)
+    else:
+        if not isinstance(dispatcher, GraphDispatcher):
+            raise TypeError(
+                'Parameter "dispachter" of function ppq.api.dispatch_graph must be String or GraphDispatcher, '
+                f"however {type(dispatcher)} was given."
+            )
+        dispatcher = dispatcher
+
+    assert isinstance(dispatcher, GraphDispatcher)
+    assert isinstance(quantizer, BaseQuantizer)
+    quant_types = quantizer.quant_operation_types
+    dispatching_table = dispatcher.dispatch(
+        graph=graph,
+        quant_types=quant_types,
+        quant_platform=TargetPlatform.UNSPECIFIED,
+        fp32_platform=TargetPlatform.FP32,
+        SOI_platform=TargetPlatform.SOI,
+    )
+
+    for operation in graph.operations.values():
+        assert (
+            operation.name in dispatching_table
+        ), f"Internal Error, Can not find operation {operation.name} in dispatching table."
+        operation.platform = dispatching_table[operation.name]
+    return graph
+
+
+def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
+    opset_dict = {}
+    for opset in onnx_model.opset_import:
+        _domain = opset.domain
+        _domain = "ai.onnx" if _domain == "" else _domain
+        opset_dict[_domain] = opset.version
+
+    return opset_dict
+
+
+def xquant_load_onnx_graph(file: str, sim_en: bool = True, truncate_var_name: Sequence[str] = []):
     onnx_model = onnx.load(file)
+    opset_dict = get_onnx_opset(onnx_model)
+    ai_onnx_version = opset_dict.get("ai.onnx", 13)
+    if ai_onnx_version < 13:
+        xquant_warning("convert ai.onnx version {} to 13...".format(ai_onnx_version))
+        onnx_model = onnx.version_converter.convert_version(onnx_model, 13)
     if sim_en:
         xquant_info("simplify onnx model...")
         onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
-    graph = OnnxParser().build(onnx_model)
+
+    osg_graph = osg.import_onnx(onnx_model)
+    truncate_left_graph = None
+    truncate_vars = []
+    if len(truncate_var_name) > 0:
+        tensors = osg_graph.tensors()
+        for k, v in tensors.items():
+            if k in set(truncate_var_name):
+                truncate_vars.append(v)
+
+        valid_node_names = set()
+        invalid_node_names = set()
+        valid_nodes = []
+        invalid_nodes = []
+
+        def _truncate_graph_upstream(out_vars: Sequence[osg.Tensor]):
+            for o_var in out_vars:
+                for source_op in o_var.inputs:
+                    if source_op.name in valid_node_names:
+                        continue
+                    valid_nodes.append(source_op)
+                    valid_node_names.add(source_op.name)
+                    _truncate_graph_upstream(source_op.inputs)
+
+        def _truncate_graph_downstream(out_vars: Sequence[osg.Tensor]):
+            for o_var in out_vars:
+                for dest_op in o_var.outputs:
+                    if dest_op.name in invalid_node_names:
+                        continue
+                    invalid_nodes.append(dest_op)
+                    invalid_node_names.add(dest_op.name)
+                    _truncate_graph_downstream(dest_op.outputs)
+
+        _truncate_graph_upstream(truncate_vars)
+        _truncate_graph_downstream(truncate_vars)
+
+        if len(valid_nodes) + len(invalid_nodes) != len(osg_graph.nodes):
+            raise RuntimeError("truncate graph failed.")
+
+        truncate_graph = osg.Graph(
+            nodes=valid_nodes,
+            inputs=osg_graph.inputs,
+            outputs=truncate_vars,
+            name=copy.copy(osg_graph.name),
+            doc_string=copy.copy(osg_graph.doc_string),
+            opset=copy.copy(osg_graph.opset),
+            import_domains=osg_graph.import_domains,
+        )
+
+        truncate_left_graph = osg.Graph(
+            nodes=invalid_nodes,
+            inputs=[],
+            outputs=osg_graph.outputs,
+            name=copy.copy(osg_graph.name),
+            doc_string=copy.copy(osg_graph.doc_string),
+            opset=copy.copy(osg_graph.opset),
+            import_domains=osg_graph.import_domains,
+        )
+
+        truncate_onnx_model = osg.export_onnx(truncate_graph)
+        for var in truncate_vars:
+            var.inputs.clear()
+    else:
+        truncate_onnx_model = onnx_model
+
+    graph = OnnxParserDecorator().build(truncate_onnx_model)
     graph = ppq_format_graph(graph)
-    return graph
+    return graph, truncate_left_graph, truncate_vars
 
 
 def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
@@ -64,21 +181,19 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
 
     calib_dataloader = torch.utils.data.DataLoader(data_set)
 
-    platform = TargetPlatform.ONNXRUNTIME
-    ppq_ir = xquant_load_onnx_graph(model_path, not config_setting.model_parameters.skip_onnxsim)
+    ppq_ir, truncate_left_graph, truncate_vars = xquant_load_onnx_graph(
+        model_path,
+        not config_setting.model_parameters.skip_onnxsim,
+        config_setting.quantization_parameters.truncate_var_names,
+    )
 
     GraphLegalized(ppq_ir)()
 
-    ppq_ir = dispatch_graph(
-        graph=ppq_ir,
-        platform=platform,
-        dispatcher="conservative",
-        dispatching_table=None,
-    )
+    ppq_ir = dispatch_graph(graph=ppq_ir, dispatcher="conservative")
 
     dummy_input = inputs_list
 
-    quantizer = PFL.Quantizer(platform, ppq_ir)
+    quantizer = XQuantizer(ppq_ir)
     executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
 
     quantizer.quantize(
@@ -105,7 +220,6 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
                 variable_reports.append(report_info)
                 variable_reports[-1]["F.Hist"] = ",".join([str(int(i)) for i in report_info["F.Hist"]])
         sort_variable_reports = sorted(variable_reports, key=lambda x: x["SNR"], reverse=True)
-        snr_topk = [x["SNR"] for x in sort_variable_reports[:10]]
 
         def md_red_float(value):
             return '<font color="red">{:.4f}</font>'.format(value)
@@ -128,14 +242,30 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
         sort_variable_reports_df = DataFrame(sort_variable_reports)
         report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
         xquant_info("export quantization statistical results file to {}".format(report_path))
-        reports_md = sort_variable_reports_df.to_markdown(report_path)
+        sort_variable_reports_df.to_markdown(report_path)
 
-    export_ppq_graph(
-        graph=quantizer._graph,
-        platform=platform,
-        graph_save_to=os.path.join(working_dir, "{}.onnx".format(output_prefix)),
-        # config_save_to=os.path.join(working_dir, "{}.json".format(output_prefix)),
+    quant_onnx_model = ONNXRUNTIMExporter().export(
+        quantizer._graph,
     )
+
+    if isinstance(truncate_left_graph, osg.Graph):
+        osg_graph = osg.import_onnx(quant_onnx_model)
+        for idx, o_var in enumerate(osg_graph.outputs):
+            o_idx = o_var.inputs[0].outputs.index(o_var)
+            o_var.inputs[0].outputs[o_idx] = truncate_vars[idx]
+
+        new_osg_graph = osg.Graph(
+            nodes=osg_graph.nodes + truncate_left_graph.nodes,
+            inputs=osg_graph.inputs,
+            outputs=truncate_left_graph.outputs,
+            name=copy.copy(osg_graph.name),
+            doc_string=copy.copy(osg_graph.doc_string),
+            opset=copy.copy(osg_graph.opset),
+            import_domains=osg_graph.import_domains,
+        )
+        quant_onnx_model = osg.export_onnx(new_osg_graph)
+
+    onnx.save(quant_onnx_model, os.path.join(working_dir, "{}.onnx".format(output_prefix)))
 
     xquant_info("quantization eplased time {:.2f} s".format(time.time() - time_start))
     return quantizer._graph

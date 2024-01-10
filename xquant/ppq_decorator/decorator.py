@@ -1,10 +1,4 @@
 import ppq
-from ppq.lib import (
-    register_network_quantizer,
-    register_network_exporter,
-    register_operation_handler,
-    register_calibration_observer,
-)
 from ppq.quantization.observer import (
     OBSERVER_TABLE,
 )
@@ -30,5 +24,3 @@ ppq_onnx_parser.OnnxParser.build = OnnxParserDecorator.build
 OBSERVER_TABLE["xquant"] = TorchXQuantObserver
 OBSERVER_TABLE["kl"] = TorchXQuantKLObserver
 OBSERVER_TABLE["mse"] = TorchXQuantMSEObserver
-register_network_exporter(ONNXRUNTIMExporter, TargetPlatform.ONNXRUNTIME)
-register_network_quantizer(XQuantizer, TargetPlatform.ONNXRUNTIME)

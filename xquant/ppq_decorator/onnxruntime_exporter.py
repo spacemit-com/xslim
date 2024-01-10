@@ -625,9 +625,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
     def export(
         self,
-        file_path: str,
         graph: BaseGraph,
-        config_path: str = None,
         quantized_param: bool = True,
         remove_activation: bool = True,
         save_as_external_data: bool = False,
@@ -663,10 +661,6 @@ class ONNXRUNTIMExporter(OnnxExporter):
             quant_parameter_to_int=quantized_param,
         )
 
-        # if a valid config path is given, export quantization config to there.
-        if config_path is not None:
-            super().export_quantization_config(config_path, graph)
-
         # before we can export them, we firstly convert all ops to proper format.
         for op in [_ for _ in graph.topological_sort()]:
             if op.type in OP_CONVERTERS:
@@ -678,7 +672,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
         name = graph._name
         if not name:
-            name = "PPL Quantization Tool - Onnx Export"
+            name = "XQuant Export"
 
         add_spacemit_ep = False
         # Ready to export onnx graph definition.
@@ -736,14 +730,15 @@ class ONNXRUNTIMExporter(OnnxExporter):
         onnx_model = helper.make_model(graph_def, producer_name="xquant", opset_imports=opsets)
         onnx_model.ir_version = graph._detail["ir_version"]
         # onnx.checker.check_model(onnx_model)
-        size_threshold = 0 if save_as_external_data else 1024
-        onnx.save(
-            onnx_model,
-            file_path,
-            size_threshold=size_threshold,
-            save_as_external_data=save_as_external_data,
-            all_tensors_to_one_file=(not save_as_external_data),
-        )
+        # size_threshold = 0 if save_as_external_data else 1024
+        # onnx.save(
+        #    onnx_model,
+        #    file_path,
+        #    size_threshold=size_threshold,
+        #    save_as_external_data=save_as_external_data,
+        #    all_tensors_to_one_file=(not save_as_external_data),
+        # )
+        return onnx_model
 
 
 register_network_exporter(ONNXRUNTIMExporter, TargetPlatform.ONNXRUNTIME)

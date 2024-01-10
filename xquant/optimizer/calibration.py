@@ -178,6 +178,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         executor_hook: dict,
         calib_steps: int,
         extern_output_var_hooks: Dict[str, Callable] = None,
+        collect_dataloader_cache: bool = False,
     ):
         operation_cache = block.rps
         if extern_output_var_hooks is None:
@@ -204,7 +205,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                 hooks=executor_hook,
             )
             for o_var, o_name in zip(outputs, output_names):
-                if o_name in block_output_names_set:
+                if o_name in block_output_names_set and collect_dataloader_cache:
                     if o_name not in dataloader_cache:
                         dataloader_cache[o_name] = []
                     mem_free, mem_all = torch.cuda.mem_get_info()
@@ -265,7 +266,9 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             hooks = {}
 
         with torch.no_grad():
-            self.forward_trainable_block(block, dataloader_cache, executor, hooks, calib_steps, extern_output_var_hooks)
+            self.forward_trainable_block(
+                block, dataloader_cache, executor, hooks, calib_steps, extern_output_var_hooks, True
+            )
 
         if len(hooks) == 0:
             return

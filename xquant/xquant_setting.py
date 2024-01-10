@@ -107,6 +107,7 @@ class QuantizationParameterSetting(SettingSerialize):
         self.finetune_level: AutoFinetuneLevel = AutoFinetuneLevel.LEVEL_1
         self.custom_setting: Sequence[CustomQuantizationParameterSetting] = None
         self.analysis_enable: bool = True
+        self.truncate_var_names: Sequence[str] = []
 
     def from_list(self, value_name, obj_setting, qsetting):
         if value_name == "custom_setting":
@@ -171,7 +172,8 @@ class CalibrationParameterSetting(SettingSerialize):
             for input_idx, in_var in enumerate(onnx_model.graph.input):
                 calib_parameter = self.input_parametres[input_idx]
                 input_shape = [
-                    i.dim_value if isinstance(i.dim_value, int) else None for i in in_var.type.tensor_type.shape.dim
+                    i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else None
+                    for i in in_var.type.tensor_type.shape.dim
                 ]
                 if isinstance(in_var.type.tensor_type.elem_type, int):
                     input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[in_var.type.tensor_type.elem_type].name
