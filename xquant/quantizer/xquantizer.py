@@ -320,7 +320,7 @@ class XQuantizer(BaseQuantizer):
             list_of_passes.append(
                 CustomLayerwiseEqualizationPass(
                     optimize_level=1,
-                    iterations=10,
+                    iterations=5,
                     weight_threshold=equalization_setting.value_threshold,
                     including_bias=True,
                     including_act=True,

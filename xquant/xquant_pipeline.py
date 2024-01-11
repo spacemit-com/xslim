@@ -80,10 +80,10 @@ def xquant_load_onnx_graph(file: str, sim_en: bool = True, truncate_var_name: Se
         xquant_info("simplify onnx model...")
         onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
 
-    osg_graph = osg.import_onnx(onnx_model)
     truncate_left_graph = None
     truncate_vars = []
     if len(truncate_var_name) > 0:
+        osg_graph = osg.import_onnx(onnx_model)
         tensors = osg_graph.tensors()
         for k, v in tensors.items():
             if k in set(truncate_var_name):
@@ -94,10 +94,12 @@ def xquant_load_onnx_graph(file: str, sim_en: bool = True, truncate_var_name: Se
         valid_nodes = []
         invalid_nodes = []
 
+        graph_node_set = set([node.name for node in osg_graph.nodes])
+
         def _truncate_graph_upstream(out_vars: Sequence[osg.Tensor]):
             for o_var in out_vars:
                 for source_op in o_var.inputs:
-                    if source_op.name in valid_node_names:
+                    if source_op.name in valid_node_names or source_op.name not in graph_node_set:
                         continue
                     valid_nodes.append(source_op)
                     valid_node_names.add(source_op.name)
@@ -106,7 +108,7 @@ def xquant_load_onnx_graph(file: str, sim_en: bool = True, truncate_var_name: Se
         def _truncate_graph_downstream(out_vars: Sequence[osg.Tensor]):
             for o_var in out_vars:
                 for dest_op in o_var.outputs:
-                    if dest_op.name in invalid_node_names:
+                    if dest_op.name in invalid_node_names or dest_op.name not in graph_node_set:
                         continue
                     invalid_nodes.append(dest_op)
                     invalid_node_names.add(dest_op.name)
