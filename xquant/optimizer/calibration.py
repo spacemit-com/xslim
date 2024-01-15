@@ -497,8 +497,8 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             "more calibration steps is demonded, we strongly recommend you to prepare more calibration data "
             "and more calibration steps is perferred here. (at least 10)"
         )
-        assert calib_steps <= 1024, (
-            "Calibration steps is too large, xquant is capable for quantizing your network within 10-1024 "
+        assert calib_steps <= 1000, (
+            "Calibration steps is too large, xquant is capable for quantizing your network within 10-1000 "
             "calibration steps. More calibraiton steps will greatly delay ppq's calibration procedure. "
             "Reset your calib_steps parameter please."
         )

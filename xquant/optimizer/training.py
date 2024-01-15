@@ -16,6 +16,7 @@ from ppq.utils.fetch import batch_random_fetch
 from ppq.utils.round import ppq_tensor_round
 from ppq.quantization.optim.base import QuantizationOptimizationPass
 from ppq.quantization.optim import LearnedStepSizePass
+from ..defs import xquant_info
 
 
 class LSQDelegatorDecorator(LSQDelegator):
@@ -181,5 +182,5 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
         # clear cache
         torch.cuda.empty_cache()
 
-        print(f"Tuning Finished  : ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f}) [Block Loss]\n")
+        xquant_info(f"Tuning Finished  : ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f}) [Block Loss]\n")
         return pre_loss, post_loss

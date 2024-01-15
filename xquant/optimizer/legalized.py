@@ -23,39 +23,10 @@ class GraphLegalized:
         self._merger.fuse_bias_add()
         self.remove_dropout()
         self.format_ms_domain()
-        self.fuse_matmul_add()
         self.fuse_mul_add()
         self.fuse_mul_add()
         self.format_gemm()
         self.format_gemm()
-
-    def fuse_matmul_add(self):
-        graph = self._graph
-        pass
-        # for current_op in [_ for _ in graph.operations.values()]:
-        #    if current_op.type != "MatMul":
-        #        continue
-
-    #
-    #    if current_op.inputs[1].is_parameter:
-    #        pass
-
-    # check down-stream op is add
-    # next_ops = graph.get_downstream_operations(current_op)
-    # if len(next_ops) != 1:
-    #    continue
-    # if next_ops[0].type != "Add":
-    #    continue
-    ## check if is a constant add
-    # fusing_op = next_ops[0]
-    # if current_op.inputs[1].is_parameter and fusing_op.num_of_parameter == 1:
-    #    pass
-    # elif fusing_op.num_of_parameter == 1:
-    #    # do graph fusion
-    #    bias = fusing_op.parameters[0].value
-    #    graph.remove_operation(fusing_op, keep_coherence=True)
-    #    graph.create_variable(value=bias, is_parameter=True, dest_ops=[current_op])
-    #    current_op.type = "PPQBiasFusedMatMul"
 
     def format_reshape_squeeze(self):
         search_engine = SearchableGraph(graph=self._graph)
@@ -76,9 +47,11 @@ class GraphLegalized:
             reshape_op, squeeze_op = path
             assert isinstance(reshape_op, Operation) and isinstance(squeeze_op, Operation)
             reshape_size = reshape_op.inputs[1].value
-            squeeze_axes = squeeze_op.attributes["axes"]
+            squeeze_axes = squeeze_op.attributes.get("axes", None)
+            if len(squeeze_op.inputs) > 1 and squeeze_op.inputs[1].is_parameter:
+                squeeze_axes = squeeze_op.inputs[1].value.numpy().tolist()
 
-            if all([reshape_size[axes] == 1 for axes in squeeze_axes]):
+            if squeeze_axes is not None and all([reshape_size[axes] == 1 for axes in squeeze_axes]):
                 new_shape = [int(s) for i, s in enumerate(reshape_size) if i not in squeeze_axes]
 
                 reshape_op.outputs[0] = squeeze_op.outputs[0]

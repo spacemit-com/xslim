@@ -57,10 +57,7 @@ class TorchXQuantObserver(TorchHistObserver):
                 .get(watch_on.name, {})
                 .get("max", self._force_range_max)
             )
-        self._hist_edge = 0.002
         self._percentile_collector = []
-        self._percentile_maxs = []
-        self._percentile_mins = []
         self._min_val_collector = []
         self._max_val_collector = []
 
@@ -222,13 +219,6 @@ class TorchXQuantObserver(TorchHistObserver):
             num_of_quant_levels = (self._quant_cfg.quant_max - self._quant_cfg.quant_min) + 1
             offset_step = hist_bins // num_of_quant_levels * 2
             range_step = hist_bins // num_of_quant_levels * 2
-
-            full_scale, full_offset = ppq_range.minmax_to_scale_offset(
-                max(self._force_range_min, self._full_min_val),
-                min(self._force_range_max, self._full_max_val),
-                config,
-                self._scale_threshold,
-            )
 
             percentile_scale, percentile_offset = ppq_range.minmax_to_scale_offset(
                 max(self._force_range_min, self._percentile_min_val),

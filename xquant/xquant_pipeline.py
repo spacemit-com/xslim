@@ -218,9 +218,8 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
         )
         variable_reports = []
         for report_info in graphwise_analyse_results:
-            if not report_info["Is parameter"]:
-                variable_reports.append(report_info)
-                variable_reports[-1]["F.Hist"] = ",".join([str(int(i)) for i in report_info["F.Hist"]])
+            variable_reports.append(report_info)
+            variable_reports[-1]["F.Hist"] = ",".join([str(int(i)) for i in report_info["F.Hist"]])
         sort_variable_reports = sorted(variable_reports, key=lambda x: x["SNR"], reverse=True)
 
         def md_red_float(value):
@@ -241,7 +240,8 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
             else:
                 report_info["Cosine"] = "{:.4f}".format(cos_value)
 
-        sort_variable_reports_df = DataFrame(sort_variable_reports)
+        report_index = ["Op", "SNR", "MSE", "Cosine", "Var", "Q.MinMax", "F.MinMax", "F.Hist"]
+        sort_variable_reports_df = DataFrame(sort_variable_reports, columns=report_index)
         report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
         xquant_info("export quantization statistical results file to {}".format(report_path))
         sort_variable_reports_df.to_markdown(report_path)

@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Callable, Dict, Iterable, List
 from enum import Enum
 import torch
+import numpy as np
 from tqdm import tqdm
 from ppq.core import empty_ppq_cache
 from ppq.executor.torch import TorchExecutor
@@ -45,23 +46,17 @@ class CustomLayerwiseEqualizationPass(LayerwiseEqualizationPass):
 
         output_collector = defaultdict(list)
 
-        loader_step = int(len(dataloader) / steps)
-        if steps >= len(dataloader):
-            loader_step = 1
-        for idx, batch in tqdm(
-            enumerate(dataloader), desc="Equalization Data Collecting.", total=min(len(dataloader), steps)
-        ):
-            if idx % loader_step != 0:
+        steps = min(steps, len(dataloader))
+        loader_step_index = set(np.random.randint(0, len(dataloader), [steps]).tolist())
+        for idx, batch in enumerate(dataloader):
+            if idx not in loader_step_index:
                 continue
-            data = batch
             if collate_fn is not None:
                 data = collate_fn(batch)
             outputs = executor.forward(data, output_names=output_names)
             for name, output in zip(output_names, outputs):
                 op = graph.variables[name].source_op
                 output_collector[name].append(aggregate(op, output).unsqueeze(-1))
-            if idx > steps:
-                break
 
         result = {}
         for name, output in zip(output_names, outputs):

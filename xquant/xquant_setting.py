@@ -129,7 +129,7 @@ class QuantizationParameterSetting(SettingSerialize):
 
 class CalibrationParameterSetting(SettingSerialize):
     def __init__(self) -> None:
-        self.calibration_step: int = 100
+        self.calibration_step: int = 500
         self.calibration_device: str = "cuda" if XQUANT_CONFIG.cuda_support else "cpu"
         self.calibration_type: str = "default"
         self.input_parametres: Sequence[InputParameterSetting] = None

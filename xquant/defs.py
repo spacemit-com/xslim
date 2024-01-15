@@ -13,7 +13,11 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.fine_tune_epoch = 2
 
-        self.version = "1.0.1"
+        self.equalization_iterations = 10
+
+        self.max_bits = 12
+
+        self.version = "1.0.3"
 
 
 class AutoFinetuneLevel(Enum):

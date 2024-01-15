@@ -200,8 +200,8 @@ class XQuantizer(BaseQuantizer):
             "Add",
             "Sub",
             "Mul",
-            "Div",
-            "Max",
+            # "Div",
+            # "Max",
             #
             "LayerNormalization",
             #
@@ -320,10 +320,10 @@ class XQuantizer(BaseQuantizer):
             list_of_passes.append(
                 CustomLayerwiseEqualizationPass(
                     optimize_level=1,
-                    iterations=5,
+                    iterations=XQUANT_CONFIG.equalization_iterations,
                     weight_threshold=equalization_setting.value_threshold,
                     including_bias=True,
-                    including_act=True,
+                    including_act=self._auto_finetune_level.value >= AutoFinetuneLevel.LEVEL_1.value,
                     bias_multiplier=equalization_setting.bias_multiplier,
                     act_multiplier=equalization_setting.act_multiplier,
                 )

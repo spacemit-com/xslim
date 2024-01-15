@@ -18,7 +18,7 @@ from ppq.IR.search import SearchableGraph
 from ppq.executor import BaseGraphExecutor
 from ppq.quantization.qfunction import PPQuantFunction
 from ppq.quantization.observer import range as ppq_range
-from ..defs import PrecisionLevel, AutoFinetuneLevel
+from ..defs import PrecisionLevel, AutoFinetuneLevel, XQUANT_CONFIG
 from ..xquant_setting import CustomQuantizationParameterSetting
 
 
@@ -220,9 +220,9 @@ class ActivationClipRefine(QuantizationOptimizationPass):
                             force_range_max = (1.0 - beta) / alpha
 
                         elif check_sigmoid or (check_swish and len(var.dest_ops) == 2):
-                            force_range_min = -12.0
+                            force_range_min = -10.0
                             if check_sigmoid:
-                                force_range_max = 12.0
+                                force_range_max = 10.0
 
                         elif check_hardswish and len(var.dest_ops) == 2:
                             dest_op_type = [dest_op.type for dest_op in var.dest_ops]
@@ -247,7 +247,7 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
     ) -> None:
         super().__init__(name="XQuant QuantizeConfigRefine Pass")
         self._precision_level = precision_level
-        self._max_bits = 12
+        self._max_bits = XQUANT_CONFIG.max_bits
         self._quant_max = 2**self._max_bits - 1
         self._quant_min = 0
         self._custom_setting = custom_setting

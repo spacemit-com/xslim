@@ -2,11 +2,11 @@
 CONFIGS = [
     {
         "Model": "resnet18",
-        "finetune_level": 2,
+        "finetune_level": 1,
     },
     {
         "Model": "resnet50",
-        "finetune_level": 2,
+        "finetune_level": 1,
     },
     {
         "Model": "resnet50-v1.5",
@@ -17,6 +17,7 @@ CONFIGS = [
     },
     {
         "Model": "resnext50",
+        "finetune_level": 2,
     },
     {
         "Model": "seresnet50",
@@ -31,7 +32,7 @@ CONFIGS = [
     },
     {
         "Model": "mobilenet_v2",
-        "finetune_level": 3,
+        "finetune_level": 2,
     },
     {
         "Model": "mobilenet_v3_large",
@@ -48,7 +49,6 @@ CONFIGS = [
     },
     {
         "Model": "efficientnet_v2_s",
-        "calibration_type": "percentile",
         "finetune_level": 2,
     },
     {
@@ -61,6 +61,7 @@ CONFIGS = [
     },
     {
         "Model": "repvgg",
+        "finetune_level": 2,
     },
     {
         "Model": "v100_gpu64@5ms_top1@71.6_finetune@25",
@@ -74,8 +75,14 @@ CONFIGS = [
         "Model": "shufflenet_v2_x1_0",
         "finetune_level": 2,
     },
-    {"Model": "lcnet_050"},
-    {"Model": "lcnet_100"},
+    {
+        "Model": "lcnet_050",
+        "finetune_level": 2,
+    },
+    {
+        "Model": "lcnet_100",
+        "finetune_level": 2,
+    },
     {
         "Model": "inception_v1",
         "mean_value": [104, 117, 123],

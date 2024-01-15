@@ -256,26 +256,16 @@ def statistical_analyse(
             x_er, x_fp, x_qt = self.x_er, self.x_fp, self.x_qt
             er_mean = x_er.mean().item()
             er_std = x_er.std().item()
-            er_min = x_er.min().item()
-            er_max = x_er.max().item()
-            er_skew = self.solve_skewness(x_er, er_mean, er_std).item()
-            er_kurtosis = self.solve_kurtosis(x_er, er_mean, er_std).item()
-            er_hist = torch.histc(x_er, bins=32, min=x_er.min(), max=x_er.max()).cpu().tolist()
 
             qt_mean = x_qt.mean().item()
             qt_std = x_qt.std().item()
             qt_min = x_qt.min().item()
             qt_max = x_qt.max().item()
-            qt_skew = self.solve_skewness(x_qt, qt_mean, qt_std).item()
-            qt_kurtosis = self.solve_kurtosis(x_qt, qt_mean, qt_std).item()
-            qt_hist = torch.histc(x_qt, bins=32, min=x_qt.min(), max=x_qt.max()).cpu().tolist()
 
             fp_mean = x_fp.mean().item()
             fp_std = x_fp.std().item()
             fp_min = x_fp.min().item()
             fp_max = x_fp.max().item()
-            fp_skew = self.solve_skewness(x_fp, fp_mean, fp_std).item()
-            fp_kurtosis = self.solve_kurtosis(x_fp, fp_mean, fp_std).item()
             fp_hist = torch.histc(x_fp, bins=32, min=x_fp.min(), max=x_fp.max()).cpu().tolist()
 
             snr = torch_snr_error(x_qt, x_fp).item()
@@ -283,46 +273,14 @@ def statistical_analyse(
             mse = torch_mean_square_error(x_qt, x_fp).item()
             return {
                 "Op": "{}[{}]".format(self.op.name, self.op.type),
-                # "Op type": self.op.type,
-                "Is parameter": self.var.is_parameter,
-                # "Is input": self.var in self.op.inputs,
-                # "Is output": self.var in self.op.outputs,
                 "Var": self.var.name,
                 "SNR": snr,
                 "MSE": mse,
                 "Cosine": cosine,
                 "Q.MinMax": "{:.3f}, {:.3f}".format(qt_min, qt_max),
                 "F.MinMax": "{:.3f}, {:.3f}".format(fp_min, fp_max),
-                # "Noise Mean": er_mean,
-                # "Noise Std": er_std,
-                # "Noise Skewness": er_skew,
-                # "Noise Kurtosis": er_kurtosis,
-                # "Noise Hist": er_hist,
-                # "Noise Max": er_max,
-                # "Noise Min": er_min,
-                # "Quantized Mean": qt_mean,
-                # "Quantized Std": qt_std,
-                # "Quantized Skewness": qt_skew,
-                # "Quantized Kurtosis": qt_kurtosis,
-                # "Quantized Hist": qt_hist,
-                # "Quantized Max": qt_max,
-                # "Quantized Min": qt_min,
-                # "Float Mean": fp_mean,
-                # "Float Std": fp_std,
-                # "Float Skewness": fp_skew,
-                # "Float Kurtosis": fp_kurtosis,
                 "F.Hist": fp_hist,
-                # "Float Max": fp_max,
-                # "Float Min": fp_min,
             }
-
-        def solve_skewness(self, x: torch.Tensor, mean: float, std: float) -> torch.Tensor:
-            # 三次方可能有数据溢出
-            return torch.pow((x - mean) / std, 3).mean()
-
-        def solve_kurtosis(self, x: torch.Tensor, mean: float, std: float) -> torch.Tensor:
-            # 四次方可能有数据溢出
-            return torch.pow((x - mean) / std, 4).mean() - 3
 
     executor = TorchExecutor(graph=graph, device=running_device)
     # find all quantable operations.
@@ -393,7 +351,7 @@ def statistical_analyse(
         operation = graph.operations[name]
         assert isinstance(operation, Operation)
         for idx, input_var in enumerate(operation.inputs):
-            if input_var in visited_var:
+            if input_var in visited_var or input_var.is_parameter:
                 continue
             visited_var.add(input_var)
             x_qt = record["Quantized Input"][idx]
