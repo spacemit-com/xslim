@@ -89,6 +89,7 @@ class CustomLayerwiseEqualizationPass(LayerwiseEqualizationPass):
                     dataloader=dataloader,
                     collate_fn=collate_fn,
                     operations=interested_operations,
+                    steps=50,
                 )
 
                 for name, act in activations.items():

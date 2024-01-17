@@ -82,7 +82,7 @@ class XQuantizer(BaseQuantizer):
         self._op_type_to_policy = {
             "Conv": perchannel_policy,
             "ConvTranspose": pertensor_policy,
-            "Gemm": perchannel_policy,
+            "Gemm": pertensor_policy,
             "MatMul": pertensor_policy,
         }
         self._observer_mapping = {

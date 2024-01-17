@@ -38,7 +38,10 @@ CONFIGS = [
         "Model": "mobilenet_v3_large",
         "finetune_level": 2,
     },
-    {"Model": "mobilenet_v3_small"},
+    {
+        "Model": "mobilenet_v3_small",
+        "finetune_level": 2,
+    },
     {
         "Model": "efficientnet_v1_b0",
         "finetune_level": 2,
@@ -49,7 +52,8 @@ CONFIGS = [
     },
     {
         "Model": "efficientnet_v2_s",
-        "finetune_level": 2,
+        "finetune_level": 1,
+        "calibration_type": "percentile",
     },
     {
         "Model": "mnasnet0_5",
@@ -103,7 +107,7 @@ CONFIGS = [
         "input_shape": [1, 3, 299, 299],
         "mean_value": [127.5, 127.5, 127.5],
         "std_value": [127.5, 127.5, 127.5],
-        "finetune_level": 2,
+        "finetune_level": 1,
     },
     {
         "Model": "squeezenet1.1",
