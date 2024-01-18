@@ -208,10 +208,13 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                 if o_name in block_output_names_set and collect_dataloader_cache:
                     if o_name not in dataloader_cache:
                         dataloader_cache[o_name] = []
-                    mem_free, mem_all = torch.cuda.mem_get_info()
-                    mem_free_ratio = mem_free / mem_all
-                    if mem_free_ratio < 0.1:
-                        dataloader_cache[o_name].append(o_var.to("cpu"))
+                    if o_var.device.type == "cuda":
+                        mem_free, mem_all = torch.cuda.mem_get_info()
+                        mem_free_ratio = mem_free / mem_all
+                        if mem_free_ratio < 0.1:
+                            dataloader_cache[o_name].append(o_var.to("cpu"))
+                        else:
+                            dataloader_cache[o_name].append(o_var)
                     else:
                         dataloader_cache[o_name].append(o_var)
                 if o_name in extern_output_var_hooks:
