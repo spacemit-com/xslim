@@ -3,6 +3,7 @@
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
 import torch
 import functools
+import time
 import math
 import numpy as np
 from ppq.core import (
@@ -16,9 +17,66 @@ from ppq.core import (
 from ppq.IR import Variable
 from ppq.quantization.observer import (
     TorchHistObserver,
+    TorchPercentileObserver,
+    TorchMinMaxObserver,
     range as ppq_range,
 )
 from ppq.quantization.measure import torch_KL_divergence
+from ..defs import xquant_debug, xquant_warning, OBSERVER_FLOATING_MSE_FETCHES
+
+
+class TorchPercentileObserverDecorator(TorchPercentileObserver):
+    def __init__(self, watch_on: Variable, quant_cfg: TensorQuantizationConfig):
+        super().__init__(watch_on, quant_cfg)
+        self._value_device = "cpu"
+        self._none_value_detected = False
+
+    @torch.no_grad()
+    def observe(self, value: torch.Tensor):
+        if isinstance(value, torch.Tensor):
+            self._value_device = value.device.type
+
+        if value is None or value.numel() == 0:
+            self._none_value_detected = True
+            return
+        return super().observe(value)
+
+    def render_quantization_config(self):
+        if self._none_value_detected:
+            xquant_warning("None value detected.")
+            self._quant_cfg.scale = torch.tensor([1.0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.offset = torch.tensor([0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.state = QuantizationStates.ACTIVATED
+            self._quant_cfg.detail["NONE_VALUE"] = True
+            return
+        super().render_quantization_config()
+
+
+class TorchMinMaxObserverObserverDecorator(TorchMinMaxObserver):
+    def __init__(self, watch_on: Variable, quant_cfg: TensorQuantizationConfig):
+        super().__init__(watch_on, quant_cfg)
+        self._value_device = "cpu"
+        self._none_value_detected = False
+
+    @torch.no_grad()
+    def observe(self, value: torch.Tensor):
+        if isinstance(value, torch.Tensor):
+            self._value_device = value.device.type
+
+        if value is None or value.numel() == 0:
+            self._none_value_detected = True
+            return
+        return super().observe(value)
+
+    def render_quantization_config(self):
+        if self._none_value_detected:
+            xquant_warning("None value detected.")
+            self._quant_cfg.scale = torch.tensor([1.0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.offset = torch.tensor([0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.state = QuantizationStates.ACTIVATED
+            self._quant_cfg.detail["NONE_VALUE"] = True
+            return
+        super().render_quantization_config()
 
 
 class TorchXQuantObserver(TorchHistObserver):
@@ -26,7 +84,7 @@ class TorchXQuantObserver(TorchHistObserver):
         self,
         watch_on: Variable,
         quant_cfg: TensorQuantizationConfig,
-        hist_bins: int = ppq_common.OBSERVER_FLOATING_MSE_FETCHES,
+        hist_bins: int = OBSERVER_FLOATING_MSE_FETCHES,
         single_alg: str = None,
     ):
         super().__init__(watch_on, quant_cfg)
@@ -60,18 +118,22 @@ class TorchXQuantObserver(TorchHistObserver):
         self._percentile_collector = []
         self._min_val_collector = []
         self._max_val_collector = []
+        self._none_value_detected = False
+        self._value_device = "cpu"
 
     def observe(self, value: torch.Tensor):
         if self._quant_cfg.state not in {QuantizationStates.INITIAL}:
             return
 
+        if isinstance(value, torch.Tensor):
+            self._value_device = value.device.type
+
+        if value is None or value.numel() == 0:
+            self._none_value_detected = True
+            return
+
+        assert isinstance(value, torch.Tensor), "XQuantObserver can only deal with torch Tensor values"
         if self._phase == "Detecting Minmax":
-            assert value is not None, (
-                "You are observing an Empty Tensor. "
-                "(This Error is usually due to you have a wrong Quantizer configuration.)"
-            )
-            assert value.numel() > 0, f"You are observing an empty tensor({self._watch_on.name})."
-            assert isinstance(value, torch.Tensor), "TorchMinMaxObserver can only deal with torch Tensor values"
             if self._quant_cfg.state == QuantizationStates.INITIAL:
                 if self._quant_cfg.policy.has_property(QuantizationProperty.PER_TENSOR):
                     numel = value.numel()
@@ -111,6 +173,14 @@ class TorchXQuantObserver(TorchHistObserver):
         if self._quant_cfg.state not in {QuantizationStates.INITIAL}:
             return
 
+        if self._none_value_detected:
+            xquant_warning("None value detected.")
+            self._quant_cfg.scale = torch.tensor([1.0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.offset = torch.tensor([0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.state = QuantizationStates.ACTIVATED
+            self._quant_cfg.detail["NONE_VALUE"] = True
+            return
+
         if not self._quant_cfg.policy.has_property(QuantizationProperty.PER_TENSOR):
             raise ValueError("Hist observer can only apply with per-tensor quantization config.")
 
@@ -133,9 +203,8 @@ class TorchXQuantObserver(TorchHistObserver):
             scale, offset = self.hist_to_scale_offset(
                 histogram=self._hist, hist_bins=self._hist_bins, hist_scale=self._hist_scale, config=self._quant_cfg
             )
-            device = self._hist.device
-            self._quant_cfg.scale = torch.tensor([scale], dtype=torch.float32, device=device).squeeze(0)
-            self._quant_cfg.offset = torch.tensor([offset], dtype=torch.float32, device=device).squeeze(0)
+            self._quant_cfg.scale = torch.tensor([scale], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.offset = torch.tensor([offset], dtype=torch.float32, device=self._value_device).squeeze(0)
             self._quant_cfg.state = QuantizationStates.ACTIVATED
 
     def compute_mse_loss(
@@ -212,6 +281,7 @@ class TorchXQuantObserver(TorchHistObserver):
         if config.policy.has_property(QuantizationProperty.ASYMMETRICAL) and config.policy.has_property(
             QuantizationProperty.PER_TENSOR
         ):
+            t_start = time.time()
             histogram = histogram.float().cpu()
             histogram_np = histogram.numpy()
 
@@ -296,11 +366,9 @@ class TorchXQuantObserver(TorchHistObserver):
             if self._single_alg == "mse":
                 scale = losses_mse[0]["scale"]
                 offset = losses_mse[0]["offset"]
-                return scale, offset
             elif self._single_alg == "kl":
                 scale = losses_kl[0]["scale"]
                 offset = losses_kl[0]["offset"]
-                return scale, offset
             else:
                 valid_topk = 10
                 loss_scale = [
@@ -312,7 +380,9 @@ class TorchXQuantObserver(TorchHistObserver):
                 scale = losses[0]["scale"]
                 offset = losses[0]["offset"]
 
-                return scale, offset
+            xquant_debug("observer render time cost {}".format(time.time() - t_start))
+
+            return scale, offset
 
         elif config.policy.has_property(QuantizationProperty.PER_CHANNEL):
             raise PermissionError("XQuant observer do not support PER_CHANNEL policy now, please wait.")

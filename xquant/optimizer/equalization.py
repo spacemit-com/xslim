@@ -14,7 +14,6 @@ from ppq.quantization.algorithm import equalization as equalization_alg
 from ppq.quantization.optim.equalization import (
     LayerwiseEqualizationPass,
     EQUALIZATION_OPERATION_TYPE,
-    OPTIMIZATION_LAYERTYPE_CONFIG,
 )
 
 
@@ -80,7 +79,6 @@ class CustomLayerwiseEqualizationPass(LayerwiseEqualizationPass):
 
         pairs = self.find_equalization_pair(graph=graph, interested_operations=interested_operations)
 
-        print(f"{len(pairs)} equalization pair(s) was found, ready to run optimization.")
         for iter_times in tqdm(range(self.iterations), desc="Layerwise Equalization", total=self.iterations):
             if self.including_act:
                 activations = self.collect_activations(

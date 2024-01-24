@@ -20,6 +20,7 @@ class GraphLegalized:
         self.format_reshape_squeeze()
         self.fuse_layernorm()
         self.fuse_gelu()
+        self.format_div()
         self._merger.fuse_bias_add()
         self.remove_dropout()
         self.format_ms_domain()
@@ -27,6 +28,12 @@ class GraphLegalized:
         self.fuse_mul_add()
         self.format_gemm()
         self.format_gemm()
+
+    def format_div(self):
+        for op in self._graph.operations.values():
+            if op.type == "Div" and op.inputs[1].is_parameter:
+                op.type = "Mul"
+                op.inputs[1].value = 1 / op.inputs[1].value
 
     def format_reshape_squeeze(self):
         search_engine = SearchableGraph(graph=self._graph)

@@ -7,8 +7,6 @@ from onnx import helper
 from ppq.core import (
     TargetPlatform,
     GRAPH_OPSET_ATTRIB,
-    PPQ_CONFIG,
-    PASSIVE_OPERATIONS,
     QuantizationProperty,
     QuantizationStates,
     QuantizationVisibility,
@@ -20,6 +18,7 @@ from ppq.IR import BaseGraph, Operation, QuantableOperation, QuantableVariable, 
 from ppq.utils.round import ppq_tensor_round
 from ppq.parser.onnx_exporter import OnnxExporter, OP_CONVERTERS, OperationExporter
 from ppq.lib import register_network_exporter
+from ..defs import PASSIVE_OPERATIONS
 
 
 def CustomLinearQuant_toInt(tensor: torch.Tensor, config: TensorQuantizationConfig) -> torch.Tensor:
@@ -493,6 +492,8 @@ class ONNXRUNTIMExporter(OnnxExporter):
             if QDQHelper.TQC_Exportable_Check(TQC=config, bounded_var=var) or (
                 inserting.type in PASSIVE_OPERATIONS and len(var.dest_ops) > 1
             ):
+                pass
+            elif inserting.type in {"Split"}:
                 pass
             else:
                 continue

@@ -3,15 +3,7 @@
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
 import torch
 from ppq.core import (
-    OBSERVER_MSE_HIST_BINS,
-    PASSIVE_OPERATIONS,
-    OperationQuantizationConfig,
-    QuantizationPolicy,
-    QuantizationProperty,
     QuantizationStates,
-    RoundingPolicy,
-    TargetPlatform,
-    empty_ppq_cache,
     ppq_warning,
 )
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
@@ -22,6 +14,7 @@ from ppq.quantization.optim import (
 )
 from ppq.IR.search import SearchableGraph
 from ppq.executor import BaseGraphExecutor
+from ..defs import XQUANT_CONFIG, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE
 
 
 class HardSwishFusionPass(QuantizationOptimizationPass):

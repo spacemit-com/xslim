@@ -71,6 +71,10 @@ def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
 
 def xquant_load_onnx_graph(file: str, sim_en: bool = True, truncate_var_name: Sequence[str] = []):
     onnx_model = onnx.load(file)
+    onnx_model.graph.ClearField("value_info")
+    for o_var in onnx_model.graph.output:
+        o_var.type.tensor_type.ClearField("shape")
+
     opset_dict = get_onnx_opset(onnx_model)
     ai_onnx_version = opset_dict.get("ai.onnx", 13)
     if ai_onnx_version < 13:

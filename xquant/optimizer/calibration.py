@@ -5,17 +5,8 @@ import functools
 import torch
 from tqdm import tqdm
 from ppq.core import (
-    COMPUTING_OP,
-    OBSERVER_MSE_HIST_BINS,
-    PASSIVE_OPERATIONS,
-    BIAS_CORRECTION_INTERST_TYPE,
-    OperationQuantizationConfig,
-    QuantizationPolicy,
-    QuantizationProperty,
     QuantizationStates,
-    RoundingPolicy,
     common as ppq_common,
-    convert_any_to_torch_tensor,
 )
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.quantization.optim import (
@@ -26,7 +17,6 @@ from ppq.quantization.observer import (
     OperationObserver,
     TorchHistObserver,
     TorchMSEObserver,
-    OBSERVER_TABLE,
 )
 from ppq.quantization.algorithm.training import TrainableBlock, BlockBuilder, PriorityQueue
 from ppq.quantization.measure import (
@@ -38,6 +28,28 @@ from ppq.quantization.measure import (
 from ppq.quantization.optim import LearnedStepSizePass, AdaroundPass
 from ppq.utils.round import ppq_round_to_power_of_2
 from ..optimizer import PassiveParameterBakingPass
+from ..defs import COMPUTING_OP, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE
+
+
+class CalibrationBlock:
+    def __init__(self, s_vars: Set[Variable], e_vars: Set[Variable], rps: Sequence[Operation]) -> None:
+        self.s_vars = s_vars  # 起始边
+        self.e_vars = e_vars  # 终止边
+        self.rps = rps  # 中继节点
+
+    def __str__(self) -> str:
+        s_var_names = ", ".join([i.name for i in self.s_vars])
+        e_var_names = ", ".join([i.name for i in self.e_vars])
+        return "[Graph Block from [{}] to [{}]]".format(s_var_names, e_var_names)
+
+    @staticmethod
+    def convert_from_trainableblock(block: TrainableBlock, graph: BaseGraph) -> "CalibrationBlock":
+        in_var_names, out_var_names = get_block_io_var_names(block)
+        return CalibrationBlock(
+            set([graph.variables[i] for i in in_var_names]),
+            set([graph.variables[i] for i in out_var_names]),
+            block.rps,
+        )
 
 
 class CustomBlockBuilder(BlockBuilder):
@@ -101,7 +113,7 @@ class CustomBlockBuilder(BlockBuilder):
 
 
 @functools.lru_cache(maxsize=None)
-def get_block_io_var_names(block: TrainableBlock):
+def get_block_io_var_names(block: Union[TrainableBlock, CalibrationBlock]):
     block_op_set = set(block.rps)
     block_output_names_set = set()
     block_input_names_set = set()
@@ -168,6 +180,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             for op in block.rps:
                 visited_ops.add(op)
             blocks.append(block)
+
         return blocks
 
     def forward_trainable_block(
@@ -211,7 +224,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                     if o_var.device.type == "cuda":
                         mem_free, mem_all = torch.cuda.mem_get_info()
                         mem_free_ratio = mem_free / mem_all
-                        if mem_free_ratio < 0.1:
+                        if mem_free_ratio < 0.2:
                             dataloader_cache[o_name].append(o_var.to("cpu"))
                         else:
                             dataloader_cache[o_name].append(o_var)
@@ -268,6 +281,16 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         if ob_table_num == 0:
             hooks = {}
 
+        not_has_hist_ob = True
+        for ob in operation_observer_cache:
+            if not_has_hist_ob:
+                not_has_hist_ob = all(
+                    [
+                        not isinstance(var_observer, (TorchHistObserver, TorchMSEObserver))
+                        for var_observer in ob._hook._observer_table.values()
+                    ]
+                )
+
         with torch.no_grad():
             self.forward_trainable_block(
                 block, dataloader_cache, executor, hooks, calib_steps, extern_output_var_hooks, True
@@ -276,17 +299,9 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         if len(hooks) == 0:
             return
 
-        not_has_hist_ob = True
         for ob in operation_observer_cache:
             ob.render_quantization_config()
             ob.report()
-            if not_has_hist_ob:
-                not_has_hist_ob = all(
-                    [
-                        not isinstance(var_observer, (TorchHistObserver, TorchMSEObserver))
-                        for var_observer in ob._hook._observer_table.values()
-                    ]
-                )
 
         if not_has_hist_ob:
             pass

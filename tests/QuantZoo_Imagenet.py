@@ -68,12 +68,10 @@ CONFIGS = [
         "finetune_level": 2,
     },
     {
-        "Model": "v100_gpu64@5ms_top1@71.6_finetune@25",
-        "finetune_level": 2,
+        "Model": "v100_gpu64_5ms",
     },
     {
-        "Model": "v100_gpu64@6ms_top1@73.0_finetune@25",
-        "finetune_level": 2,
+        "Model": "v100_gpu64_6ms",
     },
     {
         "Model": "shufflenet_v2_x1_0",
@@ -113,19 +111,24 @@ CONFIGS = [
         "Model": "squeezenet1.1",
         "finetune_level": 2,
     },
-    # {
-    #    "Model": "vit_b_16",
-    #    "calibration_type": "percentile",
-    # },
-    # {"Model": "vgg16"},
-    # {
-    #    "Model": "swin_small_patch4_window7_224",
-    #    "calibration_type": "percentile",
-    # },
-    # {
-    #    "Model": "swinv2_small_window8_256",
-    #    "calibration_type": "percentile",
-    # },
+    {
+        "Model": "vit_b_16",
+        "finetune_level": 2,
+    },
+    {
+        "Model": "vgg16",
+        "finetune_level": 1,
+    },
+    {
+        "Model": "swin-tiny_16xb64_in1k",
+        "calibration_type": "percentile",
+        "finetune_level": 2,
+    },
+    {
+        "Model": "swin-small_16xb64_in1k",
+        "calibration_type": "percentile",
+        "finetune_level": 2,
+    },
 ]
 
 from typing import Callable, Optional
@@ -140,6 +143,7 @@ import torchvision.datasets as datasets
 from torch.utils.data.dataloader import DataLoader
 from ppq.api import load_onnx_graph
 import xquant
+from xquant import xquant_info
 from xquant.calibration_helper import PTImagenetPreprocess, ImagenetPreprocess
 from ppq.api import export_ppq_graph
 from ppq.executor.torch import TorchExecutor
@@ -160,7 +164,7 @@ parser.add_argument(
     default="output",
     help="Path to the Output directory.",
 )
-parser.add_argument("--filter", required=False, default="resnet18", help="model name filter.")
+parser.add_argument("--filter", required=False, default="swin-tiny_16xb64_in1k", help="model name filter.")
 parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
 parser.add_argument("--device", required=False, default="cuda", help="device.")
 parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
@@ -414,7 +418,7 @@ if __name__ == "__main__":
         if len(MODEL_FILTER) > 0:
             if model not in MODEL_FILTER:
                 continue
-        print(f"Ready to run quant benchmark on {model}")
+        xquant_info(f"Ready to run quant benchmark on {model}")
 
         input_model_path = os.path.join(model_dir, model, model + ".onnx")
 
@@ -430,15 +434,6 @@ if __name__ == "__main__":
         color_format = config.get("color_format", "rgb")
         finetune_level = config.get("finetune_level", None)
         max_percentile = config.get("max_percentile", None)
-
-        # onnx_model = osg.import_onnx(onnx.load(input_model_path))
-        # for idx, in_var in enumerate(onnx_model.inputs):
-        #    in_var.name = "input_{}".format(idx)
-        #    in_var.shape = input_shape
-        #    in_var.dtype = np.float32
-        # new_onnx_model = osg.export_onnx(onnx_model)
-        # onnx.save_model(new_onnx_model, input_model_path)
-        # continue
 
         custom_transforms = pytorch_imagenet_preprocess(input_shape, mean_value, std_value)
         if preprocess_file == "IMAGENET":
@@ -483,7 +478,7 @@ if __name__ == "__main__":
             quantized_graph = xquant.quantize_onnx_model(demo_json)
 
         if args.eval_fp:
-            print(f"Evaluate float Model Accurarcy....")
+            xquant_info(f"Evaluate float Model Accurarcy....")
             # evaluation
             acc = evaluate_ppq_module_with_imagenet(
                 model=float_graph,
@@ -492,14 +487,14 @@ if __name__ == "__main__":
                 device=collect_device,
                 verbose=False,
             )
-            print(f"Model Classify Accurarcy = {acc: .4f}%")
+            xquant_info(f"Model Classify Accurarcy = {acc: .4f}%")
 
         output_model_path = os.path.join(output_dir, "{}.onnx".format(demo_json["model_parameters"]["output_prefix"]))
 
         if args.eval_quant:
             quantized_export_graph = load_onnx_graph(onnx_import_file=output_model_path)
 
-            print(f"Evaluate quantized Model Accurarcy....")
+            xquant_info(f"Evaluate quantized Model Accurarcy....")
             # evaluation
             acc = evaluate_ppq_module_with_imagenet(
                 model=quantized_export_graph,
@@ -508,4 +503,4 @@ if __name__ == "__main__":
                 device=collect_device,
                 verbose=False,
             )
-            print(f"Model Classify Accurarcy = {acc: .4f}%")
+            xquant_info(f"Model Classify Accurarcy = {acc: .4f}%")

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 from enum import Enum
+import logging
+from .logger import xquant_info, xquant_warning, xquant_debug, xquant_error, xquant_trace
 
 
 class XQUANT_GLOBAL_CONFIGURATION:
@@ -20,6 +22,30 @@ class XQUANT_GLOBAL_CONFIGURATION:
         self.version = "1.0.3"
 
 
+PASSIVE_OPERATIONS = {
+    "MaxPool",
+    "GlobalMaxPool",
+    "Reshape",
+    "Flatten",
+    "Identity",
+    "Dropout",
+    "Slice",
+    "Pad",
+    "Split",
+    "Transpose",
+    "Interp",
+    "Squeeze",
+    "Unsqueeze",
+    "Gather",
+}
+
+COMPUTING_OP = {"Conv", "Gemm", "ConvTranspose", "MatMul"}
+
+BIAS_CORRECTION_INTERST_TYPE = {"Conv", "Gemm", "ConvTranspose"}
+
+OBSERVER_FLOATING_MSE_FETCHES = 4096
+
+
 class AutoFinetuneLevel(Enum):
     DO_NOTHING = 0
     LEVEL_1 = 1
@@ -34,11 +60,3 @@ class PrecisionLevel(Enum):
 
 
 XQUANT_CONFIG = XQUANT_GLOBAL_CONFIGURATION()
-
-
-def xquant_warning(info: str):
-    print(f"\033[33m[Warning] {info}\033[0m")
-
-
-def xquant_info(info: str):
-    print(f"\033[34m[Info] {info}\033[0m")

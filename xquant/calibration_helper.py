@@ -35,7 +35,7 @@ class XQuantDataset(Dataset):
             else:
                 self._data_dict[input_name] = [torch.zeros(input_item.input_shape).to(getattr(torch, input_item.dtype))]
 
-            assert len(self._data_dict[input_name]), "Calibration input {} find 0 items.".format(input_name)
+            assert len(self._data_dict[input_name]), "Calibration input {} finds 0 items.".format(input_name)
 
             # 超过1个输入可以广播
             if len(self._data_dict[input_name]) == 1 and len(input_parametres) > 1:

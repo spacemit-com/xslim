@@ -9,7 +9,13 @@ from .refine import (
     QuantizeConfigRefinePass,
 )
 from .calibration import RuntimeBlockWiseCalibrationPass
-from .observer import TorchXQuantObserver, TorchXQuantKLObserver, TorchXQuantMSEObserver
+from .observer import (
+    TorchXQuantObserver,
+    TorchXQuantKLObserver,
+    TorchXQuantMSEObserver,
+    TorchPercentileObserverDecorator,
+    TorchMinMaxObserverObserverDecorator,
+)
 from .training import LearnedStepSizePassDecorator, LSQDelegatorDecorator
 from .legalized import GraphLegalized
 from .equalization import CustomLayerwiseEqualizationPass

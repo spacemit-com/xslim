@@ -4,11 +4,11 @@ from tqdm import tqdm
 import random
 import numpy as np
 import torch
-from ppq.core import *
+from ppq.core import TensorQuantizationConfig, QuantizationProperty, QuantizationStates
 from ppq.executor import BaseGraphExecutor, TorchExecutor
 from ppq.IR import BaseGraph, BaseGraph, Operation, QuantableOperation
 from ppq.IR.quantize import QuantableGraph
-from ppq.quantization.algorithm.training import LSQDelegator, CuLSQ_LC, CuLSQ_LT, TrainableBlock
+from ppq.quantization.algorithm.training import LSQDelegator, TrainableBlock
 from ppq.quantization.measure import torch_mean_square_error, torch_snr_error
 from ppq.quantization.qfunction.linear import PPQLinearQuantFunction
 from ppq.quantization.qfunction import PPQuantFunction
@@ -16,7 +16,7 @@ from ppq.utils.fetch import batch_random_fetch
 from ppq.utils.round import ppq_tensor_round
 from ppq.quantization.optim.base import QuantizationOptimizationPass
 from ppq.quantization.optim import LearnedStepSizePass
-from ..defs import xquant_info
+from ..defs import xquant_info, xquant_debug
 
 
 class LSQDelegatorDecorator(LSQDelegator):
@@ -84,21 +84,18 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
 
             # register quant delegator
             for cfg, var in op.config_with_variable:
+                if cfg.detail.get("NONE_VALUE", False):
+                    continue
                 if cfg.state in {QuantizationStates.ACTIVATED}:
-                    if var.is_parameter:
-                        delegator = LSQDelegator(
-                            config=cfg,
-                            var=var,
-                            is_scale_trainable=True,
-                            is_offset_trainable=False,
-                        )
-                    else:
-                        delegator = LSQDelegator(
-                            config=cfg,
-                            var=var,
-                            is_scale_trainable=self.is_scale_trainable,
-                            is_offset_trainable=self.is_scale_trainable,
-                        )
+                    offset_trainable = (
+                        cfg.policy.has_property(QuantizationProperty.ASYMMETRICAL) and self.is_scale_trainable
+                    )
+                    delegator = LSQDelegator(
+                        config=cfg,
+                        var=var,
+                        is_scale_trainable=self.is_scale_trainable,
+                        is_offset_trainable=offset_trainable,
+                    )
                     trainable_scales.extend(delegator.trainable_tensors())
                     executor.register_quantize_delegate(config=cfg, delegator=delegator)
                     delegators[cfg] = delegator
@@ -171,6 +168,9 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
         if post_loss > pre_loss:
             for cfg, delegator in delegators.items():
                 delegator.withdraw()
+            xquant_debug(f"Tuning Finished: loss no change and withdraw.\n")
+        else:
+            xquant_debug(f"Tuning Finished: ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f})\n")
 
         for cfg, delegator in delegators.items():
             delegator.finalize()
@@ -182,5 +182,4 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
         # clear cache
         torch.cuda.empty_cache()
 
-        xquant_info(f"Tuning Finished  : ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f}) [Block Loss]\n")
         return pre_loss, post_loss

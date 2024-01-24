@@ -2,6 +2,7 @@
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
+import math
 from ppq.core import (
     QuantizationProperty,
     QuantizationStates,
@@ -18,7 +19,7 @@ from ppq.IR.search import SearchableGraph
 from ppq.executor import BaseGraphExecutor
 from ppq.quantization.qfunction import PPQuantFunction
 from ppq.quantization.observer import range as ppq_range
-from ..defs import PrecisionLevel, AutoFinetuneLevel, XQUANT_CONFIG
+from ..defs import XQUANT_CONFIG, PASSIVE_OPERATIONS, COMPUTING_OP
 from ..xquant_setting import CustomQuantizationParameterSetting
 
 
@@ -58,16 +59,29 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
                 pad_config = op.config.input_quantization_config[-1]
                 pad_config.master_by = i_cfg
                 pad_config.visibility = QuantizationVisibility.INTERNAL
-        elif op.type not in {"Conv", "ConvTranspose", "Gemm", "MatMul"}:
+        elif op.type not in COMPUTING_OP:
             for in_config, in_var in op.config_with_variable:
-                if in_var.is_parameter and in_config.state == QuantizationStates.INITIAL:
-                    if in_config.policy.has_property(QuantizationProperty.PER_CHANNEL):
-                        raise NotImplementedError("only Computing Ops have perchannel parameters")
+                if (
+                    in_var.is_parameter
+                    and in_config.state == QuantizationStates.INITIAL
+                    and not in_config.policy.has_property(QuantizationProperty.PER_CHANNEL)
+                ):
                     max_range_val = float(in_var.value.max())
                     min_range_val = float(in_var.value.min())
-                    if torch.all(in_var.value.to(torch.int32) - in_var.value == 0):
-                        scale = torch.tensor(1, dtype=torch.float32, device=in_var.value.device)
-                        offset = torch.tensor(0, dtype=torch.float32, device=in_var.value.device)
+                    if torch.all(in_var.value.to(torch.int8) - in_var.value == 0):
+                        scale = torch.tensor(1.0, dtype=torch.float32, device=in_var.value.device)
+                        offset = torch.tensor(
+                            math.ceil((in_config.quant_max - in_config.quant_min) / 2),
+                            dtype=torch.float32,
+                            device=in_var.value.device,
+                        )
+                    elif torch.all(in_var.value.to(torch.uint8) - in_var.value == 0):
+                        scale = torch.tensor(1.0, dtype=torch.float32, device=in_var.value.device)
+                        offset = torch.tensor(
+                            in_config.quant_min,
+                            dtype=torch.float32,
+                            device=in_var.value.device,
+                        )
                     elif min_range_val != max_range_val:
                         scale, offset = ppq_range.minmax_to_scale_offset(min_range_val, max_range_val, in_config)
                     elif max_range_val > 0:
@@ -159,9 +173,11 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
     def __init__(
         self,
         fuse_relu_clip: bool = True,
+        fuse_passive_op: bool = True,
     ) -> None:
         self.fuse_relu_clip = fuse_relu_clip
-        super().__init__(name="PPQ Quantization Fusion Pass")
+        self.fuse_passive_op = fuse_passive_op
+        super().__init__(name="XQuant Quantization Fusion Pass")
 
     def is_same_platform(self, operations: List[Operation]):
         platforms = [operation.platform for operation in operations]
@@ -170,6 +186,20 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
     @empty_ppq_cache
     def optimize(self, graph: BaseGraph, **kwargs) -> None:
         processor = SearchableGraph(graph)
+
+        if self.fuse_passive_op:
+            # all passive operations should never changes quantization configuration of its input
+            # so to say their input and output share a same scale.
+            for op in graph.operations.values():
+                if op.type not in PASSIVE_OPERATIONS:
+                    continue
+                source_op = op.inputs[0].source_op
+                if source_op is None:
+                    continue  # beginning op, can not merge.
+                if isinstance(op, QuantableOperation) and self.is_same_platform([op, source_op]):
+                    TQC = op.config.input_quantization_config[0]
+                    for output_cfg in op.config.output_quantization_config:
+                        output_cfg.dominated_by = TQC
 
         if self.fuse_relu_clip:
             patterns = processor.pattern_matching(

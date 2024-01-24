@@ -9,7 +9,6 @@ import functools
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.core import (
     PPQ_CONFIG,
-    PASSIVE_OPERATIONS,
     OperationQuantizationConfig,
     QuantizationPolicy,
     QuantizationProperty,
@@ -46,7 +45,7 @@ from ..optimizer import (
     CustomLayerwiseEqualizationPass,
     QuantizeConfigRefinePass,
 )
-from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, xquant_info, xquant_warning
+from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, xquant_info, xquant_warning, PASSIVE_OPERATIONS
 from ..xquant_setting import XQuantSetting
 
 
@@ -145,17 +144,16 @@ class XQuantizer(BaseQuantizer):
             # set all parameters within Conv, ConvTranspose, Gemm to per-channel quant-config.
             assert operation.num_of_input > 0, "Seems you got a Conv layer with no parameters."
             # set weight tqc
-            for in_var, in_tqc in zip(operation.inputs, base_quant_config.input_quantization_config):
-                if in_var.is_parameter:
-                    in_tqc.num_of_bits = 8
-                    in_tqc._quant_min, in_tqc._quant_max = _get_quant_min_max(in_tqc.num_of_bits)
-                    in_tqc.policy = self._op_type_to_policy[operation.type]
-                    in_tqc.observer_algorithm = "minmax"
-                    if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
-                        in_tqc.channel_axis = 1 if operation.type == "ConvTranspose" else 0
-                        if operation.type == "Gemm" and operation.attributes.get("transB", 0) == 0:
-                            in_tqc.channel_axis = 1
-                    break
+            if operation.inputs[1].is_parameter:
+                in_tqc = base_quant_config.input_quantization_config[1]
+                in_tqc.num_of_bits = 8
+                in_tqc._quant_min, in_tqc._quant_max = _get_quant_min_max(in_tqc.num_of_bits)
+                in_tqc.policy = self._op_type_to_policy[operation.type]
+                in_tqc.observer_algorithm = "minmax"
+                if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
+                    in_tqc.channel_axis = 1 if operation.type == "ConvTranspose" else 0
+                    if operation.type == "Gemm" and operation.attributes.get("transB", 0) == 0:
+                        in_tqc.channel_axis = 1
 
             # if operation has bias
             if operation.num_of_input > 2 and operation.inputs[-1].is_parameter:
@@ -166,6 +164,10 @@ class XQuantizer(BaseQuantizer):
                 in_tqc.state = QuantizationStates.PASSIVE_INIT
                 if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
                     in_tqc.channel_axis = 0
+
+        elif operation.type in {"LayerNormalization", "InstanceNormalization", "BatchNormalization"}:
+            for in_tqc in base_quant_config.input_quantization_config[1:]:
+                in_tqc.state = QuantizationStates.FP32
 
         return base_quant_config
 
@@ -204,7 +206,9 @@ class XQuantizer(BaseQuantizer):
             # "Max",
             #
             "LayerNormalization",
+            "InstanceNormalization",
             #
+            "Gather",
             "Reshape",
             "Concat",
             "Split",
