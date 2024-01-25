@@ -207,6 +207,7 @@ class XQuantizer(BaseQuantizer):
             #
             "LayerNormalization",
             "InstanceNormalization",
+            "GroupNormalization",
             #
             "Gather",
             "Reshape",
@@ -273,7 +274,6 @@ class XQuantizer(BaseQuantizer):
             list_of_passes.append(
                 RuntimeBlockWiseCalibrationPass(
                     act_setting.calib_algorithm,
-                    calib_block_size=XQUANT_CONFIG.default_block_size,
                     block_wise=True,
                     fintune_epoch=XQUANT_CONFIG.fine_tune_epoch,
                     auto_finetune_level=self._auto_finetune_level.value,

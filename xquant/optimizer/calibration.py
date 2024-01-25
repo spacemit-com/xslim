@@ -28,7 +28,7 @@ from ppq.quantization.measure import (
 from ppq.quantization.optim import LearnedStepSizePass, AdaroundPass
 from ppq.utils.round import ppq_round_to_power_of_2
 from ..optimizer import PassiveParameterBakingPass
-from ..defs import COMPUTING_OP, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE
+from ..defs import COMPUTING_OP, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE, XQUANT_CONFIG
 
 
 class CalibrationBlock:
@@ -53,7 +53,7 @@ class CalibrationBlock:
 
 
 class CustomBlockBuilder(BlockBuilder):
-    def build(self, op: Operation, limit: int) -> TrainableBlock:
+    def build(self, op: Operation, max_limit: int, min_limit: int) -> TrainableBlock:
         def _find_multi_input_ep(op: Operation):
             # 如果当前节点后继节点存在多个，层序遍历寻找阻断节点
             least_first_queue = PriorityQueue()
@@ -105,9 +105,23 @@ class CustomBlockBuilder(BlockBuilder):
             else:
                 future_ep = _find_multi_input_ep(ep)
 
-            quantable_op_num = _find_computing_ops_in_route(sp, ep)
-            if future_ep is None or ((self.depth[future_ep] - self.depth[sp] > limit) and quantable_op_num > 0):
+            if future_ep is None:
                 return self.create_block(sp, ep)
+
+            current_depth = self.depth[ep] - self.depth[sp]
+            future_depth = self.depth[future_ep] - self.depth[sp]
+
+            if future_ep is not None and len(self.graph.get_downstream_operations(future_ep)) > 1:
+                # 如果下个节点产生分叉，分叉后产生超过限制的深度就不合并
+                next_future_ep = _find_multi_input_ep(future_ep)
+                next_future_depth = self.depth[next_future_ep] - self.depth[sp]
+                if next_future_depth > max_limit and current_depth > min_limit:
+                    return self.create_block(sp, ep)
+
+            if future_depth > max_limit:
+                quantable_op_num = _find_computing_ops_in_route(sp, ep)
+                if quantable_op_num > 0:
+                    return self.create_block(sp, ep)
             ep = future_ep
         return self.create_block(sp=sp, ep=ep)
 
@@ -149,14 +163,12 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         method: str = None,
         override: bool = False,
         calib_steps: int = 32,
-        calib_block_size: int = 8,
         block_wise: bool = True,
         fintune_epoch: int = 2,
         auto_finetune_level: int = 1,
     ) -> None:
         super().__init__(method, override, calib_steps)
         self.name = "XQuant Runtime Calibration Pass(BlockWise)"
-        self._calib_block_size = calib_block_size
         self._block_wise = block_wise
         self._fintune_epoch = fintune_epoch
         self._block_wise_loss = []
@@ -166,7 +178,6 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         self,
         graph: BaseGraph,
         executing_order: List[Operation],
-        blocksize: int = ppq_common.OPTIM_ADVOPT_GRAPH_MAXDEPTH,
     ) -> List[TrainableBlock]:
         visited_ops, blocks = set(), []
         block_builder = CustomBlockBuilder(graph=graph, topo_order=executing_order)
@@ -175,7 +186,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             # start from computing op
             if op in visited_ops:
                 continue
-            block = block_builder.build(op, blocksize)
+            block = block_builder.build(op, XQUANT_CONFIG.max_block_size, XQUANT_CONFIG.min_block_size)
             # by default blocks are exclusive from each other
             for op in block.rps:
                 visited_ops.add(op)
@@ -263,7 +274,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         extern_output_var_hooks = {}
 
         def __collect_bias(o_name: str, o_var: torch.Tensor, idx: int):
-            reduce_bias = self.collect_bias(o_var, bias_op_var_names[o_name].type)
+            reduce_bias = self.collect_bias(o_var, bias_op_var_names[o_name])
             if o_name not in bias_fp_cache:
                 bias_fp_cache[o_name] = []
             bias_fp_cache[o_name].append(reduce_bias)
@@ -381,17 +392,23 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
 
         return {"mse": mse_losses, "snr": snr_losses, "cosine": cosine, "mean": means}
 
-    def collect_bias(self, output: torch.Tensor, op_type: str) -> torch.Tensor:
+    def collect_bias(self, output: torch.Tensor, op: Operation) -> torch.Tensor:
         if output.ndim < 1:
             raise ValueError("Forward value has an unexpected dimension.")
-        if op_type in {"Conv", "ConvTranspose"}:
+        op_type = op.type
+        if op_type in {"Conv", "ConvTranspose", "InstanceNormalization", "GroupNormalization"}:
             # for convolution layer, bias always been added on axis 1
             reduce_dims = [i for i in range(output.ndim) if i != 1]
             return torch.mean(output, dim=reduce_dims).unsqueeze(0)
         elif op_type in {"Gemm"}:
-            # for convolution layer, bias always been added on axis -1
             reduce_dims = [i for i in range(output.ndim) if i != (output.ndim - 1)]
             return torch.mean(output, dim=(0,)).unsqueeze(0)
+        elif op_type in {"LayerNormalization"}:
+            axis = op.attributes.get("axis", -1)
+            if axis < 0:
+                axis = output.ndim + axis
+            reduce_dims = [i for i in range(axis)]
+            return torch.mean(output, dim=reduce_dims).unsqueeze(0)
         else:
             raise TypeError(f"Unsupported Operation type: {op_type}")
 
@@ -419,7 +436,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                 operations=operation_cache, feed_dict=inputs_feed, output_names=list(bias_op_var_names.keys())
             )
             for o_var, o_name in zip(outputs, output_names):
-                reduce_bias = self.collect_bias(o_var, bias_op_var_names[o_name].type)
+                reduce_bias = self.collect_bias(o_var, bias_op_var_names[o_name])
                 if o_name not in bias_quant_cache:
                     bias_quant_cache[o_name] = [reduce_bias]
                 else:
@@ -563,7 +580,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         topo_sort_ops = graph.topological_sort()
 
         if self._block_wise:
-            op_blocks = self.split_graph_into_blocks(graph, topo_sort_ops, self._calib_block_size)
+            op_blocks = self.split_graph_into_blocks(graph, topo_sort_ops)
             for block in tqdm(op_blocks, desc="Runtime Calibration(BlockWise)"):
                 self.calib_single_block(block, dataloader_cache, var_to_operations, executor, calib_step)
 

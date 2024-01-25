@@ -22,7 +22,7 @@ from ppq.quantization.observer import (
     range as ppq_range,
 )
 from ppq.quantization.measure import torch_KL_divergence
-from ..defs import xquant_debug, xquant_warning, OBSERVER_FLOATING_MSE_FETCHES
+from ..defs import xquant_debug, xquant_warning, OBSERVER_FLOATING_MSE_FETCHES, OBSERVER_MIN_SCALE_THRESHOLD
 
 
 class TorchPercentileObserverDecorator(TorchPercentileObserver):
@@ -276,7 +276,7 @@ class TorchXQuantObserver(TorchHistObserver):
         hist_bins: int,
         hist_scale: float,
         config: TensorQuantizationConfig,
-        scale_threshold: float = 2**-24,
+        scale_threshold: float = OBSERVER_MIN_SCALE_THRESHOLD,
     ) -> Tuple[float, int]:
         if config.policy.has_property(QuantizationProperty.ASYMMETRICAL) and config.policy.has_property(
             QuantizationProperty.PER_TENSOR

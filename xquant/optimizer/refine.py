@@ -19,7 +19,13 @@ from ppq.IR.search import SearchableGraph
 from ppq.executor import BaseGraphExecutor
 from ppq.quantization.qfunction import PPQuantFunction
 from ppq.quantization.observer import range as ppq_range
-from ..defs import XQUANT_CONFIG, PASSIVE_OPERATIONS, COMPUTING_OP
+from ..defs import (
+    XQUANT_CONFIG,
+    PASSIVE_OPERATIONS,
+    COMPUTING_OP,
+    OBSERVER_MIN_SCALE_THRESHOLD,
+    OBSERVER_SIGMOID_MAX_VALUE,
+)
 from ..xquant_setting import CustomQuantizationParameterSetting
 
 
@@ -64,7 +70,8 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
                 if (
                     in_var.is_parameter
                     and in_config.state == QuantizationStates.INITIAL
-                    and not in_config.policy.has_property(QuantizationProperty.PER_CHANNEL)
+                    and in_config.policy.has_property(QuantizationProperty.ASYMMETRICAL)
+                    and in_config.policy.has_property(QuantizationProperty.PER_TENSOR)
                 ):
                     max_range_val = float(in_var.value.max())
                     min_range_val = float(in_var.value.min())
@@ -83,11 +90,17 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
                             device=in_var.value.device,
                         )
                     elif min_range_val != max_range_val:
-                        scale, offset = ppq_range.minmax_to_scale_offset(min_range_val, max_range_val, in_config)
+                        scale, offset = ppq_range.minmax_to_scale_offset(
+                            min_range_val, max_range_val, in_config, OBSERVER_MIN_SCALE_THRESHOLD
+                        )
                     elif max_range_val > 0:
-                        scale, offset = ppq_range.minmax_to_scale_offset(0, max_range_val, in_config)
+                        scale, offset = ppq_range.minmax_to_scale_offset(
+                            0, max_range_val, in_config, OBSERVER_MIN_SCALE_THRESHOLD
+                        )
                     elif max_range_val < 0:
-                        scale, offset = ppq_range.minmax_to_scale_offset(max_range_val, 0, in_config)
+                        scale, offset = ppq_range.minmax_to_scale_offset(
+                            max_range_val, 0, in_config, OBSERVER_MIN_SCALE_THRESHOLD
+                        )
                     else:
                         continue
                     in_config.scale = convert_any_to_torch_tensor(scale)
@@ -121,7 +134,7 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
                 return
 
             if w_cfg.scale.numel() > 1 and operation.type in {"Conv"}:
-                zero_channel = torch.where(w_cfg.scale < 2**-24)[0]
+                zero_channel = torch.where(w_cfg.scale < OBSERVER_MIN_SCALE_THRESHOLD)[0]
                 if zero_channel.numel() > 0:
                     operation.inputs[1].value[zero_channel] = 0
                     store_state = w_cfg.state
@@ -250,9 +263,9 @@ class ActivationClipRefine(QuantizationOptimizationPass):
                             force_range_max = (1.0 - beta) / alpha
 
                         elif check_sigmoid or (check_swish and len(var.dest_ops) == 2):
-                            force_range_min = -10.0
+                            force_range_min = -OBSERVER_SIGMOID_MAX_VALUE
                             if check_sigmoid:
-                                force_range_max = 10.0
+                                force_range_max = OBSERVER_SIGMOID_MAX_VALUE
 
                         elif check_hardswish and len(var.dest_ops) == 2:
                             dest_op_type = [dest_op.type for dest_op in var.dest_ops]

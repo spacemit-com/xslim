@@ -168,9 +168,9 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
         if post_loss > pre_loss:
             for cfg, delegator in delegators.items():
                 delegator.withdraw()
-            xquant_debug(f"Tuning Finished: loss no change and withdraw.\n")
+            xquant_info(f"Tuning Finished: loss no change and withdraw.\n")
         else:
-            xquant_debug(f"Tuning Finished: ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f})\n")
+            xquant_info(f"Tuning Finished: ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f})\n")
 
         for cfg, delegator in delegators.items():
             delegator.finalize()

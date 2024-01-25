@@ -11,7 +11,9 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.cuda_support = torch.cuda.is_available()
 
-        self.default_block_size = 8
+        self.min_block_size = 4
+
+        self.max_block_size = 16
 
         self.fine_tune_epoch = 2
 
@@ -41,9 +43,20 @@ PASSIVE_OPERATIONS = {
 
 COMPUTING_OP = {"Conv", "Gemm", "ConvTranspose", "MatMul"}
 
-BIAS_CORRECTION_INTERST_TYPE = {"Conv", "Gemm", "ConvTranspose"}
+BIAS_CORRECTION_INTERST_TYPE = {
+    "Conv",
+    "Gemm",
+    "ConvTranspose",
+    "LayerNormalization",
+    "InstanceNormalization",
+    "GroupNormalization",
+}
 
 OBSERVER_FLOATING_MSE_FETCHES = 4096
+
+OBSERVER_MIN_SCALE_THRESHOLD = 2**-24
+
+OBSERVER_SIGMOID_MAX_VALUE = 10
 
 
 class AutoFinetuneLevel(Enum):
