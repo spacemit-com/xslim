@@ -46,16 +46,22 @@ class ModelParameterSetting(SettingSerialize):
         self.skip_onnxsim: bool = False
 
     def check(self, qsetting):
-        if not os.path.exists(self.onnx_model):
-            raise FileExistsError(self.onnx_model)
+        # if not os.path.exists(self.onnx_model):
+        #    raise FileExistsError(self.onnx_model)
 
         if self.working_dir is None:
-            self.working_dir = os.path.dirname(self.onnx_model)
+            if isinstance(self.onnx_model, str) and os.path.exists(self.onnx_model):
+                self.working_dir = os.path.dirname(self.onnx_model)
+            else:
+                self.working_dir = os.path.join(os.curdir, "temp")
             xquant_info("Not set working_dir, deatults to {}.".format(self.working_dir))
 
         if self.output_prefix is None:
-            model_name = os.path.splitext(os.path.basename(self.onnx_model))[0]
-            self.output_prefix = "{}.q".format(model_name)
+            if isinstance(self.onnx_model, str) and os.path.exists(self.onnx_model):
+                model_name = os.path.splitext(os.path.basename(self.onnx_model))[0]
+                self.output_prefix = "{}.q".format(model_name)
+            else:
+                self.output_prefix = "xquant.q"
             xquant_info("Not set output_prefix, deatults to {}.".format(self.output_prefix))
 
 

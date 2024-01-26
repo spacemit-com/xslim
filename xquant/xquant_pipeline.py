@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Union, Dict, Sequence
+from typing import Union, Dict, Sequence, Optional
 from collections import OrderedDict
 import json
 import torch
@@ -69,8 +69,16 @@ def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
     return opset_dict
 
 
-def xquant_load_onnx_graph(file: str, sim_en: bool = True, truncate_var_name: Sequence[str] = []):
-    onnx_model = onnx.load(file)
+def xquant_load_onnx_graph(
+    file_or_model: Union[str, onnx.ModelProto], sim_en: bool = True, truncate_var_name: Sequence[str] = []
+):
+    if isinstance(file_or_model, onnx.ModelProto):
+        onnx_model = file_or_model
+    elif isinstance(file_or_model, str):
+        onnx_model = onnx.load(file_or_model)
+    else:
+        raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
+
     onnx_model.graph.ClearField("value_info")
     for o_var in onnx_model.graph.output:
         o_var.type.tensor_type.ClearField("shape")
@@ -164,12 +172,55 @@ def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
     return XQuantSettingFactory.from_json(config_dict)
 
 
-def quantize_onnx_model(path_or_config: Union[str, dict]):
+def quantize_onnx_model(
+    path_or_config: Union[str, dict],
+    input_onnx_model_or_path: Optional[Union[str, onnx.ModelProto]] = None,
+    output_path: Optional[str] = None,
+) -> onnx.ModelProto:
+    """
+    xquant model quantize api
+
+    Args:
+        path_or_config (Union[str, dict]): xquant config json file or config dict
+        input_onnx_model_or_path (Optional[Union[str, onnx.ModelProto]], optional): input onnx model proto or path. Defaults to None.
+        output_path (Optional[str], optional): output model path or output model dir. Defaults to None.
+
+    Raises:
+        RuntimeError: maybe set input_onnx_model_or_path error
+
+    Returns:
+        onnx.ModelProto: output model onnx proto
+    """
     time_start = time.time()
     config_setting = parse_xquant_config(path_or_config)
-    data_set = XQuantDataset(config_setting.calibration_parameters)
 
     model_path = config_setting.model_parameters.onnx_model
+
+    if input_onnx_model_or_path is not None:
+        xquant_info("using api input onnx model {}.".format(input_onnx_model_or_path))
+        if isinstance(input_onnx_model_or_path, onnx.ModelProto):
+            model_path = input_onnx_model_or_path
+        elif os.path.exists(input_onnx_model_or_path):
+            model_path = input_onnx_model_or_path
+            config_setting.model_parameters.output_prefix = os.path.splitext(
+                os.path.basename(input_onnx_model_or_path)
+            )[0]
+        else:
+            raise RuntimeError("input_onnx_model_or_path set error.")
+
+    if isinstance(output_path, str):
+        xquant_info("using api output path {}.".format(output_path))
+        if os.path.isdir(output_path):
+            config_setting.model_parameters.working_dir = output_path
+        elif output_path[-5:] == ".onnx":
+            config_setting.model_parameters.working_dir = os.path.dirname(output_path)
+            config_setting.model_parameters.output_prefix = os.path.splitext(os.path.basename(output_path))[0]
+        else:
+            config_setting.model_parameters.working_dir = output_path
+
+    config_setting.model_parameters.working_dir = os.path.realpath(config_setting.model_parameters.working_dir)
+
+    data_set = XQuantDataset(config_setting.calibration_parameters)
     output_prefix = config_setting.model_parameters.output_prefix
     working_dir = config_setting.model_parameters.working_dir
     calibration_step = config_setting.calibration_parameters.calibration_step
@@ -274,4 +325,4 @@ def quantize_onnx_model(path_or_config: Union[str, dict]):
     onnx.save(quant_onnx_model, os.path.join(working_dir, "{}.onnx".format(output_prefix)))
 
     xquant_info("quantization eplased time {:.2f} s".format(time.time() - time_start))
-    return quantizer._graph
+    return quant_onnx_model
