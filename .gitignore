@@ -10,3 +10,5 @@ __pycache__/
 /build
 /dist
 /xquant.egg-info
+/samples/temp
+/tests/output

@@ -9,16 +9,20 @@ import onnx
 import time
 import copy
 import onnxsim
-import onnx_graphsurgeon as osg
-from ppq import TargetPlatform, BaseQuantizer, BaseGraph
-from ppq.executor import TorchExecutor
-from ppq.scheduler import DISPATCHER_TABLE, GraphDispatcher
-from .defs import xquant_info, xquant_warning, XQUANT_CONFIG
+from xquant.logger import logger
+from .ppq_decorator import (
+    TargetPlatform,
+    BaseGraph,
+    TorchExecutor,
+    DISPATCHER_TABLE,
+    GraphDispatcher,
+    ONNXRUNTIMExporter,
+    OnnxParser,
+)
+from .defs import XQUANT_CONFIG
 from .calibration_helper import XQuantDataset, CalibrationCollect
 from .optimizer import GraphLegalized
 from .analyse import statistical_analyse
-from .ppq_decorator.onnxruntime_exporter import ONNXRUNTIMExporter
-from .ppq_decorator.onnx_parser import OnnxParserDecorator
 from .xquant_setting import XQuantSettingFactory, XQuantSetting
 from .quantizer import XQuantizer
 from .onnx_graph_helper import format_onnx_model, truncate_onnx_model, merge_onnx_model
@@ -40,7 +44,6 @@ def dispatch_graph(graph: BaseGraph, dispatcher: Union[str, GraphDispatcher] = "
         dispatcher = dispatcher
 
     assert isinstance(dispatcher, GraphDispatcher)
-    assert isinstance(quantizer, BaseQuantizer)
     quant_types = quantizer.quant_operation_types
     dispatching_table = dispatcher.dispatch(
         graph=graph,
@@ -72,12 +75,13 @@ def xquant_load_onnx_graph(
     onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
 
     if sim_en:
+        logger.info("simplify onnx model...")
         try:
             onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
         except Exception as e:
-            xquant_warning("simplify onnx model error and skip.")
+            logger.warning("simplify onnx model error and skip.")
 
-    graph = OnnxParserDecorator().build(onnx_model)
+    graph = OnnxParser().build(onnx_model)
     return graph, truncate_left_graph, truncate_vars
 
 
@@ -115,7 +119,7 @@ def quantize_onnx_model(
     model_path = config_setting.model_parameters.onnx_model
 
     if input_onnx_model_or_path is not None:
-        xquant_info("using api input onnx model {}.".format(input_onnx_model_or_path))
+        logger.info("using api input onnx model {}.".format(input_onnx_model_or_path))
         if isinstance(input_onnx_model_or_path, onnx.ModelProto):
             model_path = input_onnx_model_or_path
         elif os.path.exists(input_onnx_model_or_path):
@@ -127,7 +131,7 @@ def quantize_onnx_model(
             raise RuntimeError("input_onnx_model_or_path set error.")
 
     if isinstance(output_path, str):
-        xquant_info("using api output path {}.".format(output_path))
+        logger.info("using api output path {}.".format(output_path))
         if os.path.isdir(output_path):
             config_setting.model_parameters.working_dir = output_path
         elif output_path[-5:] == ".onnx":
@@ -146,7 +150,7 @@ def quantize_onnx_model(
     input_parametres = config_setting.calibration_parameters.input_parametres
 
     if not os.path.exists(working_dir):
-        xquant_info("{} not existed and make new one.".format(working_dir))
+        logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
 
     inputs_list = []
@@ -200,5 +204,5 @@ def quantize_onnx_model(
 
     onnx.save(quant_onnx_model, os.path.join(working_dir, "{}.onnx".format(output_prefix)))
 
-    xquant_info("quantization eplased time {:.2f} s".format(time.time() - time_start))
+    logger.info("quantization eplased time {:.2f} s".format(time.time() - time_start))
     return quant_onnx_model

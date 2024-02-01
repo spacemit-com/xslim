@@ -4,12 +4,13 @@ from typing import Callable, Dict, Iterator, List, Optional
 from collections import OrderedDict
 import torch
 from pandas import DataFrame
-from ppq.executor import RuntimeHook, TorchExecutor
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
-from ppq.quantization.measure import torch_snr_error, torch_cosine_similarity, torch_mean_square_error
-from ppq.utils.fetch import batch_random_fetch, tensor_random_fetch, generate_torch_indexer
+from xquant.logger import logger
+from ..ppq_decorator.ppq.executor import RuntimeHook, TorchExecutor
+from ..ppq_decorator.ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
+from ..ppq_decorator.ppq.quantization.measure import torch_snr_error, torch_cosine_similarity, torch_mean_square_error
+from ..ppq_decorator.ppq.utils.fetch import batch_random_fetch, tensor_random_fetch, generate_torch_indexer
 from tqdm import tqdm
-from ..defs import PASSIVE_OPERATIONS, xquant_info, xquant_warning
+from ..defs import PASSIVE_OPERATIONS
 
 
 class DetailedRecorder(RuntimeHook):
@@ -101,7 +102,7 @@ def statistical_analyse(
         if isinstance(operation, QuantableOperation) and operation.type not in PASSIVE_OPERATIONS:
             interested_op.append(operation)
     if len(interested_op) == 0:
-        xquant_warning("No analyzable operators were found.")
+        logger.warning("No analyzable operators were found.")
 
     # set up all hooks.
     hooks, caches = OrderedDict(), OrderedDict()
@@ -225,6 +226,6 @@ def statistical_analyse(
     report_info_df = DataFrame(report_info_list, columns=report_index)
 
     if isinstance(report_path, str):
-        xquant_info("export quantization statistical results file to {}".format(report_path))
+        logger.info("export quantization statistical results file to {}".format(report_path))
         report_info_df.to_markdown(report_path)
     return report_info_list

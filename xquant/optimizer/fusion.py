@@ -2,15 +2,18 @@
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
-from ppq.core import QuantizationStates, ppq_warning, TargetPlatform
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
-from ppq.quantization.optim import (
-    QuantizationOptimizationPipeline,
+from xquant.logger import logger
+from ..ppq_decorator import (
+    QuantizationStates,
+    TargetPlatform,
+    BaseGraph,
+    Operation,
+    QuantableOperation,
+    Variable,
     QuantizationOptimizationPass,
-    RuntimeCalibrationPass,
+    BaseGraphExecutor,
+    SearchableGraph,
 )
-from ppq.IR.search import SearchableGraph
-from ppq.executor import BaseGraphExecutor
 from ..defs import XQUANT_CONFIG, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE
 
 
@@ -167,14 +170,14 @@ class HardSwishFusionPass(QuantizationOptimizationPass):
 
         for pattern in patterns:
             if any([not isinstance(op, QuantableOperation) for op in pattern]):
-                ppq_warning(
+                logger.warning(
                     f"There is a pattern of swish activation in your network start from {pattern[0]}, "
                     "however part of your swish activation is not quantable, "
                     "so that graph fusion can not merge their quantization configuration."
                 )
                 continue
             if any([op.platform != pattern[0].platform for op in pattern]):
-                ppq_warning(
+                logger.warning(
                     f"There is a pattern of swish activation in your network start from {pattern[0]}, "
                     "however part of your swish activation is not quantable, "
                     "so that graph fusion can not merge their quantization configuration."
@@ -213,14 +216,14 @@ class SwishFusionPass(QuantizationOptimizationPass):
 
         for pattern in patterns:
             if any([not isinstance(op, QuantableOperation) for op in pattern]):
-                ppq_warning(
+                logger.warning(
                     f"There is a pattern of swish activation in your network start from {pattern[0]}, "
                     "however part of your swish activation is not quantable, "
                     "so that graph fusion can not merge their quantization configuration."
                 )
                 continue
             if any([op.platform != pattern[0].platform for op in pattern]):
-                ppq_warning(
+                logger.warning(
                     f"There is a pattern of swish activation in your network start from {pattern[0]}, "
                     "however part of your swish activation is not quantable, "
                     "so that graph fusion can not merge their quantization configuration."
@@ -271,7 +274,7 @@ class ComputingFusionPass(QuantizationOptimizationPass):
                 len(graph.get_downstream_operations(computing_op)) != 1
                 or len(graph.get_upstream_operations(mul_op)) != 1
             ):
-                ppq_warning(
+                logger.warning(
                     f"PPQ can not merge operation {computing_op.name} and {mul_op.name}, "
                     "this is not suppose to happen with your network, "
                     "network with batchnorm inside might not be able to quantize and deploy."

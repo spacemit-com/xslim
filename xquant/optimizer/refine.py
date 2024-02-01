@@ -3,22 +3,21 @@
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
 import math
-from ppq.core import (
+from ..ppq_decorator import (
     QuantizationProperty,
     QuantizationStates,
     empty_ppq_cache,
     QuantizationVisibility,
     convert_any_to_torch_tensor,
-    common as ppq_common,
-)
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
-from ppq.quantization.optim import (
+    ppq_common,
+    BaseGraph,
+    Operation,
+    QuantableOperation,
+    Variable,
     QuantizationOptimizationPass,
+    SearchableGraph,
+    minmax_to_scale_offset,
 )
-from ppq.IR.search import SearchableGraph
-from ppq.executor import BaseGraphExecutor
-from ppq.quantization.qfunction import PPQuantFunction
-from ppq.quantization.observer import range as ppq_range
 from ..defs import (
     XQUANT_CONFIG,
     PASSIVE_OPERATIONS,
@@ -26,7 +25,6 @@ from ..defs import (
     OBSERVER_MIN_SCALE_THRESHOLD,
     OBSERVER_SIGMOID_MAX_VALUE,
 )
-from ..xquant_setting import CustomQuantizationParameterSetting
 
 
 class PassiveParameterBakingPass(QuantizationOptimizationPass):
@@ -90,15 +88,15 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
                             device=in_var.value.device,
                         )
                     elif min_range_val != max_range_val:
-                        scale, offset = ppq_range.minmax_to_scale_offset(
+                        scale, offset = minmax_to_scale_offset(
                             min_range_val, max_range_val, in_config, OBSERVER_MIN_SCALE_THRESHOLD
                         )
                     elif max_range_val > 0:
-                        scale, offset = ppq_range.minmax_to_scale_offset(
+                        scale, offset = minmax_to_scale_offset(
                             0, max_range_val, in_config, OBSERVER_MIN_SCALE_THRESHOLD
                         )
                     elif max_range_val < 0:
-                        scale, offset = ppq_range.minmax_to_scale_offset(
+                        scale, offset = minmax_to_scale_offset(
                             max_range_val, 0, in_config, OBSERVER_MIN_SCALE_THRESHOLD
                         )
                     else:
@@ -286,7 +284,7 @@ class ActivationClipRefine(QuantizationOptimizationPass):
 
 class QuantizeConfigRefinePass(QuantizationOptimizationPass):
     def __init__(
-        self, precision_level: int = 0, custom_setting: Sequence[CustomQuantizationParameterSetting] = None
+        self, precision_level: int = 0, custom_setting: Sequence["CustomQuantizationParameterSetting"] = None
     ) -> None:
         super().__init__(name="XQuant QuantizeConfigRefine Pass")
         self._precision_level = precision_level
@@ -329,7 +327,7 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
                 if tqc.dominated_by is tqc and tqc.num_of_bits != self._max_bits:
                     tqc.state = QuantizationStates.FP32
 
-    def custom_tqc_set(self, graph: BaseGraph, custom_tqc: CustomQuantizationParameterSetting):
+    def custom_tqc_set(self, graph: BaseGraph, custom_tqc: "CustomQuantizationParameterSetting"):
         var_dict = graph.variables
         input_names = custom_tqc.input_names
         output_names = custom_tqc.output_names

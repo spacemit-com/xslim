@@ -6,8 +6,8 @@ import json
 import copy
 import os
 import onnx
-from ppq.core import common as ppq_common
-from .defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, xquant_warning, xquant_info
+from xquant.logger import logger
+from .defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel
 
 
 class SettingSerialize:
@@ -54,7 +54,7 @@ class ModelParameterSetting(SettingSerialize):
                 self.working_dir = os.path.dirname(self.onnx_model)
             else:
                 self.working_dir = os.path.join(os.curdir, "temp")
-            xquant_info("Not set working_dir, deatults to {}.".format(self.working_dir))
+            logger.info("Not set working_dir, deatults to {}.".format(self.working_dir))
 
         if self.output_prefix is None:
             if isinstance(self.onnx_model, str) and os.path.exists(self.onnx_model):
@@ -62,7 +62,7 @@ class ModelParameterSetting(SettingSerialize):
                 self.output_prefix = "{}.q".format(model_name)
             else:
                 self.output_prefix = "xquant.q"
-            xquant_info("Not set output_prefix, deatults to {}.".format(self.output_prefix))
+            logger.info("Not set output_prefix, deatults to {}.".format(self.output_prefix))
 
 
 class InputParameterSetting(SettingSerialize):
@@ -128,9 +128,9 @@ class QuantizationParameterSetting(SettingSerialize):
 
     def check(self, qsetting):
         if self.precision_level.value > PrecisionLevel.BIT_8.value:
-            xquant_info("set higher precision level.")
+            logger.info("set higher precision level.")
         if self.finetune_level.value > AutoFinetuneLevel.LEVEL_1.value:
-            xquant_info("set higher finetune level.")
+            logger.info("set higher finetune level.")
 
 
 class CalibrationParameterSetting(SettingSerialize):
@@ -153,11 +153,11 @@ class CalibrationParameterSetting(SettingSerialize):
 
     def check(self, qsetting):
         if self.calibration_device == "cuda" and not XQUANT_CONFIG.cuda_support:
-            xquant_warning("Specifies that cuda is used but not detected. Turn to cpu.")
+            logger.warning("Specifies that cuda is used but not detected. Turn to cpu.")
             self.calibration_device = "cpu"
 
         if self.calibration_step > 1000 or self.calibration_step < 10:
-            xquant_warning("Specifies that calibration_step is too large or too small, it should be in [10, 1000].")
+            logger.warning("Specifies that calibration_step is too large or too small, it should be in [10, 1000].")
 
         assert len(self.input_parametres) > 0, "Calibration input_parametres setting not detected."
 
@@ -165,7 +165,7 @@ class CalibrationParameterSetting(SettingSerialize):
             raise NotImplementedError("calibration_type {} not implemented yet.".format(self.calibration_type))
 
         if self.calibration_type != "default":
-            xquant_info("set calibration_type {}.".format(self.calibration_type))
+            logger.info("set calibration_type {}.".format(self.calibration_type))
 
         if isinstance(qsetting, XQuantSetting):
             onnx_model_path = qsetting.model_parameters.onnx_model

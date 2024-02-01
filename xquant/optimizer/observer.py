@@ -6,80 +6,23 @@ import functools
 import time
 import math
 import numpy as np
-from ppq.core import (
+from xquant.logger import logger
+from ..ppq_decorator import (
+    Variable,
+    TorchMinMaxObserver,
+    minmax_to_scale_offset,
     TensorQuantizationConfig,
     QuantizationProperty,
     QuantizationStates,
     ppq_quant_param_computing_function,
-    common as ppq_common,
-    convert_any_to_numpy,
+    ppq_common,
+    torch_KL_divergence,
+    ppq_observer,
 )
-from ppq.IR import Variable
-from ppq.quantization.observer import (
-    TorchHistObserver,
-    TorchPercentileObserver,
-    TorchMinMaxObserver,
-    range as ppq_range,
-)
-from ppq.quantization.measure import torch_KL_divergence
-from ..defs import xquant_debug, xquant_warning, OBSERVER_FLOATING_MSE_FETCHES, OBSERVER_MIN_SCALE_THRESHOLD
+from ..defs import OBSERVER_FLOATING_MSE_FETCHES, OBSERVER_MIN_SCALE_THRESHOLD
 
 
-class TorchPercentileObserverDecorator(TorchPercentileObserver):
-    def __init__(self, watch_on: Variable, quant_cfg: TensorQuantizationConfig):
-        super().__init__(watch_on, quant_cfg)
-        self._value_device = "cpu"
-        self._none_value_detected = False
-
-    @torch.no_grad()
-    def observe(self, value: torch.Tensor):
-        if isinstance(value, torch.Tensor):
-            self._value_device = value.device.type
-
-        if value is None or value.numel() == 0:
-            self._none_value_detected = True
-            return
-        return super().observe(value)
-
-    def render_quantization_config(self):
-        if self._none_value_detected:
-            xquant_warning("None value detected.")
-            self._quant_cfg.scale = torch.tensor([1.0], dtype=torch.float32, device=self._value_device).squeeze(0)
-            self._quant_cfg.offset = torch.tensor([0], dtype=torch.float32, device=self._value_device).squeeze(0)
-            self._quant_cfg.state = QuantizationStates.ACTIVATED
-            self._quant_cfg.detail["NONE_VALUE"] = True
-            return
-        super().render_quantization_config()
-
-
-class TorchMinMaxObserverObserverDecorator(TorchMinMaxObserver):
-    def __init__(self, watch_on: Variable, quant_cfg: TensorQuantizationConfig):
-        super().__init__(watch_on, quant_cfg)
-        self._value_device = "cpu"
-        self._none_value_detected = False
-
-    @torch.no_grad()
-    def observe(self, value: torch.Tensor):
-        if isinstance(value, torch.Tensor):
-            self._value_device = value.device.type
-
-        if value is None or value.numel() == 0:
-            self._none_value_detected = True
-            return
-        return super().observe(value)
-
-    def render_quantization_config(self):
-        if self._none_value_detected:
-            xquant_warning("None value detected.")
-            self._quant_cfg.scale = torch.tensor([1.0], dtype=torch.float32, device=self._value_device).squeeze(0)
-            self._quant_cfg.offset = torch.tensor([0], dtype=torch.float32, device=self._value_device).squeeze(0)
-            self._quant_cfg.state = QuantizationStates.ACTIVATED
-            self._quant_cfg.detail["NONE_VALUE"] = True
-            return
-        super().render_quantization_config()
-
-
-class TorchXQuantObserver(TorchHistObserver):
+class TorchXQuantObserver(TorchMinMaxObserver):
     def __init__(
         self,
         watch_on: Variable,
@@ -87,7 +30,13 @@ class TorchXQuantObserver(TorchHistObserver):
         hist_bins: int = OBSERVER_FLOATING_MSE_FETCHES,
         single_alg: str = None,
     ):
-        super().__init__(watch_on, quant_cfg)
+        self._phase = "Detecting Minmax"
+        self._hist = None
+        self._hist_scale = None
+        self._min = None
+        self._max = None
+        self._hist_bins = hist_bins
+        self._quant_cfg = quant_cfg
         if not ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE in quant_cfg.detail:
             self._percentile = ppq_common.OBSERVER_PERCENTILE
         else:
@@ -99,7 +48,6 @@ class TorchXQuantObserver(TorchHistObserver):
             self._scale_threshold = ppq_common.OBSERVER_MIN_SCALE
 
         self._single_alg = single_alg
-        self._hist_bins = hist_bins
         self._channel_min_max = []
 
         self._force_range_min = -(2**31)
@@ -174,7 +122,7 @@ class TorchXQuantObserver(TorchHistObserver):
             return
 
         if self._none_value_detected:
-            xquant_warning("None value detected.")
+            logger.warning("None value detected at var {}".format(self._watch_on.name))
             self._quant_cfg.scale = torch.tensor([1.0], dtype=torch.float32, device=self._value_device).squeeze(0)
             self._quant_cfg.offset = torch.tensor([0], dtype=torch.float32, device=self._value_device).squeeze(0)
             self._quant_cfg.state = QuantizationStates.ACTIVATED
@@ -290,7 +238,7 @@ class TorchXQuantObserver(TorchHistObserver):
             offset_step = hist_bins // num_of_quant_levels * 2
             range_step = hist_bins // num_of_quant_levels * 2
 
-            percentile_scale, percentile_offset = ppq_range.minmax_to_scale_offset(
+            percentile_scale, percentile_offset = minmax_to_scale_offset(
                 max(self._force_range_min, self._percentile_min_val),
                 min(self._force_range_max, self._percentile_max_val),
                 config,
@@ -336,9 +284,7 @@ class TorchXQuantObserver(TorchHistObserver):
                 ):
                     min_range_val = max(self._force_range_min, self._full_min_val + bin_start * hist_scale)
                     max_range_val = min(self._force_range_max, min_range_val + bin_range * hist_scale)
-                    scale, offset = ppq_range.minmax_to_scale_offset(
-                        min_range_val, max_range_val, config, self._scale_threshold
-                    )
+                    scale, offset = minmax_to_scale_offset(min_range_val, max_range_val, config, self._scale_threshold)
 
                     kl_loss = self.compute_kl_loss(histogram, bin_start, bin_range, num_of_quant_levels, hist_sum)
                     mse_loss = self.compute_mse_loss(
@@ -380,17 +326,9 @@ class TorchXQuantObserver(TorchHistObserver):
                 scale = losses[0]["scale"]
                 offset = losses[0]["offset"]
 
-            xquant_debug("observer render time cost {}".format(time.time() - t_start))
+            logger.debug("observer render time cost {}".format(time.time() - t_start))
 
             return scale, offset
-
-        elif config.policy.has_property(QuantizationProperty.PER_CHANNEL):
-            raise PermissionError("XQuant observer do not support PER_CHANNEL policy now, please wait.")
-
-        elif config.policy.has_property(QuantizationProperty.SYMMETRICAL) and config.policy.has_property(
-            QuantizationProperty.PER_TENSOR
-        ):
-            return super().hist_to_scale_offset(histogram, hist_bins, hist_scale, config, scale_threshold)
 
         raise Exception("Oops, there might be some mistakes.")
 
@@ -413,3 +351,8 @@ class TorchXQuantKLObserver(TorchXQuantObserver):
         hist_bins: int = ppq_common.OBSERVER_FLOATING_MSE_FETCHES,
     ):
         super().__init__(watch_on, quant_cfg, hist_bins, "kl")
+
+
+ppq_observer.OBSERVER_TABLE["kl"] = TorchXQuantKLObserver
+ppq_observer.OBSERVER_TABLE["mse"] = TorchXQuantMSEObserver
+ppq_observer.OBSERVER_TABLE["xquant"] = TorchXQuantObserver

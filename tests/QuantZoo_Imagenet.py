@@ -141,14 +141,11 @@ import argparse
 from tqdm import tqdm
 import torchvision.datasets as datasets
 from torch.utils.data.dataloader import DataLoader
-from ppq.api import load_onnx_graph
 import xquant
-from xquant import xquant_info
+from xquant.logger import logger
+from xquant.ppq_decorator import load_onnx_graph, TorchExecutor, BaseGraph
 from xquant.calibration_helper import PTImagenetPreprocess, ImagenetPreprocess
-from ppq.api import export_ppq_graph
-from ppq.executor.torch import TorchExecutor
 from torch.utils.data.dataset import Subset
-from ppq.IR import BaseGraph
 import torchvision.transforms as transforms
 
 parser = argparse.ArgumentParser()
@@ -164,7 +161,7 @@ parser.add_argument(
     default="output",
     help="Path to the Output directory.",
 )
-parser.add_argument("--filter", required=False, default="resnet18", help="model name filter.")
+parser.add_argument("--filter", required=False, default="resnext50", help="model name filter.")
 parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
 parser.add_argument("--device", required=False, default="cuda", help="device.")
 parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
@@ -418,12 +415,12 @@ if __name__ == "__main__":
         if len(MODEL_FILTER) > 0:
             if model not in MODEL_FILTER:
                 continue
-        xquant_info(f"Ready to run quant benchmark on {model}")
+        logger.info(f"Ready to run quant benchmark on {model}")
 
         input_model_path = os.path.join(model_dir, model, model + ".onnx")
 
         opt_model_path = input_model_path
-        float_graph = load_onnx_graph(onnx_import_file=input_model_path)
+        float_graph = load_onnx_graph(input_model_path)
 
         xquant.GraphLegalized(float_graph)()
         mean_value = config.get("mean_value", [123.675, 116.28, 103.53])
@@ -478,7 +475,7 @@ if __name__ == "__main__":
             quantized_graph = xquant.quantize_onnx_model(demo_json)
 
         if args.eval_fp:
-            xquant_info(f"Evaluate float Model Accurarcy....")
+            logger.info(f"Evaluate float Model Accurarcy....")
             # evaluation
             acc = evaluate_ppq_module_with_imagenet(
                 model=float_graph,
@@ -487,14 +484,14 @@ if __name__ == "__main__":
                 device=collect_device,
                 verbose=False,
             )
-            xquant_info(f"Model Classify Accurarcy = {acc: .4f}%")
+            logger.info(f"Model Classify Accurarcy = {acc: .4f}%")
 
         output_model_path = os.path.join(output_dir, "{}.onnx".format(demo_json["model_parameters"]["output_prefix"]))
 
-        if args.eval_quant:
-            quantized_export_graph = load_onnx_graph(onnx_import_file=output_model_path)
+        if True:  # args.eval_quant:
+            quantized_export_graph = load_onnx_graph(output_model_path)
 
-            xquant_info(f"Evaluate quantized Model Accurarcy....")
+            logger.info(f"Evaluate quantized Model Accurarcy....")
             # evaluation
             acc = evaluate_ppq_module_with_imagenet(
                 model=quantized_export_graph,
@@ -503,4 +500,4 @@ if __name__ == "__main__":
                 device=collect_device,
                 verbose=False,
             )
-            xquant_info(f"Model Classify Accurarcy = {acc: .4f}%")
+            logger.info(f"Model Classify Accurarcy = {acc: .4f}%")

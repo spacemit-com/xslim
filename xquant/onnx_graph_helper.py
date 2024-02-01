@@ -5,7 +5,7 @@ from collections import OrderedDict, deque
 import copy
 import onnx_graphsurgeon as osg
 import onnx
-from .defs import xquant_info, xquant_warning
+from xquant.logger import logger
 
 
 def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
@@ -41,7 +41,7 @@ def format_onnx_model(onnx_model: onnx.ModelProto, min_onnx_version: int = 13) -
     opset_dict = get_onnx_opset(onnx_model)
     ai_onnx_version = opset_dict.get("ai.onnx", min_onnx_version)
     if ai_onnx_version < min_onnx_version:
-        xquant_warning("convert ai.onnx version {} to {}...".format(ai_onnx_version, min_onnx_version))
+        logger.warning("convert ai.onnx version {} to {}...".format(ai_onnx_version, min_onnx_version))
         onnx_model = onnx.version_converter.convert_version(onnx_model, min_onnx_version)
 
     return onnx_model

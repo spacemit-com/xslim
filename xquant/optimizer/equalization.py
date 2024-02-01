@@ -6,18 +6,49 @@ from enum import Enum
 import torch
 import numpy as np
 from tqdm import tqdm
-from ppq.core import empty_ppq_cache
-from ppq.executor.torch import TorchExecutor
-from ppq.IR import BaseGraph, Operation, QuantableOperation
-from ppq.executor import BaseGraphExecutor
-from ppq.quantization.algorithm import equalization as equalization_alg
-from ppq.quantization.optim.equalization import (
+from ..ppq_decorator import (
+    empty_ppq_cache,
+    TorchExecutor,
+    BaseGraph,
+    Operation,
+    QuantableOperation,
+    BaseGraphExecutor,
     LayerwiseEqualizationPass,
-    EQUALIZATION_OPERATION_TYPE,
 )
 
+EQUALIZATION_OPERATION_TYPE = {"Conv", "Gemm", "ConvTranspose"}
 
-class CustomLayerwiseEqualizationPass(LayerwiseEqualizationPass):
+
+class XQuantLayerwiseEqualizationPass(LayerwiseEqualizationPass):
+    def __init__(
+        self,
+        iterations: int,
+        value_threshold: float = 0.5,
+        including_weight: bool = True,
+        weight_multiplier: float = 1.0,
+        including_bias: bool = False,
+        including_act: bool = False,
+        bias_multiplier: float = 0.5,
+        act_multiplier: float = 0.5,
+        interested_layers: List[str] = None,
+        optimize_level: int = 2,
+        verbose: bool = False,
+    ) -> None:
+        super().__init__(
+            iterations,
+            value_threshold,
+            including_weight,
+            weight_multiplier,
+            including_bias,
+            including_act,
+            bias_multiplier,
+            act_multiplier,
+            interested_layers,
+            optimize_level,
+            verbose,
+        )
+        self.name = "XQuant LayerwiseEqualizationPass"
+
     def collect_activations(
         self,
         graph: BaseGraph,
@@ -79,6 +110,8 @@ class CustomLayerwiseEqualizationPass(LayerwiseEqualizationPass):
 
         pairs = self.find_equalization_pair(graph=graph, interested_operations=interested_operations)
 
+        act_calib_steps = max(int(len(dataloader) / 5), 32)
+
         for iter_times in tqdm(range(self.iterations), desc="Layerwise Equalization", total=self.iterations):
             if self.including_act:
                 activations = self.collect_activations(
@@ -87,7 +120,7 @@ class CustomLayerwiseEqualizationPass(LayerwiseEqualizationPass):
                     dataloader=dataloader,
                     collate_fn=collate_fn,
                     operations=interested_operations,
-                    steps=50,
+                    steps=act_calib_steps,
                 )
 
                 for name, act in activations.items():

@@ -4,7 +4,7 @@ from loguru import logger
 logger.remove()
 logger.add(
     sink=sys.stdout,
-    format="{time:YYYY-MM-DD HH:mm:ss} | <lvl>{name:13}</> | <lvl>{level:8}</> | <lvl>{message}</>",
+    format="{time:YYYY-MM-DD HH:mm:ss} | <lvl>{name:24}</> | <lvl>{level:8}</> | <lvl>{message}</>",
     colorize=True,
     level="INFO",
 )

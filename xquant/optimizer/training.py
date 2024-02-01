@@ -5,19 +5,26 @@ from tqdm import tqdm
 import random
 import numpy as np
 import torch
-from ppq.core import TensorQuantizationConfig, QuantizationProperty, QuantizationStates
-from ppq.executor import BaseGraphExecutor, TorchExecutor
-from ppq.IR import BaseGraph, BaseGraph, Operation, QuantableOperation, Variable
-from ppq.IR.quantize import QuantableGraph
-from ppq.quantization.algorithm.training import LSQDelegator, TrainableBlock
-from ppq.quantization.measure import torch_mean_square_error, torch_snr_error
-from ppq.quantization.qfunction.linear import PPQLinearQuantFunction
-from ppq.quantization.qfunction import PPQuantFunction
-from ppq.utils.fetch import batch_random_fetch
-from ppq.utils.round import ppq_tensor_round
-from ppq.quantization.optim.base import QuantizationOptimizationPass
-from ppq.quantization.optim import LearnedStepSizePass
-from ..defs import xquant_info, xquant_debug, XQUANT_CONFIG
+from xquant.logger import logger
+from ..ppq_decorator import (
+    TensorQuantizationConfig,
+    QuantizationProperty,
+    QuantizationStates,
+    BaseGraphExecutor,
+    TorchExecutor,
+    BaseGraph,
+    Operation,
+    QuantableOperation,
+    Variable,
+    QuantableGraph,
+    LearnedStepSizePass,
+    torch_mean_square_error,
+    torch_snr_error,
+    PPQLinearQuantFunction,
+    LSQDelegator,
+    TrainableBlock,
+)
+from ..defs import XQUANT_CONFIG
 
 
 class XQuantTrainableBlock(TrainableBlock):
@@ -340,6 +347,33 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
 
         return qt_inputs, fp_outputs
 
+    def compute_block_loss(
+        self,
+        block: XQuantTrainableBlock,
+        qt_inputs: List[Dict[str, torch.Tensor]],
+        fp_outputs: List[Dict[str, torch.Tensor]],
+        executor: TorchExecutor,
+        loss_fn: Callable = torch_mean_square_error,
+    ) -> float:
+        with torch.no_grad():
+            block_output_names = list(block.out_var_names)
+            block_input_names = list(block.in_var_names)
+            losses = {var_name: 0.0 for var_name in block_output_names}
+            for qt_input, fp_output in zip(qt_inputs, fp_outputs):
+                feed_dict = {k: v.to(executor._device) for k, v in qt_input.items()}
+
+                qt_output = executor.partial_graph_forward(
+                    operations=block.rps, feed_dict=feed_dict, output_names=block_output_names
+                )
+
+                for name, quant_output in zip(block_output_names, qt_output):
+                    batch_loss = loss_fn(quant_output, fp_output[name].to(executor._device))
+                    losses[name] += batch_loss.detach().item()
+
+            for name in losses:
+                losses[name] /= len(qt_inputs)
+        return sum([v for v in losses.values()])
+
     def finetune(
         self,
         steps: int,
@@ -373,7 +407,7 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
                     offset_trainable = (
                         cfg.policy.has_property(QuantizationProperty.ASYMMETRICAL) and self.is_scale_trainable
                     )
-                    delegator = LSQDelegator(
+                    delegator = LSQDelegatorDecorator(
                         config=cfg,
                         var=var,
                         is_scale_trainable=self.is_scale_trainable,
@@ -383,7 +417,7 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
                     executor.register_quantize_delegate(config=cfg, delegator=delegator)
                     delegators[cfg] = delegator
                 elif cfg.state in {QuantizationStates.PASSIVE, QuantizationStates.PASSIVE_INIT} and var.is_parameter:
-                    delegator = LSQDelegator(
+                    delegator = LSQDelegatorDecorator(
                         config=cfg,
                         var=var,
                         is_scale_trainable=False,
@@ -451,9 +485,9 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
         if post_loss > pre_loss:
             for cfg, delegator in delegators.items():
                 delegator.withdraw()
-            xquant_info(f"Tuning Finished: loss no change and withdraw.\n")
+            logger.info(f"Tuning Finished: loss no change and withdraw.\n")
         else:
-            xquant_info(f"Tuning Finished: ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f})\n")
+            logger.info(f"Tuning Finished: ({pre_loss:.5f} -> {min(pre_loss, post_loss):.5f})\n")
 
         for cfg, delegator in delegators.items():
             delegator.finalize()

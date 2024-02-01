@@ -19,9 +19,7 @@ from .observer import (
     TorchXQuantObserver,
     TorchXQuantKLObserver,
     TorchXQuantMSEObserver,
-    TorchPercentileObserverDecorator,
-    TorchMinMaxObserverObserverDecorator,
 )
 from .training import LearnedStepSizePassDecorator, LSQDelegatorDecorator
 from .legalized import GraphLegalized
-from .equalization import CustomLayerwiseEqualizationPass
+from .equalization import XQuantLayerwiseEqualizationPass

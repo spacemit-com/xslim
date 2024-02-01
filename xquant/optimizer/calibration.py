@@ -5,42 +5,27 @@ import functools
 from collections import deque
 from tqdm import tqdm
 import torch
-from ppq.core import (
+from ..ppq_decorator import (
     QuantizationStates,
-    common as ppq_common,
-)
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
-from ppq.quantization.optim import (
-    RuntimeCalibrationPass,
-)
-from ppq.executor import TorchExecutor
-from ppq.quantization.observer import (
+    ppq_common,
+    QuantizationOptimizationPass,
+    BaseGraph,
+    Operation,
+    QuantableOperation,
+    Variable,
     OperationObserver,
-    TorchHistObserver,
-    TorchMSEObserver,
-)
-from ppq.quantization.algorithm.training import TrainableBlock
-from ppq.quantization.measure import (
+    TorchExecutor,
     torch_mean_square_error,
     torch_snr_error,
     torch_cosine_similarity,
-    torch_cosine_similarity_as_loss,
 )
-from ppq.quantization.optim import LearnedStepSizePass, AdaroundPass
-from ppq.utils.round import ppq_round_to_power_of_2
-from ..optimizer import PassiveParameterBakingPass
-from .training import XQuantTrainableBlock, XQuantBlockBuilder
+from .refine import PassiveParameterBakingPass
+from .observer import TorchXQuantObserver
+from .training import LearnedStepSizePassDecorator, XQuantTrainableBlock, XQuantBlockBuilder
 from ..defs import COMPUTING_OP, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE, XQUANT_CONFIG
 
 
-class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
-    """
-    逐块执行量化，
-
-    Args:
-        RuntimeCalibrationPass (_type_): _description_
-    """
-
+class RuntimeBlockWiseCalibrationPass(QuantizationOptimizationPass):
     def __init__(
         self,
         method: str = None,
@@ -50,8 +35,11 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         fintune_epoch: int = 2,
         auto_finetune_level: int = 1,
     ) -> None:
-        super().__init__(method, override, calib_steps)
         self.name = "XQuant Runtime Calibration Pass(BlockWise)"
+        self._method = method
+        self._collate_fn = None
+        self._calib_steps = calib_steps
+        self._override = override
         self._block_wise = block_wise
         self._fintune_epoch = fintune_epoch
         self._block_wise_loss = []
@@ -166,7 +154,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             if not_has_hist_ob:
                 not_has_hist_ob = all(
                     [
-                        not isinstance(var_observer, (TorchHistObserver, TorchMSEObserver))
+                        not isinstance(var_observer, TorchXQuantObserver)
                         for var_observer in ob._hook._observer_table.values()
                     ]
                 )
@@ -218,7 +206,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         for tqc, var in operaion.config_with_variable:
             if tqc.dominated_by is tqc and tqc.scale is not None:
                 if torch.any(tqc.scale < 0):
-                    raise RuntimeError("tqc.scale for {} < 0".format(operaion.name))
+                    raise RuntimeError("tqc.scale for {} < 0, you can change fintune_level <= 1.".format(operaion.name))
 
         PassiveParameterBakingPass.passive_parameters_quant(operaion)
         PassiveParameterBakingPass.passive_bias_quant(operaion)
@@ -350,7 +338,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
             bias_op_var_names[o_name].inputs[-1].value += bias_error
 
     def create_block_loss_info(
-        self, block: TrainableBlock, mse_losses: dict, snr_losses: dict, means: dict, cosines: dict
+        self, block: XQuantTrainableBlock, mse_losses: dict, snr_losses: dict, means: dict, cosines: dict
     ):
         return {
             "start_op": "[{}]{}".format(block.sp.type, block.sp.name),
@@ -364,13 +352,13 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
     def finetune(
         self,
         graph: BaseGraph,
-        blocks: Sequence[TrainableBlock],
+        blocks: Sequence[XQuantTrainableBlock],
         dataloader: Iterable,
         executor: TorchExecutor,
         calib_steps: int = 32,
         collate_fn: Callable = None,
     ):
-        lsq_optimizer = LearnedStepSizePass(is_scale_trainable=True, lr=0.0001)
+        lsq_optimizer = LearnedStepSizePassDecorator(is_scale_trainable=True, lr=0.0001)
         for block in tqdm(blocks, desc="Runtime Calibration Single Block Finetune"):
             qt_inputs, fp_outputs = lsq_optimizer.collect(
                 graph=graph,

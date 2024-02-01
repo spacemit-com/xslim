@@ -3,10 +3,10 @@ from typing import Dict, List
 import onnx
 import torch
 from onnx import helper
-
-from ppq.core import (
-    TargetPlatform,
+from xquant.defs import PASSIVE_OPERATIONS
+from ..core import (
     GRAPH_OPSET_ATTRIB,
+    PPQ_CONFIG,
     QuantizationProperty,
     QuantizationStates,
     QuantizationVisibility,
@@ -14,32 +14,11 @@ from ppq.core import (
     convert_any_to_torch_tensor,
     ppq_warning,
 )
-from ppq.IR import BaseGraph, Operation, QuantableOperation, QuantableVariable, Variable
-from ppq.utils.round import ppq_tensor_round
-from ppq.parser.onnx_exporter import OnnxExporter, OP_CONVERTERS, OperationExporter
-from ppq.lib import register_network_exporter
-from ..defs import PASSIVE_OPERATIONS
+from ..IR import BaseGraph, Operation, QuantableOperation, QuantableVariable, Variable
+from ..quantization.qfunction.linear import PPQLinearQuant_toInt
+from ..utils.round import ppq_tensor_round
 
-
-def CustomLinearQuant_toInt(tensor: torch.Tensor, config: TensorQuantizationConfig) -> torch.Tensor:
-    if not config.policy.has_property(QuantizationProperty.LINEAR):
-        raise ValueError("Critical Quantization Error! Non-linear config detected.")
-    if config.policy.has_property(QuantizationProperty.PER_CHANNEL):
-        shape = [1 if axis != config.channel_axis else -1 for axis in range(tensor.ndim)]
-        scale, offset = config.scale.view(shape), config.offset.view(shape)
-        tensor = ppq_tensor_round((tensor / scale), config.rounding) + offset
-        tensor = torch.clamp(tensor, config.quant_min, config.quant_max)
-    elif config.policy.has_property(QuantizationProperty.PER_TENSOR):
-        tensor = ppq_tensor_round((tensor / config.scale), config.rounding) + config.offset
-        tensor = torch.clamp(tensor, config.quant_min, config.quant_max)
-    if config.num_of_bits == 8:
-        return tensor.type(dtype=torch.int8)
-    elif config.num_of_bits > 8 and config.num_of_bits <= 16:
-        return tensor.type(dtype=torch.int16)
-    elif config.num_of_bits > 16:
-        return tensor.type(dtype=torch.int32)
-    else:
-        raise Exception("Do not konw how to convert value into int. num of bits is unexpected.")
+from .onnx_exporter import OnnxExporter, OP_CONVERTERS, OperationExporter
 
 
 class QDQHelper:
@@ -87,20 +66,19 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
     def infer_qtype(self, config: TensorQuantizationConfig):
         offset_dtype, value_dtype = torch.int8, torch.int8
-        if config.num_of_bits > 16 and config.num_of_bits <= 32:
-            offset_dtype = torch.int32
-            value_dtype = torch.int32
+        if config.policy.has_property(QuantizationProperty.ASYMMETRICAL) and config.quant_min == 0:
+            offset_dtype = torch.uint8
+            value_dtype = torch.uint8
         elif config.num_of_bits > 8 and config.num_of_bits <= 16:
             offset_dtype = torch.int16
             value_dtype = torch.int16
+        elif config.num_of_bits > 16:
+            offset_dtype = torch.int32
+            value_dtype = torch.int32
         return offset_dtype, value_dtype
 
     def insert_quantize_node(
-        self,
-        graph: BaseGraph,
-        var: Variable,
-        config: TensorQuantizationConfig,
-        op: Operation,
+        self, graph: BaseGraph, var: Variable, config: TensorQuantizationConfig, op: Operation
     ) -> Operation:
         """
         Insert a Quantize Node on given variable, according to given TensorQuantizationConfig.
@@ -110,15 +88,12 @@ class ONNXRUNTIMExporter(OnnxExporter):
             # Following code will export Linear Quantization Config
             # That is for FP32 -> INT
             offset_dtype, value_type = self.infer_qtype(config)
-
             scale = convert_any_to_torch_tensor(config.scale.clone(), dtype=torch.float32)
             offset = ppq_tensor_round(config.offset.clone()).type(offset_dtype)
 
             created = graph.create_operation(op_type="QuantizeLinear", attributes={})
             if config.policy.has_property(QuantizationProperty.PER_CHANNEL):
                 created.attributes["axis"] = config.channel_axis
-            elif config.scale.numel() > 1:
-                created.attributes["axis"] = 0
             else:
                 created.attributes["axis"] = None
 
@@ -182,11 +157,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
             )
 
     def insert_dequantize_node(
-        self,
-        graph: BaseGraph,
-        var: Variable,
-        config: TensorQuantizationConfig,
-        op: Operation,
+        self, graph: BaseGraph, var: Variable, config: TensorQuantizationConfig, op: Operation
     ) -> Operation:
         """
         Insert a DeQuantize Node on given variable, according to given TensorQuantizationConfig.
@@ -200,8 +171,6 @@ class ONNXRUNTIMExporter(OnnxExporter):
             created = graph.create_operation(op_type="DequantizeLinear", attributes={})
             if config.policy.has_property(QuantizationProperty.PER_CHANNEL):
                 created.attributes["axis"] = config.channel_axis
-            elif config.scale.numel() > 1:
-                created.attributes["axis"] = 0
             else:
                 created.attributes["axis"] = None
 
@@ -346,26 +315,17 @@ class ONNXRUNTIMExporter(OnnxExporter):
             }:
                 assert input_var.source_op.num_of_input == 3, "Quantize Node Format Error, need as least 3 inputs."
                 assert isinstance(input_var.source_op, Operation)
-                scale, offset = (
-                    input_var.source_op.inputs[1].value,
-                    input_var.source_op.inputs[2].value,
-                )
+                scale, offset = input_var.source_op.inputs[1].value, input_var.source_op.inputs[2].value
 
                 scale_diff = torch.max(torch.abs(scale - config.scale)).item()
                 zeropoint_diff = torch.max(torch.abs(offset - config.offset)).item()
                 if scale_diff < 1e-4 and zeropoint_diff < 1e-1:
                     continue
 
-            if len(output_var.dest_ops) == 1 and output_var.dest_ops[0].type in {
-                "QuantizeLinear",
-                "QuantizeFloating",
-            }:
+            if len(output_var.dest_ops) == 1 and output_var.dest_ops[0].type in {"QuantizeLinear", "QuantizeFloating"}:
                 assert output_var.dest_ops[0].num_of_input == 3, "Quantize Node Format Error, need as least 3 inputs."
                 assert isinstance(output_var.dest_ops[0], Operation)
-                scale, offset = (
-                    output_var.dest_ops[0].inputs[1].value.to(config.scale.device),
-                    output_var.dest_ops[0].inputs[2].value.to(config.scale.device),
-                )
+                scale, offset = output_var.dest_ops[0].inputs[1].value, output_var.dest_ops[0].inputs[2].value
 
                 scale_diff = torch.max(torch.abs(scale - config.scale)).item()
                 zeropoint_diff = torch.max(torch.abs(offset - config.offset)).item()
@@ -520,39 +480,25 @@ class ONNXRUNTIMExporter(OnnxExporter):
                 self.insert_dequantize_node(graph=graph, var=inserting_var, config=config, op=inserting)
 
                 if quantized_param and config.policy.has_property(QuantizationProperty.LINEAR):
-                    var.value = CustomLinearQuant_toInt(tensor=var.value, config=config)
+                    var.value = PPQLinearQuant_toInt(tensor=var.value, config=config)
 
             elif not var.is_parameter:
                 # Patch 20230103:
                 # If var.source_op is DequantizeLinear, then we do not need to quantize it twice.
-                if (
-                    var.source_op is not None
-                    and var.source_op.type in {"DequantizeLinear", "DequantizeFloating"}
-                    and not config.policy.has_property(QuantizationProperty.DYNAMIC)
-                ):
+                if var.source_op is not None and var.source_op.type in {"DequantizeLinear", "DequantizeFloating"}:
                     assert var.source_op.num_of_input == 3, "Quantize Node Format Error, need as least 3 inputs."
                     assert isinstance(var.source_op, Operation)
-                    scale, offset = (
-                        var.source_op.inputs[1].value,
-                        var.source_op.inputs[2].value,
-                    )
+                    scale, offset = var.source_op.inputs[1].value, var.source_op.inputs[2].value
 
                     scale_diff = torch.max(torch.abs(scale - config.scale)).item()
                     zeropoint_diff = torch.max(torch.abs(offset - config.offset)).item()
                     if scale_diff < 1e-4 and zeropoint_diff < 1e-1:
                         continue
 
-                if (
-                    len(var.dest_ops) == 1
-                    and var.dest_ops[0].type in {"QuantizeLinear", "QuantizeFloating"}
-                    and not config.policy.has_property(QuantizationProperty.DYNAMIC)
-                ):
+                if len(var.dest_ops) == 1 and var.dest_ops[0].type in {"QuantizeLinear", "QuantizeFloating"}:
                     assert var.dest_ops[0].num_of_input == 3, "Quantize Node Format Error, need as least 3 inputs."
                     assert isinstance(var.dest_ops[0], Operation)
-                    scale, offset = (
-                        var.dest_ops[0].inputs[1].value,
-                        var.dest_ops[0].inputs[2].value,
-                    )
+                    scale, offset = var.dest_ops[0].inputs[1].value, var.dest_ops[0].inputs[2].value
 
                     scale_diff = torch.max(torch.abs(scale - config.scale)).item()
                     zeropoint_diff = torch.max(torch.abs(offset - config.offset)).item()
@@ -566,10 +512,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
                 self.insert_dequantize_node(graph=graph, var=inserting_var, config=config, op=inserting)
 
     def prepare_graph(
-        self,
-        graph: BaseGraph,
-        remove_activation_fn: bool = True,
-        quant_parameter_to_int: bool = True,
+        self, graph: BaseGraph, remove_activation_fn: bool = True, quant_parameter_to_int: bool = True
     ) -> BaseGraph:
         """Prepare your graph for exporting.
 
@@ -587,7 +530,6 @@ class ONNXRUNTIMExporter(OnnxExporter):
         Returns:
             BaseGraph: Processed Graph
         """
-        # 有点bug 需要把数值上调
         graph._num_of_generated_op = graph._num_of_generated_op + len(graph.operations)
         graph._num_of_generated_var = graph._num_of_generated_var + len(graph.variables)
         self.convert_operation_from_opset11_to_opset13(graph)
@@ -596,12 +538,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
         for op in graph.topological_sort():
             if not isinstance(op, QuantableOperation):
                 continue
-            if op.type in {
-                "QuantizeLinear",
-                "DequantizeLinear",
-                "QuantizeFloating",
-                "DequantizeFloating",
-            }:
+            if op.type in {"QuantizeLinear", "DequantizeLinear", "QuantizeFloating", "DequantizeFloating"}:
                 continue
 
             self.convert_operation(graph=graph, op=op, quantized_param=quant_parameter_to_int)
@@ -611,22 +548,12 @@ class ONNXRUNTIMExporter(OnnxExporter):
             # remove useless activation.
             self.remove_activation_ops(graph)
 
-        for op_name, op in graph.operations.items():
-            if (
-                op.type in {"Conv"}
-                and "quant_bias_apply" in op.attributes
-                and len(op.inputs) > 2
-                and isinstance(op.inputs[-1].source_op, Operation)
-                and op.inputs[-1].source_op.type == "DequantizeLinear"
-            ):
-                op.inputs[-1].source_op.attributes["quant_bias_apply"] = op.attributes.pop("quant_bias_apply")
-                op.inputs[-1].source_op.attributes["domain"] = "spacemit_ops"
-
         return self.remove_duplicated_quant_op(graph)
 
     def export(
         self,
         graph: BaseGraph,
+        config_path: str = None,
         quantized_param: bool = True,
         remove_activation: bool = True,
         save_as_external_data: bool = False,
@@ -657,10 +584,12 @@ class ONNXRUNTIMExporter(OnnxExporter):
         """
         # In prepare stage, quant & dequant node are inserted into graph.
         graph = self.prepare_graph(
-            graph,
-            remove_activation_fn=remove_activation,
-            quant_parameter_to_int=quantized_param,
+            graph, remove_activation_fn=remove_activation, quant_parameter_to_int=quantized_param
         )
+
+        # if a valid config path is given, export quantization config to there.
+        if config_path is not None:
+            super().export_quantization_config(config_path, graph)
 
         # before we can export them, we firstly convert all ops to proper format.
         for op in [_ for _ in graph.topological_sort()]:
@@ -676,12 +605,12 @@ class ONNXRUNTIMExporter(OnnxExporter):
             name = "XQuant Export"
 
         add_spacemit_ep = False
+
         # Ready to export onnx graph definition.
         _inputs, _outputs, _initilizers, _nodes, _value_info = [], [], [], [], []
         for operation in graph.topological_sort():
             if not add_spacemit_ep and operation.attributes.get("domain", None) == "spacemit_ops":
                 add_spacemit_ep = True
-
             _nodes.append(super().build_operator_proto(operation))
 
         for variable in graph.variables.values():
@@ -700,12 +629,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
         _inputs = sorted(_inputs, key=lambda x: pb_inputs.index(x.name) if x.name in pb_inputs else len(_inputs))
         _outputs = sorted(_outputs, key=lambda x: pb_outputs.index(x.name) if x.name in pb_outputs else len(pb_outputs))
         graph_def = helper.make_graph(
-            name=name,
-            nodes=_nodes,
-            inputs=_inputs,
-            outputs=_outputs,
-            initializer=_initilizers,
-            value_info=_value_info,
+            name=name, nodes=_nodes, inputs=_inputs, outputs=_outputs, initializer=_initilizers, value_info=_value_info
         )
         extra_opsets = self.required_opsets
 
@@ -724,22 +648,16 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
         for key, value in extra_opsets.items():
             op = onnx.OperatorSetIdProto()
+            # PATCH 2024.01.30
+            # 我也不知道为什么 onnx checker 会对 ai.onnx 这个 domain 报错
+            # 按照规范 ai.onnx 与 "" 是等价的写法
+            if key == "ai.onnx":
+                key = ""
             op.domain = key
             op.version = value
             opsets.append(op)
 
         onnx_model = helper.make_model(graph_def, producer_name="xquant", opset_imports=opsets)
         onnx_model.ir_version = graph._detail["ir_version"]
-        # onnx.checker.check_model(onnx_model)
-        # size_threshold = 0 if save_as_external_data else 1024
-        # onnx.save(
-        #    onnx_model,
-        #    file_path,
-        #    size_threshold=size_threshold,
-        #    save_as_external_data=save_as_external_data,
-        #    all_tensors_to_one_file=(not save_as_external_data),
-        # )
+
         return onnx_model
-
-
-register_network_exporter(ONNXRUNTIMExporter, TargetPlatform.ONNXRUNTIME)

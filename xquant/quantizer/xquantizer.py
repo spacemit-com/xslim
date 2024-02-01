@@ -6,31 +6,28 @@ from enum import Enum
 import torch
 import numpy as np
 import functools
-from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
-from ppq.core import (
-    PPQ_CONFIG,
+from xquant.logger import logger
+from ..ppq_decorator import (
+    BaseGraph,
+    Operation,
+    QuantableOperation,
+    Variable,
+    QuantableGraph,
+    GraphReplacer,
+    QuantizeOperationCommand,
     OperationQuantizationConfig,
     QuantizationPolicy,
     QuantizationProperty,
     QuantizationStates,
     RoundingPolicy,
-    common as ppq_common,
+    ppq_common,
     TargetPlatform,
-)
-from ppq import QuantizationSettingFactory
-from ppq.quantization.quantizer import BaseQuantizer
-from ppq.api.setting import QuantizationSetting
-from ppq.executor import BaseGraphExecutor
-from ppq.quantization.optim import (
-    HorizontalLayerSplitPass,
-    ChannelwiseSplitPass,
+    TensorQuantizationConfig,
+    BaseGraphExecutor,
     QuantizationOptimizationPipeline,
-    SSDEqualizationPass,
-    QuantizeFusionPass as PPQQuantizeFusionPass,
+    QuantizeFusionPass,
     QuantizeSimplifyPass,
     ParameterQuantizePass,
-    QuantAlignmentPass,
-    PassiveParameterQuantizePass,
     ParameterBakingPass,
 )
 from ..optimizer import (
@@ -39,16 +36,15 @@ from ..optimizer import (
     ActivationClipRefine,
     HardSwishFusionPass,
     SwishFusionPass,
-    QuantizeFusionPass,
     PassiveParameterBakingPass,
     AsymmetricaUnsignlAlignSign,
     RuntimeBlockWiseCalibrationPass,
     ComputingFusionPass,
     PassiveParameterBakingPass,
-    CustomLayerwiseEqualizationPass,
+    XQuantLayerwiseEqualizationPass,
     QuantizeConfigRefinePass,
 )
-from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, xquant_info, xquant_warning, PASSIVE_OPERATIONS
+from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, PASSIVE_OPERATIONS
 from ..xquant_setting import XQuantSetting
 
 
@@ -59,19 +55,13 @@ def _get_quant_min_max(num_of_bits: int, signed: bool = True):
         return 0, 2**num_of_bits - 1
 
 
-def _get_version_number(ver_str):
-    return functools.reduce(
-        lambda x, y: x + y, [pow(100, i) * int(ver) for i, ver in enumerate(reversed(ver_str.split(".")))]
-    )
-
-
-class XQuantizer(BaseQuantizer):
+class XQuantizer:
     def __init__(self, graph: BaseGraph) -> Union[torch.Tensor, list, dict]:
-        super().__init__(graph=graph)
+        self._graph = graph
+        self._processor = QuantableGraph(GraphReplacer(self._graph))
         self._precision_level = PrecisionLevel.BIT_8
         self._num_of_bits = 8
-        self._auto_finetune_level = AutoFinetuneLevel.DO_NOTHING
-        self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits, False)
+        self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits)
         perchannel_policy = QuantizationPolicy(
             QuantizationProperty.SYMMETRICAL + QuantizationProperty.PER_CHANNEL + QuantizationProperty.LINEAR
         )
@@ -96,6 +86,41 @@ class XQuantizer(BaseQuantizer):
         }
         self._verbose = False
 
+    @property
+    def target_platform(self) -> TargetPlatform:
+        return TargetPlatform.XQUANT_INT8
+
+    def quantize_operation(self, op_name: str, platform: TargetPlatform = None) -> QuantableOperation:
+        if op_name not in self._graph.operations:
+            raise KeyError(f"Can not find op {op_name} in your graph, chech operation name again.")
+        converting_operation = self._graph.operations[op_name]
+        if isinstance(converting_operation, QuantableOperation):
+            logger.warning(f"Operation {op_name} has been quantized, can not to quantize it twice.")
+            return converting_operation
+
+        # override platform with calling parameter.
+        if platform is not None:
+            converting_operation.platform = platform
+        else:
+            platform = converting_operation.platform
+
+        if platform in {TargetPlatform.FP32, TargetPlatform.SOI}:
+            return self._graph.operations[op_name]
+
+        # if platform == TargetPlatform.UNSPECIFIED we can skip its quantization when type is not supported.
+        if platform == TargetPlatform.UNSPECIFIED and converting_operation.type not in self.quant_operation_types:
+            return self._graph.operations[op_name]
+
+        # create quantize config and convert operation.
+        self._processor(
+            QuantizeOperationCommand(
+                op_name=op_name,
+                target_platform=platform,
+                config=self.init_quantize_config(operation=converting_operation),
+            )
+        )
+        return self._graph.operations[op_name]
+
     def quantize(
         self,
         inputs: Union[torch.Tensor, list, dict],
@@ -104,20 +129,14 @@ class XQuantizer(BaseQuantizer):
         xquant_setting: XQuantSetting,
         **kwargs,
     ) -> None:
-        self._xquant_setting = xquant_setting
         self._set_max_percentile = xquant_setting.quantization_parameters.max_percentile
         self._calibration_type = xquant_setting.calibration_parameters.calibration_type
-        self._auto_finetune_level = xquant_setting.quantization_parameters.finetune_level
-        self._precision_level = xquant_setting.quantization_parameters.precision_level
-
-        quant_setting = QuantizationSettingFactory.default_setting()
-        quant_setting.fusion_setting.align_quantization = False
 
         executor.load_graph(self._graph)
         executor.tracing_operation_meta(inputs=inputs)
         # step - 1, prequant pipeline:
         # prequant pipeline will change your network structure and float value.
-        prequant_pipeline = self.build_prequant_pipeline(quant_setting, executor=executor)
+        prequant_pipeline = self.build_prequant_pipeline(xquant_setting, executor=executor)
         prequant_pipeline.optimize(
             graph=self._graph, dataloader=calib_dataloader, executor=executor, verbose=self._verbose, **kwargs
         )
@@ -140,11 +159,84 @@ class XQuantizer(BaseQuantizer):
         # it is necessary calling self._executor before further execution
         # step - 3, calling graph optimization pipeline
         executor.load_graph(self._graph)
-        quant_pipeline = self.build_quant_pipeline(quant_setting)
+        quant_pipeline = self.build_quant_pipeline(xquant_setting)
 
         quant_pipeline.optimize(
             graph=self._graph, dataloader=calib_dataloader, executor=executor, verbose=self._verbose, **kwargs
         )
+
+    @staticmethod
+    def create_default_quant_config(
+        op: Operation,
+        num_of_bits: int = 8,
+        quant_min: Union[int, float] = -127,
+        quant_max: Union[int, float] = 128,
+        observer_algorithm: str = "percentile",
+        policy: QuantizationPolicy = QuantizationPolicy(
+            QuantizationProperty.PER_TENSOR + QuantizationProperty.LINEAR + QuantizationProperty.SYMMETRICAL
+        ),
+        rounding: RoundingPolicy = RoundingPolicy.ROUND_HALF_EVEN,
+        exponent_bits: int = 0,
+    ) -> OperationQuantizationConfig:
+        assert isinstance(op, Operation), f"Can only initialize OQC for PPQ.IR.Operation, however {type(op)} was given."
+        assert isinstance(
+            policy, QuantizationPolicy
+        ), f"Can not create quantization config - Quantization Policy Type Error."
+        assert isinstance(rounding, RoundingPolicy), f"Can not create quantization config - Rounding Policy Type Error."
+
+        socket = op.socket
+        input_cfgs, output_cfgs = [], []
+        for index in range(op.num_of_input):
+            state = QuantizationStates.INITIAL
+            # for those unexpected inputs and outputs
+            # ppq just initilize them as normal variable.
+            if index < len(socket.in_plat):
+                target_plat = socket.in_plat[index]
+                if target_plat == TargetPlatform.FP32:
+                    state = QuantizationStates.FP32
+                if target_plat == TargetPlatform.SOI:
+                    state = QuantizationStates.FP32
+            input_cfgs.append(
+                TensorQuantizationConfig(
+                    policy=policy,
+                    rounding=rounding,
+                    num_of_bits=num_of_bits,
+                    scale=None,
+                    offset=None,
+                    exponent_bits=exponent_bits,
+                    quant_min=quant_min,
+                    quant_max=quant_max,
+                    observer_algorithm=observer_algorithm,
+                    state=state,
+                )
+            )
+
+        for index in range(op.num_of_output):
+            state = QuantizationStates.INITIAL
+            # for those unexpected inputs and outputs
+            # ppq just initilize them as normal variable.
+            if index < len(socket.out_plat):
+                target_plat = socket.out_plat[index]
+                if target_plat == TargetPlatform.FP32:
+                    state = QuantizationStates.FP32
+                if target_plat == TargetPlatform.SOI:
+                    state = QuantizationStates.FP32
+            output_cfgs.append(
+                TensorQuantizationConfig(
+                    policy=policy,
+                    rounding=rounding,
+                    num_of_bits=num_of_bits,
+                    scale=None,
+                    offset=None,
+                    exponent_bits=exponent_bits,
+                    quant_min=quant_min,
+                    quant_max=quant_max,
+                    observer_algorithm=observer_algorithm,
+                    state=state,
+                )
+            )
+
+        return OperationQuantizationConfig(input_cfgs, output_cfgs)
 
     def report(self):
         pass
@@ -268,81 +360,62 @@ class XQuantizer(BaseQuantizer):
     def activation_fusion_types(self) -> set:
         return {"Relu", "Clip"}
 
-    def build_quant_pipeline(self, setting: QuantizationSetting) -> QuantizationOptimizationPipeline:
-        assert isinstance(setting, QuantizationSetting), (
-            f"PPQ needs a OptimSetting instance to initialize optimization pipeline,"
-            f" however {type(setting)} was given."
-        )
-        ppq_ver = _get_version_number(PPQ_CONFIG.VERSION)
-
+    def build_quant_pipeline(self, setting: XQuantSetting) -> QuantizationOptimizationPipeline:
         list_of_passes = []
 
         list_of_passes.append(PassiveParameterBakingPass())
 
         list_of_passes.append(
-            PPQQuantizeFusionPass(
+            QuantizeFusionPass(
                 fuse_activation=True,
                 fuse_passive_op=True,
+                fuse_relu_clip=True,
                 activation_type=self.activation_fusion_types,
             )
         )
-
-        if ppq_ver <= _get_version_number("0.6.6"):
-            list_of_passes.append(QuantizeFusionPass(True))
-
         list_of_passes.append(QuantizeSimplifyPass())
 
         list_of_passes.append(ActivationClipRefine())
 
-        param_setting = setting.quantize_parameter_setting
-        list_of_passes.append(ParameterQuantizePass(method=param_setting.calib_algorithm))
+        list_of_passes.append(ParameterQuantizePass(method="minmax"))
 
         list_of_passes.append(
             QuantizeConfigRefinePass(
-                self._precision_level.value, self._xquant_setting.quantization_parameters.custom_setting
+                setting.quantization_parameters.precision_level.value,
+                setting.quantization_parameters.custom_setting,
             )
         )
 
-        if setting.quantize_activation:
-            act_setting = setting.quantize_activation_setting
-            list_of_passes.append(
-                RuntimeBlockWiseCalibrationPass(
-                    act_setting.calib_algorithm,
-                    block_wise=True,
-                    fintune_epoch=XQUANT_CONFIG.fine_tune_epoch,
-                    auto_finetune_level=self._auto_finetune_level.value,
-                )
+        list_of_passes.append(
+            RuntimeBlockWiseCalibrationPass(
+                self._observer_mapping.get(setting.calibration_parameters.calibration_type, "xquant"),
+                block_wise=True,
+                fintune_epoch=XQUANT_CONFIG.fine_tune_epoch,
+                auto_finetune_level=setting.quantization_parameters.finetune_level.value,
             )
+        )
 
         list_of_passes.append(ParameterBakingPass())
         list_of_passes.append(PassiveParameterBakingPass())
-        list_of_passes.append(AsymmetricaUnsignlAlignSign())
         return QuantizationOptimizationPipeline(passes=list_of_passes)
 
     def build_prequant_pipeline(
-        self, setting: QuantizationSetting, executor: BaseGraphExecutor
+        self, setting: XQuantSetting, executor: BaseGraphExecutor
     ) -> QuantizationOptimizationPipeline:
-        assert isinstance(setting, QuantizationSetting), (
-            f"PPQ needs a OptimSetting instance to initialize optimization pipeline,"
-            f" however {type(setting)} was given."
-        )
-
         list_of_passes = []
+
+        finetune_level = setting.quantization_parameters.finetune_level.value
 
         list_of_passes.append(FlattenGemmFusionPass())
         list_of_passes.append(FormatBatchNormalizationPass())
 
-        if self._auto_finetune_level.value >= AutoFinetuneLevel.DO_NOTHING.value:
-            equalization_setting = setting.equalization_setting
+        if finetune_level >= AutoFinetuneLevel.DO_NOTHING.value:
             list_of_passes.append(
-                CustomLayerwiseEqualizationPass(
-                    optimize_level=1,
+                XQuantLayerwiseEqualizationPass(
                     iterations=XQUANT_CONFIG.equalization_iterations,
-                    weight_threshold=equalization_setting.value_threshold,
                     including_bias=True,
-                    including_act=self._auto_finetune_level.value >= AutoFinetuneLevel.LEVEL_1.value,
-                    bias_multiplier=equalization_setting.bias_multiplier,
-                    act_multiplier=equalization_setting.act_multiplier,
+                    including_act=finetune_level > AutoFinetuneLevel.DO_NOTHING.value,
+                    optimize_level=1,
                 )
             )
 
