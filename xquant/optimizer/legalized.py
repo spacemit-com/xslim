@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Any, Iterable, List, Set, Union, Dict, Callable, Tuple
+import numpy as np
 import torch
-from ppq.core import (
-    ppq_warning,
-    convert_any_to_torch_tensor,
-)
+from ppq.core import ppq_warning, convert_any_to_torch_tensor, DataType
 from ppq.IR import Operation, Variable
-from ppq.IR import GraphMerger
+from ppq.IR import GraphMerger, GraphFormatter
 from ppq.IR.search import SearchableGraph
 
 
@@ -15,8 +13,22 @@ class GraphLegalized:
     def __init__(self, graph) -> None:
         self._graph = graph
         self._merger = GraphMerger(self._graph)
+        self._formatter = GraphFormatter(self._graph)
 
     def __call__(self) -> Any:
+        self._formatter.remove_constant_input()
+        self._formatter.convert_to_tensor()
+        self.format_cast()
+        self._formatter.format_parameter()
+        self._merger.fuse_bias_add()
+        self._merger.fuse_bn()
+        self._formatter.format_cast()
+        self._formatter.format_slice()
+        self._formatter.format_clip()
+        self._formatter.format_pad()
+        self._formatter.format_resize()
+        self._formatter.remove_identity()
+        self._formatter.delete_isolated()
         self.format_reshape_squeeze()
         self.fuse_layernorm()
         self.fuse_gelu()
@@ -26,6 +38,18 @@ class GraphLegalized:
         self.format_ms_domain()
         self.fuse_mul_add()
         self.fuse_mul_add()
+
+    def format_cast(self):
+        interested_ops = []
+        for _, operation in self._graph.operations.items():
+            assert isinstance(operation, Operation)
+            if operation.type == "Cast":
+                interested_ops.append(operation)
+        for operation in interested_ops:
+            assert isinstance(operation, Operation)
+            assert "to" in operation.attributes
+            if isinstance(operation.attributes["to"], np.dtype):
+                operation.attributes["to"] = DataType.convert_from_numpy(operation.attributes["to"])
 
     def format_div(self):
         for op in self._graph.operations.values():

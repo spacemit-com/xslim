@@ -12,7 +12,6 @@ import onnxsim
 import onnx_graphsurgeon as osg
 from ppq import TargetPlatform, BaseQuantizer, BaseGraph
 from ppq.executor import TorchExecutor
-from ppq.api.interface import format_graph as ppq_format_graph
 from ppq.scheduler import DISPATCHER_TABLE, GraphDispatcher
 from .defs import xquant_info, xquant_warning, XQUANT_CONFIG
 from .calibration_helper import XQuantDataset, CalibrationCollect
@@ -73,11 +72,12 @@ def xquant_load_onnx_graph(
     onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
 
     if sim_en:
-        xquant_info("simplify onnx model...")
-        onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
+        try:
+            onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
+        except Exception as e:
+            xquant_warning("simplify onnx model error and skip.")
 
     graph = OnnxParserDecorator().build(onnx_model)
-    graph = ppq_format_graph(graph)
     return graph, truncate_left_graph, truncate_vars
 
 

@@ -13,7 +13,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.min_block_size = 10
 
-        self.max_block_size = 16
+        self.max_block_size = 20
 
         self.merge_block_step = 4
 

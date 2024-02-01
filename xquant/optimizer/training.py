@@ -62,15 +62,22 @@ class XQuantTrainableBlock(TrainableBlock):
 
     def get_depth(self):
         block_ops = set(self.rps)
+        toposort_ops = []
+        visited_vars = set()
 
         def visit_ops(in_vars: List[Variable], depth):
             next_vars = []
             max_depth = 0
             for var in in_vars:
                 for dest_op in var.dest_ops:
-                    if dest_op in block_ops:
+                    if (
+                        dest_op in block_ops
+                        and set([var for var in dest_op.inputs if not var.is_parameter]) <= visited_vars
+                    ):
+                        toposort_ops.append(dest_op)
                         block_ops.remove(dest_op)
                         next_vars.extend(dest_op.outputs)
+                        visited_vars.update([var for var in dest_op.outputs])
                         max_depth = max(XQuantTrainableBlock.OP_DEPTH_DICT.get(dest_op.type, 1), max_depth)
             depth = max_depth + depth
             if len(next_vars) > 0:
@@ -78,8 +85,14 @@ class XQuantTrainableBlock(TrainableBlock):
             return depth
 
         in_vars = [self.graph.variables[name] for name in self.in_var_names]
+        visited_vars.update(in_vars)
         depth = visit_ops(in_vars, 0)
+        if len(block_ops) > 0:
+            raise RuntimeError(
+                "get block depth and toposort error, {} no visited".format([op.name for op in block_ops])
+            )
         self.depth = depth
+        self.rps = toposort_ops
         return depth
 
     def update_block_io_var_names(self) -> Tuple[Set[str], Set[str]]:
@@ -176,16 +189,16 @@ class XQuantBlockBuilder:
     def build(self):
         def _find_same_input_block(block: XQuantTrainableBlock):
             visited_var_names = block.in_var_names | block.out_var_names
-            merge_blocks = []
-            for down_block in self.get_downstream_blocks(block):
+            merge_blocks = set()
+            merge_block_list = []
+            down_blocks = self.get_downstream_blocks(block)
+            for down_block in down_blocks:
                 visited_var_names.update(down_block.out_var_names)
+            for down_block in down_blocks:
                 if down_block.in_var_names <= visited_var_names and down_block not in merge_blocks:
-                    merge_blocks.append(down_block)
-            # 保持顺序
-            for down_block in self.get_downstream_blocks(block):
-                if down_block.in_var_names <= visited_var_names and down_block not in merge_blocks:
-                    merge_blocks.append(down_block)
-            return merge_blocks
+                    merge_blocks.add(down_block)
+                    merge_block_list.append(down_block)
+            return merge_block_list
 
         def _merge_block(
             start_block: XQuantTrainableBlock, end_block: XQuantTrainableBlock, rp_blocks: List[XQuantTrainableBlock]
@@ -225,6 +238,9 @@ class XQuantBlockBuilder:
 
             self.sequence_blocks = valid_blocks
             self.sequence_io_init()
+
+        for block in self.sequence_blocks:
+            block.get_depth()
 
         return self.sequence_blocks
 
@@ -279,17 +295,14 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
         expire_device: str = "cpu",
     ) -> Tuple[List[Dict[str, torch.Tensor]], List[Dict[str, torch.Tensor]]]:
         def cache_fn(data: torch.Tensor):
-            # TODO move this function to ppq.core.IO
-            if not isinstance(data, torch.Tensor):
-                raise TypeError(
-                    "Unexpected Type of value, Except network output to be torch.Tensor, "
-                    f"however {type(data)} was given."
-                )
-            if collecting_device == "cpu":
-                data = data.cpu()
             if collecting_device == "cuda":
                 data = data.cuda()
-            # TODO restrict collecting device.
+                mem_free, mem_all = torch.cuda.mem_get_info()
+                mem_free_ratio = mem_free / mem_all
+                if mem_free_ratio < 0.2:
+                    data = data.cpu()
+            else:
+                data = data.cpu()
             return data
 
         block_output_names = list(block.out_var_names)
@@ -400,7 +413,7 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
 
         range_steps = [i for i in range(steps)]
         random.shuffle(range_steps)
-        for idx in tqdm(range_steps, desc="Block Finetune Tuning"):
+        for idx in tqdm(range_steps, desc="Block Tuning"):
             qt_input, fp_output = qt_inputs[idx % dataset_length], fp_outputs[idx % dataset_length]
 
             # forward

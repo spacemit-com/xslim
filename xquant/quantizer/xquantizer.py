@@ -34,6 +34,7 @@ from ppq.quantization.optim import (
     ParameterBakingPass,
 )
 from ..optimizer import (
+    FormatBatchNormalizationPass,
     FlattenGemmFusionPass,
     ActivationClipRefine,
     HardSwishFusionPass,
@@ -329,6 +330,7 @@ class XQuantizer(BaseQuantizer):
         list_of_passes = []
 
         list_of_passes.append(FlattenGemmFusionPass())
+        list_of_passes.append(FormatBatchNormalizationPass())
 
         if self._auto_finetune_level.value >= AutoFinetuneLevel.DO_NOTHING.value:
             equalization_setting = setting.equalization_setting

@@ -31,7 +31,12 @@ def format_onnx_model(onnx_model: onnx.ModelProto, min_onnx_version: int = 13) -
     """
     onnx_model.graph.ClearField("value_info")
     for o_var in onnx_model.graph.output:
-        o_var.type.tensor_type.ClearField("shape")
+        try:
+            for dim in o_var.type.tensor_type.shape.dim:
+                dim.dim_value = 0
+                dim.dim_param = "?"
+        except:
+            pass
 
     opset_dict = get_onnx_opset(onnx_model)
     ai_onnx_version = opset_dict.get("ai.onnx", min_onnx_version)

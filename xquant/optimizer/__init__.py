@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from .fusion import HardSwishFusionPass, SwishFusionPass, ComputingFusionPass, FlattenGemmFusionPass
+from .fusion import (
+    HardSwishFusionPass,
+    SwishFusionPass,
+    ComputingFusionPass,
+    FlattenGemmFusionPass,
+    FormatBatchNormalizationPass,
+)
 from .refine import (
     AsymmetricaUnsignlAlignSign,
     QuantizeFusionPass,

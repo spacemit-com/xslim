@@ -2,10 +2,7 @@
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
-from ppq.core import (
-    QuantizationStates,
-    ppq_warning,
-)
+from ppq.core import QuantizationStates, ppq_warning, TargetPlatform
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.quantization.optim import (
     QuantizationOptimizationPipeline,
@@ -19,7 +16,7 @@ from ..defs import XQUANT_CONFIG, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TY
 
 class FlattenGemmFusionPass(QuantizationOptimizationPass):
     def __init__(self) -> None:
-        super().__init__("XQuant FlattenGemm Fusion")
+        super().__init__("XQuant FlattenGemmFusionPass")
 
     def optimize(
         self,
@@ -60,7 +57,7 @@ class FlattenGemmFusionPass(QuantizationOptimizationPass):
             weight_new_shape[1] = -1
             w = w.reshape(weight_new_shape)
             gemm_op.inputs[1].value = w
-            conv_attributes = {"dilations": [1, 1], "kernel_shape": [1, 1], "strides": [1, 1], "group": 1}
+            conv_attributes = {"dilations": [1, 1], "kernel_shape": weight_new_shape[2:], "strides": [1, 1], "group": 1}
             gemm_op.type = "Conv"
             gemm_op.attributes.clear()
             for k, v in conv_attributes.items():
@@ -80,12 +77,74 @@ class FlattenGemmFusionPass(QuantizationOptimizationPass):
 
             gemm_op.outputs[0].source_op = gemm_op
             flatten_op.outputs[0].source_op = flatten_op
+            flatten_op.platform = TargetPlatform.UNSPECIFIED
+            gemm_op.platform = TargetPlatform.UNSPECIFIED
 
         for op_name, op in graph.operations.items():
             if op.type in {"Gemm"}:
                 if op.inputs[1].is_parameter and op.attributes.get("transB", 0) == 0:
                     op.attributes["transB"] = 1
                     op.inputs[1].value = torch.permute(op.inputs[1].value, [1, 0])
+
+
+class FormatBatchNormalizationPass(QuantizationOptimizationPass):
+    def __init__(self) -> None:
+        super().__init__("XQuant FormatBatchNormalizationPass")
+
+    def optimize(
+        self,
+        graph: BaseGraph,
+        dataloader: Iterable,
+        executor: BaseGraphExecutor,
+        **kwargs,
+    ) -> None:
+        op_list = [op for op in graph.operations.values()]
+        for op in op_list:
+            if op.type == "BatchNormalization" and op.inputs[1].is_parameter and op.inputs[2].is_parameter:
+                if not isinstance(op.inputs[0].shape, Sequence):
+                    raise RuntimeError("remove BatchNormalization error, shape not found.")
+                weight_shape = [op.inputs[0].shape[1]] + [1] * (len(op.inputs[0].shape) - 2)
+                alpha = op.parameters[0].value
+                beta = op.parameters[1].value
+                mean = op.parameters[2].value
+                var = op.parameters[3].value
+                epsilon = op.attributes.get("epsilon", 1e-5)
+
+                with torch.no_grad():
+                    w = alpha / torch.sqrt(var + epsilon)
+                    w = w.reshape(weight_shape)
+                    b = alpha * (-mean) / torch.sqrt(var + epsilon) + beta
+                    b = b.reshape(weight_shape)
+
+                op.type = "Mul"
+                op.attributes.clear()
+
+                graph.remove_variable(op.inputs[-1])
+                graph.remove_variable(op.inputs[-1])
+                bias_var = op.inputs.pop()
+                bias_var.dest_ops.remove(op)
+                with torch.no_grad():
+                    op.inputs[1].value = w
+                    bias_var.value = b
+                op.platform = TargetPlatform.UNSPECIFIED
+                bias_out_var = op.outputs[0]
+                inner_var = Variable("{}_bn_inner".format(op.name), shape=op.inputs[0].shape)
+                graph.append_variable(inner_var)
+                op.outputs[0] = inner_var
+                inner_var.source_op = op
+
+                bias_op = Operation(
+                    "{}_bias".format(op.name),
+                    "Add",
+                    attributes={},
+                    inputs=[inner_var, bias_var],
+                    outputs=[bias_out_var],
+                    platform=TargetPlatform.UNSPECIFIED,
+                )
+                inner_var.dest_ops.append(bias_op)
+                bias_var.dest_ops.append(bias_op)
+                bias_out_var.source_op = bias_op
+                graph.append_operation(bias_op)
 
 
 class HardSwishFusionPass(QuantizationOptimizationPass):
