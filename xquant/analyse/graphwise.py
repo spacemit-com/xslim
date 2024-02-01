@@ -1,35 +1,15 @@
-from typing import Callable, Dict, Iterator, List
-
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT. All rights reserved.
+from typing import Callable, Dict, Iterator, List, Optional
+from collections import OrderedDict
 import torch
-from ppq.core import PASSIVE_OPERATIONS, ppq_warning
+from pandas import DataFrame
 from ppq.executor import RuntimeHook, TorchExecutor
 from ppq.IR import BaseGraph, Operation, QuantableOperation, Variable
 from ppq.quantization.measure import torch_snr_error, torch_cosine_similarity, torch_mean_square_error
 from ppq.utils.fetch import batch_random_fetch, tensor_random_fetch, generate_torch_indexer
 from tqdm import tqdm
-
-from ppq.quantization.analyse.util import MeasurePrinter, MeasureRecorder
-
-
-class OutputRecorder(RuntimeHook):
-    def __init__(self, operation: Operation, fetchs: int = 4096) -> None:
-        self.fetched = None
-        self.fetchs = fetchs
-        super().__init__(operation)
-
-    def pre_forward_hook(self, inputs: list, **kwargs) -> list:
-        return super().pre_forward_hook(inputs, **kwargs)
-
-    def post_forward_hook(self, outputs: list, **kwargs) -> list:
-        output_tensor = outputs[0]
-        assert isinstance(output_tensor, torch.Tensor), "Output of monitoring operation is not a torch.Tensor"
-        self.fetched = batch_random_fetch(output_tensor, seed=10086, fetches_per_batch=self.fetchs).to("cpu")
-        return super().post_forward_hook(outputs, **kwargs)
-
-    def pop(self) -> torch.Tensor:
-        fetched = self.fetched
-        self.fetched = None
-        return fetched
+from ..defs import PASSIVE_OPERATIONS, xquant_info, xquant_warning
 
 
 class DetailedRecorder(RuntimeHook):
@@ -66,182 +46,14 @@ class DetailedRecorder(RuntimeHook):
         self.o_storage = [[] for _ in range(self._hook_to.num_of_output)]
 
 
-def graphwise_error_analyse(
-    graph: BaseGraph,
-    running_device: str,
-    dataloader: Iterator,
-    collate_fn: Callable = None,
-    method: str = "snr",
-    steps: int = 8,
-    verbose: bool = True,
-    fetchs: int = 4096,
-) -> Dict[str, float]:
-    """Measure the difference from a quantized graph to its dequantized graph.
-
-    A dictionary contains output differences for all operation will be returned as a result.
-
-        Result is like: {'operation name 1': 0.933, 'operation name 2': 0.926}
-
-    if verbose is set as True, this function will display error report at last.
-
-    The key of the dictionary is an operation name while the value of corresponding key
-        is the difference between quantized output and float output of this operation.
-
-    Result {'operation name 1': 0.933} means that quantized graph and fp32 graph have a difference
-        (or similarity, based on your measurement) 0.933 at the output tensor of 'operation name 1'.
-
-    ATTENTION: Output difference is measured at graph-level, it includes the difference accmulated from the
-        very beginning operation along to the target operation.
-
-    Args:
-        graph (BaseGraph):
-            A fully quantized graph instance.
-
-        running_device (str):
-            A device string used to initialize a graph executor for the graph execution.
-                if a executor was given, this parameter will be skipped.
-
-        dataloader (Iterator):
-            Test dataloader, this function will measure the output difference based on given data.
-
-        collate_fn (Callable, optional):
-            An data preprocessing function provided by user to convert data from dataloader towards
-                executable format. If set as None, then no action will be taken during preprocessing.
-
-        method (str, optional):
-            A string indicates a measurement to calculate the difference of quantized output and fp32 one.
-                'cosine', 'snr', and 'mse' is supported in PPQ for now.
-
-        steps (Int, optional)
-            computation steps.
-
-    Returns:
-        A dictionary contains output differences for all operation will be returned from this function.
-
-        Result is like: {'operation name 1': 0.933, 'operation name 2': 0.926}
-    """
-    executor = TorchExecutor(graph=graph, device=running_device)
-
-    # find all quantable operations.
-    interested_op = [
-        operation
-        for operation in graph.operations.values()
-        if (isinstance(operation, QuantableOperation) and operation.is_computing_op)
-    ]
-    if len(interested_op) == 0:
-        print("Oops. you got nothing to analyse.")
-        return
-
-    # set up all hooks.
-    recorders, hooks, caches = {}, {}, {}
-    for operation in interested_op:
-        if isinstance(operation, QuantableOperation):
-            if operation.num_of_output > 1:
-                ppq_warning(
-                    f"Operation {operation.name} has more than 1 output, "
-                    "analyser will process the first output of it."
-                )
-
-            recorders[operation.name] = MeasureRecorder(measurement=method)
-            hooks[operation.name] = OutputRecorder(operation=operation, fetchs=fetchs)
-            caches[operation.name] = []
-
-    # dequantize all
-    for operation in graph.operations.values():
-        if isinstance(operation, QuantableOperation):
-            operation.dequantize()
-
-    # run for each quantable operations:
-    for idx, batch in tqdm(
-        enumerate(dataloader),
-        desc="Analysing Graphwise Quantization Error(Phrase 1):",
-        total=(min(len(dataloader), steps)),
-    ):
-        if collate_fn is not None:
-            batch = collate_fn(batch)
-        executor.forward(inputs=batch, hooks=hooks)
-
-        for operation in interested_op:
-            hook = hooks[operation.name]
-            caches[operation.name].append(hook.pop())
-
-        if idx >= steps:
-            break
-
-    # restore all
-    for operation in graph.operations.values():
-        if isinstance(operation, QuantableOperation):
-            operation.restore_quantize_state()
-
-    # run for each quantable operations:
-    for idx, batch in tqdm(
-        enumerate(dataloader),
-        desc="Analysing Graphwise Quantization Error(Phrase 2):",
-        total=(min(len(dataloader), steps)),
-    ):
-        if collate_fn is not None:
-            batch = collate_fn(batch)
-        executor.forward(inputs=batch, hooks=hooks)
-
-        for operation in interested_op:
-            recorder = recorders[operation.name]
-            hook = hooks[operation.name]
-            cache = caches[operation.name]
-            recorder.update(y_real=cache[idx], y_pred=hook.pop())
-
-        if idx >= steps:
-            break
-
-    results = {}
-    for operation in interested_op:
-        assert isinstance(operation, QuantableOperation)
-        results[operation.name] = recorders[operation.name].measure
-
-    if verbose:
-        method_str = "MEASUREMENT"
-        if method == "snr":
-            method_str = "NOISE:SIGNAL POWER RATIO"
-        if method == "cosine":
-            method_str = "COSINE SIMILARITY"
-        if method == "mse":
-            method_str = "MSE LOSS(UNSCALED)"
-        MeasurePrinter(
-            results, order="large_to_small", measure=method_str, percentage=method in {"snr", "cosine"}
-        ).print()
-    return results
-
-
 def statistical_analyse(
     graph: BaseGraph,
     running_device: str,
     dataloader: Iterator,
     collate_fn: Callable = None,
     steps: int = 8,
+    report_path: Optional[str] = None,
 ) -> List[dict]:
-    """It is time to do some statistical work.
-
-    statistical_analyse is a powerful analying function
-        that provides a in-depth study of your network.
-
-    use report = statistical_analyse() to invoke this function
-
-    The return value of this function is a collection of statistics parameters
-    You are recommended to processing them with pandas
-
-    from pandas import DataFrame
-    report_df = DataFrame(report)
-
-    Args:
-        graph (BaseGraph): _description_
-        running_device (str): _description_
-        dataloader (Iterator): _description_
-        collate_fn (Callable, optional): _description_. Defaults to None.
-        steps (int, optional): _description_. Defaults to 8.
-
-    Returns:
-        Dict[str, float]: _description_
-    """
-
     class StatisticalErrorAnalyser:
         def __init__(self, x_fp: List[torch.Tensor], x_qt: List[torch.Tensor], op: Operation, var: Variable) -> None:
             self.x_qt = torch.cat(x_qt, dim=0)
@@ -272,28 +84,27 @@ def statistical_analyse(
             cosine = torch_cosine_similarity(x_qt, x_fp).item()
             mse = torch_mean_square_error(x_qt, x_fp).item()
             return {
-                "Op": "{}[{}]".format(self.op.name, self.op.type),
-                "Var": self.var.name,
                 "SNR": snr,
                 "MSE": mse,
                 "Cosine": cosine,
                 "Q.MinMax": "{:.3f}, {:.3f}".format(qt_min, qt_max),
                 "F.MinMax": "{:.3f}, {:.3f}".format(fp_min, fp_max),
-                "F.Hist": fp_hist,
+                "F.Hist": ",".join([str(int(i)) for i in fp_hist]),
+                "is_parameter": self.var.is_parameter,
             }
 
     executor = TorchExecutor(graph=graph, device=running_device)
     # find all quantable operations.
     interested_op = []
-    for operation in graph.operations.values():
+    operation_list = graph.topological_sort()
+    for operation in operation_list:
         if isinstance(operation, QuantableOperation) and operation.type not in PASSIVE_OPERATIONS:
             interested_op.append(operation)
     if len(interested_op) == 0:
-        print("Oops. you got nothing to analyse.")
-        return
+        xquant_warning("No analyzable operators were found.")
 
     # set up all hooks.
-    hooks, caches = {}, {}
+    hooks, caches = OrderedDict(), OrderedDict()
     for operation in interested_op:
         if isinstance(operation, QuantableOperation):
             hooks[operation.name] = DetailedRecorder(operation=operation, fetchs=2048)
@@ -305,7 +116,7 @@ def statistical_analyse(
             }
 
     # dequantize all
-    for operation in graph.operations.values():
+    for operation in operation_list:
         if isinstance(operation, QuantableOperation):
             operation.dequantize()
 
@@ -318,7 +129,7 @@ def statistical_analyse(
         if idx >= steps:
             break
 
-    for batch in tqdm(analyse_data_list, desc="Analysing Phrase 1"):
+    for batch in tqdm(analyse_data_list, desc="Analysing Dequantized"):
         executor.forward(inputs=batch, hooks=hooks)
 
     for operation in interested_op:
@@ -329,12 +140,12 @@ def statistical_analyse(
         hook.clear()
 
     # restore all
-    for operation in graph.operations.values():
+    for operation in operation_list:
         if isinstance(operation, QuantableOperation):
             operation.restore_quantize_state()
 
     # run for each quantable operations:
-    for batch in tqdm(analyse_data_list, desc="Analysing Phrase 2"):
+    for batch in tqdm(analyse_data_list, desc="Analysing Quantized"):
         executor.forward(inputs=batch, hooks=hooks)
 
     for operation in interested_op:
@@ -348,18 +159,25 @@ def statistical_analyse(
     records = []
     visited_var = set()
     for name, record in caches.items():
+        op_records = {}
         operation = graph.operations[name]
-        assert isinstance(operation, Operation)
+        if not isinstance(operation, Operation):
+            continue
+        op_records["Op"] = "{}[{}]".format(operation.name, operation.type)
+        op_records["Vars"] = {}
         for idx, input_var in enumerate(operation.inputs):
-            if input_var in visited_var or input_var.is_parameter:
+            if input_var in visited_var:
                 continue
             visited_var.add(input_var)
             x_qt = record["Quantized Input"][idx]
             x_fp = record["Dequantized Input"][idx]
             if x_fp[0].dtype not in {torch.float32, torch.float64, torch.float16}:
                 continue
-            records.append(StatisticalErrorAnalyser(x_fp=x_fp, x_qt=x_qt, op=operation, var=input_var).stat())
+            op_records["Vars"][input_var.name] = StatisticalErrorAnalyser(
+                x_fp=x_fp, x_qt=x_qt, op=operation, var=input_var
+            ).stat()
 
+        max_snr = 0
         for idx, output_var in enumerate(operation.outputs):
             if output_var in visited_var:
                 continue
@@ -368,6 +186,45 @@ def statistical_analyse(
             x_fp = record["Dequantized Output"][idx]
             if x_fp[0].dtype not in {torch.float32, torch.float64, torch.float16}:
                 continue
-            records.append(StatisticalErrorAnalyser(x_fp=x_fp, x_qt=x_qt, op=operation, var=output_var).stat())
+            _detail = StatisticalErrorAnalyser(x_fp=x_fp, x_qt=x_qt, op=operation, var=output_var).stat()
+            if _detail["SNR"] > max_snr:
+                max_snr = _detail["SNR"]
+            op_records["Vars"][output_var.name] = _detail
 
-    return records
+        op_records["MAX_SNR"] = max_snr
+        records.append(op_records)
+
+    def md_red_float(value):
+        return '<font color="red">{:.4f}</font>'.format(value)
+
+    sort_variable_reports = sorted(records, key=lambda x: x["MAX_SNR"], reverse=True)
+
+    report_info_list = []
+    for report_info in sort_variable_reports:
+        for var_name, var_info in report_info["Vars"].items():
+            report_info_list.append({"Op": report_info["Op"], "Var": var_name, **var_info})
+            if "is_parameter" in report_info_list[-1]:
+                is_parameter = report_info_list[-1].pop("is_parameter")
+                if is_parameter:
+                    report_info_list[-1]["Var"] = "{}[Constant]".format(report_info_list[-1]["Var"])
+            snr_value = report_info_list[-1]["SNR"]
+            cos_value = report_info_list[-1]["Cosine"]
+            if snr_value > 0.1:
+                report_info_list[-1]["SNR"] = md_red_float(snr_value)
+            else:
+                report_info_list[-1]["SNR"] = "{:.4f}".format(snr_value)
+
+            if cos_value < 0.99:
+                report_info_list[-1]["Cosine"] = md_red_float(cos_value)
+            else:
+                report_info_list[-1]["Cosine"] = "{:.4f}".format(cos_value)
+
+            report_info_list[-1]["MSE"] = "{:.4f}".format(report_info_list[-1]["MSE"])
+
+    report_index = ["Op", "Var", "SNR", "MSE", "Cosine", "Q.MinMax", "F.MinMax", "F.Hist"]
+    report_info_df = DataFrame(report_info_list, columns=report_index)
+
+    if isinstance(report_path, str):
+        xquant_info("export quantization statistical results file to {}".format(report_path))
+        report_info_df.to_markdown(report_path)
+    return report_info_list

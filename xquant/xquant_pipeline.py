@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Union, Dict, Sequence, Optional
-from collections import OrderedDict
+from typing import Union, Dict, Sequence, Optional, List
+from collections import OrderedDict, deque
 import json
 import torch
 import os
@@ -10,12 +10,11 @@ import time
 import copy
 import onnxsim
 import onnx_graphsurgeon as osg
-from pandas import DataFrame
 from ppq import TargetPlatform, BaseQuantizer, BaseGraph
 from ppq.executor import TorchExecutor
 from ppq.api.interface import format_graph as ppq_format_graph
 from ppq.scheduler import DISPATCHER_TABLE, GraphDispatcher
-from .defs import xquant_info, xquant_warning
+from .defs import xquant_info, xquant_warning, XQUANT_CONFIG
 from .calibration_helper import XQuantDataset, CalibrationCollect
 from .optimizer import GraphLegalized
 from .analyse import statistical_analyse
@@ -23,6 +22,7 @@ from .ppq_decorator.onnxruntime_exporter import ONNXRUNTIMExporter
 from .ppq_decorator.onnx_parser import OnnxParserDecorator
 from .xquant_setting import XQuantSettingFactory, XQuantSetting
 from .quantizer import XQuantizer
+from .onnx_graph_helper import format_onnx_model, truncate_onnx_model, merge_onnx_model
 
 
 def dispatch_graph(graph: BaseGraph, dispatcher: Union[str, GraphDispatcher] = "conservative") -> BaseGraph:
@@ -59,16 +59,6 @@ def dispatch_graph(graph: BaseGraph, dispatcher: Union[str, GraphDispatcher] = "
     return graph
 
 
-def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
-    opset_dict = {}
-    for opset in onnx_model.opset_import:
-        _domain = opset.domain
-        _domain = "ai.onnx" if _domain == "" else _domain
-        opset_dict[_domain] = opset.version
-
-    return opset_dict
-
-
 def xquant_load_onnx_graph(
     file_or_model: Union[str, onnx.ModelProto], sim_en: bool = True, truncate_var_name: Sequence[str] = []
 ):
@@ -79,86 +69,14 @@ def xquant_load_onnx_graph(
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
 
-    onnx_model.graph.ClearField("value_info")
-    for o_var in onnx_model.graph.output:
-        o_var.type.tensor_type.ClearField("shape")
+    onnx_model = format_onnx_model(onnx_model)
+    onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
 
-    opset_dict = get_onnx_opset(onnx_model)
-    ai_onnx_version = opset_dict.get("ai.onnx", 13)
-    if ai_onnx_version < 13:
-        xquant_warning("convert ai.onnx version {} to 13...".format(ai_onnx_version))
-        onnx_model = onnx.version_converter.convert_version(onnx_model, 13)
     if sim_en:
         xquant_info("simplify onnx model...")
         onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
 
-    truncate_left_graph = None
-    truncate_vars = []
-    if len(truncate_var_name) > 0:
-        osg_graph = osg.import_onnx(onnx_model)
-        tensors = osg_graph.tensors()
-        for k, v in tensors.items():
-            if k in set(truncate_var_name):
-                truncate_vars.append(v)
-
-        valid_node_names = set()
-        invalid_node_names = set()
-        valid_nodes = []
-        invalid_nodes = []
-
-        graph_node_set = set([node.name for node in osg_graph.nodes])
-
-        def _truncate_graph_upstream(out_vars: Sequence[osg.Tensor]):
-            for o_var in out_vars:
-                for source_op in o_var.inputs:
-                    if source_op.name in valid_node_names or source_op.name not in graph_node_set:
-                        continue
-                    valid_nodes.append(source_op)
-                    valid_node_names.add(source_op.name)
-                    _truncate_graph_upstream(source_op.inputs)
-
-        def _truncate_graph_downstream(out_vars: Sequence[osg.Tensor]):
-            for o_var in out_vars:
-                for dest_op in o_var.outputs:
-                    if dest_op.name in invalid_node_names or dest_op.name not in graph_node_set:
-                        continue
-                    invalid_nodes.append(dest_op)
-                    invalid_node_names.add(dest_op.name)
-                    _truncate_graph_downstream(dest_op.outputs)
-
-        _truncate_graph_upstream(truncate_vars)
-        _truncate_graph_downstream(truncate_vars)
-
-        if len(valid_nodes) + len(invalid_nodes) != len(osg_graph.nodes):
-            raise RuntimeError("truncate graph failed.")
-
-        truncate_graph = osg.Graph(
-            nodes=valid_nodes,
-            inputs=osg_graph.inputs,
-            outputs=truncate_vars,
-            name=copy.copy(osg_graph.name),
-            doc_string=copy.copy(osg_graph.doc_string),
-            opset=copy.copy(osg_graph.opset),
-            import_domains=osg_graph.import_domains,
-        )
-
-        truncate_left_graph = osg.Graph(
-            nodes=invalid_nodes,
-            inputs=[],
-            outputs=osg_graph.outputs,
-            name=copy.copy(osg_graph.name),
-            doc_string=copy.copy(osg_graph.doc_string),
-            opset=copy.copy(osg_graph.opset),
-            import_domains=osg_graph.import_domains,
-        )
-
-        truncate_onnx_model = osg.export_onnx(truncate_graph)
-        for var in truncate_vars:
-            var.inputs.clear()
-    else:
-        truncate_onnx_model = onnx_model
-
-    graph = OnnxParserDecorator().build(truncate_onnx_model)
+    graph = OnnxParserDecorator().build(onnx_model)
     graph = ppq_format_graph(graph)
     return graph, truncate_left_graph, truncate_vars
 
@@ -264,63 +182,21 @@ def quantize_onnx_model(
 
     if config_setting.quantization_parameters.analysis_enable:
         test_dataloader = torch.utils.data.DataLoader(data_set, shuffle=True)
+        report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
         graphwise_analyse_results = statistical_analyse(
             quantizer._graph,
             calibration_device,
             test_dataloader,
             CalibrationCollect(input_parametres, calibration_device),
-            steps=16,
+            steps=XQUANT_CONFIG.analyse_steps,
+            report_path=report_path,
         )
-        variable_reports = []
-        for report_info in graphwise_analyse_results:
-            variable_reports.append(report_info)
-            variable_reports[-1]["F.Hist"] = ",".join([str(int(i)) for i in report_info["F.Hist"]])
-        sort_variable_reports = sorted(variable_reports, key=lambda x: x["SNR"], reverse=True)
-
-        def md_red_float(value):
-            return '<font color="red">{:.4f}</font>'.format(value)
-
-        for report_info in sort_variable_reports:
-            snr_value = report_info["SNR"]
-            if snr_value > 0.1:
-                report_info["SNR"] = md_red_float(snr_value)
-            else:
-                report_info["SNR"] = "{:.4f}".format(snr_value)
-
-            report_info["MSE"] = "{:.4f}".format(report_info["MSE"])
-
-            cos_value = report_info["Cosine"]
-            if cos_value < 0.99:
-                report_info["Cosine"] = md_red_float(cos_value)
-            else:
-                report_info["Cosine"] = "{:.4f}".format(cos_value)
-
-        report_index = ["Op", "SNR", "MSE", "Cosine", "Var", "Q.MinMax", "F.MinMax", "F.Hist"]
-        sort_variable_reports_df = DataFrame(sort_variable_reports, columns=report_index)
-        report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
-        xquant_info("export quantization statistical results file to {}".format(report_path))
-        sort_variable_reports_df.to_markdown(report_path)
 
     quant_onnx_model = ONNXRUNTIMExporter().export(
         quantizer._graph,
     )
 
-    if isinstance(truncate_left_graph, osg.Graph):
-        osg_graph = osg.import_onnx(quant_onnx_model)
-        for idx, o_var in enumerate(osg_graph.outputs):
-            o_idx = o_var.inputs[0].outputs.index(o_var)
-            o_var.inputs[0].outputs[o_idx] = truncate_vars[idx]
-
-        new_osg_graph = osg.Graph(
-            nodes=osg_graph.nodes + truncate_left_graph.nodes,
-            inputs=osg_graph.inputs,
-            outputs=truncate_left_graph.outputs,
-            name=copy.copy(osg_graph.name),
-            doc_string=copy.copy(osg_graph.doc_string),
-            opset=copy.copy(osg_graph.opset),
-            import_domains=osg_graph.import_domains,
-        )
-        quant_onnx_model = osg.export_onnx(new_osg_graph)
+    quant_onnx_model = merge_onnx_model(quant_onnx_model, truncate_left_graph, truncate_vars)
 
     onnx.save(quant_onnx_model, os.path.join(working_dir, "{}.onnx".format(output_prefix)))
 

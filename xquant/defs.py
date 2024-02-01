@@ -11,15 +11,19 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.cuda_support = torch.cuda.is_available()
 
-        self.min_block_size = 4
+        self.min_block_size = 10
 
         self.max_block_size = 16
+
+        self.merge_block_step = 4
 
         self.fine_tune_epoch = 2
 
         self.equalization_iterations = 10
 
         self.max_bits = 12
+
+        self.analyse_steps = 16
 
         self.version = "1.0.3"
 

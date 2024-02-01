@@ -2,8 +2,9 @@
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import functools
-import torch
+from collections import deque
 from tqdm import tqdm
+import torch
 from ppq.core import (
     QuantizationStates,
     common as ppq_common,
@@ -18,7 +19,7 @@ from ppq.quantization.observer import (
     TorchHistObserver,
     TorchMSEObserver,
 )
-from ppq.quantization.algorithm.training import TrainableBlock, BlockBuilder, PriorityQueue
+from ppq.quantization.algorithm.training import TrainableBlock
 from ppq.quantization.measure import (
     torch_mean_square_error,
     torch_snr_error,
@@ -28,126 +29,8 @@ from ppq.quantization.measure import (
 from ppq.quantization.optim import LearnedStepSizePass, AdaroundPass
 from ppq.utils.round import ppq_round_to_power_of_2
 from ..optimizer import PassiveParameterBakingPass
+from .training import XQuantTrainableBlock, XQuantBlockBuilder
 from ..defs import COMPUTING_OP, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE, XQUANT_CONFIG
-
-
-class CalibrationBlock:
-    def __init__(self, s_vars: Set[Variable], e_vars: Set[Variable], rps: Sequence[Operation]) -> None:
-        self.s_vars = s_vars  # 起始边
-        self.e_vars = e_vars  # 终止边
-        self.rps = rps  # 中继节点
-
-    def __str__(self) -> str:
-        s_var_names = ", ".join([i.name for i in self.s_vars])
-        e_var_names = ", ".join([i.name for i in self.e_vars])
-        return "[Graph Block from [{}] to [{}]]".format(s_var_names, e_var_names)
-
-    @staticmethod
-    def convert_from_trainableblock(block: TrainableBlock, graph: BaseGraph) -> "CalibrationBlock":
-        in_var_names, out_var_names = get_block_io_var_names(block)
-        return CalibrationBlock(
-            set([graph.variables[i] for i in in_var_names]),
-            set([graph.variables[i] for i in out_var_names]),
-            block.rps,
-        )
-
-
-class CustomBlockBuilder(BlockBuilder):
-    def build(self, op: Operation, max_limit: int, min_limit: int) -> TrainableBlock:
-        def _find_multi_input_ep(op: Operation):
-            # 如果当前节点后继节点存在多个，层序遍历寻找阻断节点
-            least_first_queue = PriorityQueue()
-            least_first_queue.push(self.depth[op], op)
-            least_first_queue.pop()
-
-            for down_op in self.graph.get_downstream_operations(op):
-                least_first_queue.push(self.depth[down_op], down_op)
-
-            while not least_first_queue.empty():
-                iter_operation = least_first_queue.pop()[-1]
-                if least_first_queue.empty():
-                    upstream_ops = self.graph.get_upstream_operations(iter_operation)
-                    if all([op in least_first_queue._ops for op in upstream_ops]) and len(upstream_ops) > 1:
-                        return iter_operation
-                for down_op in self.graph.get_downstream_operations(iter_operation):
-                    least_first_queue.push(self.depth[down_op], down_op)
-
-            # if least_first_queue is empty, it means we can not find an blocking ep from given sp.
-            return None
-
-        def _find_coherent_ep(op: Operation):
-            # 如果当前节点后继节点只有一个，向下寻找直系节点
-            # 但如果直系后继节点有多于一个输入，算法立即停机
-            ops = self.graph.get_downstream_operations(op)
-            if len(ops) == 1:
-                following_op = ops[0]
-                # PATCH 20220811，get_upstream_operations 不足以判断算子是否只有一个输入
-                # 因为算子可以直接与图的 input 相连...
-                non_parameter_input = following_op.num_of_input - following_op.num_of_parameter
-                upstream_ops = len(self.graph.get_upstream_operations(following_op))
-                if non_parameter_input == 1 and upstream_ops == 1:
-                    return ops[0]
-            return None
-
-        def _find_computing_ops_in_route(sp: Operation, ep: Operation):
-            if sp == ep:
-                return 1 if sp.type in COMPUTING_OP else 0
-            rps = self.search_engine.opset_matching(
-                sp_expr=lambda x: x == sp, rp_expr=lambda x, y: True, ep_expr=lambda x: x == ep, direction="down"
-            )
-            rps = [(self.op_orders.index(op), op) for op in rps if isinstance(op, QuantableOperation)]
-            return len(rps)
-
-        sp, ep, future_ep = op, op, op
-        while future_ep is not None:
-            if len(self.graph.get_downstream_operations(ep)) <= 1:
-                future_ep = _find_coherent_ep(ep)
-            else:
-                future_ep = _find_multi_input_ep(ep)
-
-            if future_ep is None:
-                return self.create_block(sp, ep)
-
-            current_depth = self.depth[ep] - self.depth[sp]
-            future_depth = self.depth[future_ep] - self.depth[sp]
-
-            if future_ep is not None and len(self.graph.get_downstream_operations(future_ep)) > 1:
-                # 如果下个节点产生分叉，分叉后产生超过限制的深度就不合并
-                next_future_ep = _find_multi_input_ep(future_ep)
-                next_future_depth = self.depth[next_future_ep] - self.depth[sp]
-                if next_future_depth > max_limit and current_depth > min_limit:
-                    return self.create_block(sp, ep)
-
-            if future_depth > max_limit:
-                quantable_op_num = _find_computing_ops_in_route(sp, ep)
-                if quantable_op_num > 0:
-                    return self.create_block(sp, ep)
-            ep = future_ep
-        return self.create_block(sp=sp, ep=ep)
-
-
-@functools.lru_cache(maxsize=None)
-def get_block_io_var_names(block: Union[TrainableBlock, CalibrationBlock]):
-    block_op_set = set(block.rps)
-    block_output_names_set = set()
-    block_input_names_set = set()
-    for operation in block.rps:
-        for o_var in operation.outputs:
-            if isinstance(o_var.dest_ops, Sequence) and len(o_var.dest_ops) > 0:
-                for dest_op in o_var.dest_ops:
-                    if dest_op not in block_op_set:
-                        block_output_names_set.add(o_var.name)
-                        break
-            else:
-                block_output_names_set.add(o_var.name)
-        # block内所有op输入的source_op不属于当前block
-        for i_var in operation.inputs:
-            if i_var.source_op is not None:
-                if i_var.source_op not in block_op_set:
-                    block_input_names_set.add(i_var.name)
-            elif not i_var.is_parameter and i_var.name != "":
-                block_input_names_set.add(i_var.name)
-    return block_input_names_set, block_output_names_set
 
 
 class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
@@ -178,25 +61,13 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         self,
         graph: BaseGraph,
         executing_order: List[Operation],
-    ) -> List[TrainableBlock]:
-        visited_ops, blocks = set(), []
-        block_builder = CustomBlockBuilder(graph=graph, topo_order=executing_order)
-
-        for op in executing_order:
-            # start from computing op
-            if op in visited_ops:
-                continue
-            block = block_builder.build(op, XQUANT_CONFIG.max_block_size, XQUANT_CONFIG.min_block_size)
-            # by default blocks are exclusive from each other
-            for op in block.rps:
-                visited_ops.add(op)
-            blocks.append(block)
-
-        return blocks
+    ) -> List[XQuantTrainableBlock]:
+        block_builder = XQuantBlockBuilder(graph=graph, topo_order=executing_order)
+        return block_builder.build()
 
     def forward_trainable_block(
         self,
-        block: TrainableBlock,
+        block: XQuantTrainableBlock,
         dataloader_cache: dict,
         executor: TorchExecutor,
         executor_hook: dict,
@@ -208,9 +79,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
         if extern_output_var_hooks is None:
             extern_output_var_hooks = {}
 
-        block_input_names_set, block_output_names_set = get_block_io_var_names(block)
-
-        block_input_names = list(block_input_names_set)
+        block_input_names = list(block.in_var_names)
 
         for var_name in block_input_names:
             if var_name not in dataloader_cache:
@@ -221,7 +90,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                 var_name: dataloader_cache[var_name][idx].to(executor._executing_context.executing_device)
                 for var_name in block_input_names
             }
-            output_names = list(block_output_names_set | set(extern_output_var_hooks.keys()))
+            output_names = list(block.out_var_names | set(extern_output_var_hooks.keys()))
             outputs = executor._TorchExecutor__forward(
                 inputs_feed,
                 operation_cache,
@@ -229,7 +98,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
                 hooks=executor_hook,
             )
             for o_var, o_name in zip(outputs, output_names):
-                if o_name in block_output_names_set and collect_dataloader_cache:
+                if o_name in block.out_var_names and collect_dataloader_cache:
                     if o_name not in dataloader_cache:
                         dataloader_cache[o_name] = []
                     if o_var.device.type == "cuda":
@@ -246,7 +115,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
 
     def clean_dataloader_cache(
         self,
-        block: TrainableBlock,
+        block: XQuantTrainableBlock,
         dataloader_cache: dict,
         var_to_operations: dict,
     ):
@@ -262,7 +131,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
 
     def calib_single_block(
         self,
-        block: TrainableBlock,
+        block: XQuantTrainableBlock,
         dataloader_cache: dict,
         var_to_operations: dict,
         executor: TorchExecutor,
@@ -356,25 +225,32 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
 
     def compute_block_loss(
         self,
-        block: TrainableBlock,
+        block: XQuantTrainableBlock,
         dataloader_cache: dict,
         executor: TorchExecutor,
         calib_steps: int,
     ) -> dict:
-        _, block_output_names_set = get_block_io_var_names(block)
-        block_output_names = list(block_output_names_set)
+        block_output_names = list(block.out_var_names)
         mse_losses = {o_name: 0 for o_name in block_output_names}
         snr_losses = {o_name: 0 for o_name in block_output_names}
         cosine = {o_name: 0 for o_name in block_output_names}
         means = {o_name: 0 for o_name in block_output_names}
 
         def __collect_loss(o_name: str, o_var: torch.Tensor, idx: int):
+            exe_device = executor._executing_context.executing_device
             ref_var = dataloader_cache[o_name][idx]
-            ref_var = ref_var.to(executor._executing_context.executing_device)
-            batch_mse_loss = torch_mean_square_error(o_var, ref_var)
-            batch_snr_loss = torch_snr_error(o_var, ref_var)
-            batch_cosine = torch_cosine_similarity(o_var, ref_var)
-            means[o_name] += ref_var.abs().mean().detach().item()
+            ref_var = ref_var.to(exe_device)
+            o_var = o_var.to(exe_device)
+            if ref_var.dtype in {torch.float32, torch.float64, torch.float16}:
+                batch_mse_loss = torch_mean_square_error(o_var, ref_var)
+                batch_snr_loss = torch_snr_error(o_var, ref_var)
+                batch_cosine = torch_cosine_similarity(o_var, ref_var)
+                means[o_name] += ref_var.abs().mean().detach().item()
+            else:
+                batch_mse_loss = torch.tensor([0], dtype=torch.float32, device=exe_device)
+                batch_snr_loss = torch.tensor([0], dtype=torch.float32, device=exe_device)
+                batch_cosine = torch.tensor([1], dtype=torch.float32, device=exe_device)
+                means[o_name] += torch.tensor([0], dtype=torch.float32, device=exe_device)
             mse_losses[o_name] += batch_mse_loss.detach().item()
             snr_losses[o_name] += batch_snr_loss.detach().item()
             cosine[o_name] += batch_cosine.detach().item()
@@ -414,7 +290,7 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
 
     def block_bias_correct(
         self,
-        block: TrainableBlock,
+        block: XQuantTrainableBlock,
         dataloader_cache: dict,
         executor: TorchExecutor,
         calib_steps: int,
@@ -423,14 +299,13 @@ class RuntimeBlockWiseCalibrationPass(RuntimeCalibrationPass):
     ) -> None:
         if len(bias_op_var_names) == 0:
             return
-        block_input_names_set, block_output_names_set = get_block_io_var_names(block)
         operation_cache = [operation for operation in block.rps]
         bias_quant_cache = {}
         output_names = list(bias_op_var_names.keys())
         for idx in tqdm(range(calib_steps), desc="Runtime Calibration Single Block Finetune", disable=True):
             inputs_feed = {
                 var_name: dataloader_cache[var_name][idx].to(executor._executing_context.executing_device)
-                for var_name in block_input_names_set
+                for var_name in block.in_var_names
             }
             outputs = executor.partial_graph_forward(
                 operations=operation_cache, feed_dict=inputs_feed, output_names=list(bias_op_var_names.keys())

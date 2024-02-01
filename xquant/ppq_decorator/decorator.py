@@ -22,6 +22,7 @@ from .onnx_parser import OnnxParserDecorator
 from ..defs import PASSIVE_OPERATIONS, COMPUTING_OP
 
 ppq_optim.training.LearnedStepSizePass.finetune = LearnedStepSizePassDecorator.finetune
+ppq_optim.training.LearnedStepSizePass.collect = LearnedStepSizePassDecorator.collect
 ppq_algorithm_training.LSQDelegator.__call__ = LSQDelegatorDecorator.__call__
 ppq_algorithm_training.LSQDelegator.finalize = LSQDelegatorDecorator.finalize
 ppq_onnx_parser.OnnxParser.build = OnnxParserDecorator.build

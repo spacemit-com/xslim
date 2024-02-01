@@ -26,8 +26,6 @@ class GraphLegalized:
         self.format_ms_domain()
         self.fuse_mul_add()
         self.fuse_mul_add()
-        self.format_gemm()
-        self.format_gemm()
 
     def format_div(self):
         for op in self._graph.operations.values():
@@ -75,63 +73,6 @@ class GraphLegalized:
                 squeeze_op.inputs.clear()
                 squeeze_op.outputs.clear()
                 self._graph.remove_operation(squeeze_op)
-
-    def format_gemm(self):
-        search_engine = SearchableGraph(graph=self._graph)
-        paths = search_engine.path_matching(
-            sp_expr=lambda x: x.type in {"Flatten"} and x.attributes.get("axis", 0) == 1,
-            rp_expr=lambda x, y: False,
-            ep_expr=lambda x: x.type in {"Gemm"}
-            and x.attributes.get("alpha", 1) == 1
-            and x.attributes.get("transA", 0) == 0
-            and len(x.inputs) >= 2
-            and x.inputs[1].is_parameter,
-            direction="down",
-        )
-
-        for path in paths:
-            path = path.tolist()
-            assert len(path) == 2, "Oops seems we got something unexpected."
-
-            flatten_op, gemm_op = path
-            assert isinstance(flatten_op, Operation) and isinstance(gemm_op, Operation)
-
-            transB = gemm_op.attributes.get("transB", 0)
-
-            w = gemm_op.parameters[0].value
-            if transB != 1:
-                w = torch.permute(w, [1, 0])
-
-            w = torch.unsqueeze(w, -1)
-            w = torch.unsqueeze(w, -1)
-
-            gemm_op.inputs[1].value = w
-            conv_attributes = {"dilations": [1, 1], "kernel_shape": [1, 1], "strides": [1, 1], "group": 1}
-            gemm_op.type = "Conv"
-            gemm_op.attributes.clear()
-            for k, v in conv_attributes.items():
-                gemm_op.attributes[k] = v
-
-            gemm_op.inputs[0] = flatten_op.inputs[0]
-            gemm_op.inputs[0].dest_ops.remove(flatten_op)
-            gemm_op.inputs[0].dest_ops.append(gemm_op)
-
-            temp_var = flatten_op.outputs[0]
-            flatten_op.outputs[0] = gemm_op.outputs[0]
-            gemm_op.outputs[0] = temp_var
-            flatten_op.inputs[0] = gemm_op.outputs[0]
-
-            flatten_op.inputs[0].dest_ops.remove(gemm_op)
-            flatten_op.inputs[0].dest_ops.append(flatten_op)
-
-            gemm_op.outputs[0].source_op = gemm_op
-            flatten_op.outputs[0].source_op = flatten_op
-
-        for op_name, op in self._graph.operations.items():
-            if op.type in {"Gemm"}:
-                if op.inputs[1].is_parameter and op.attributes.get("transB", 0) == 0:
-                    op.attributes["transB"] = 1
-                    op.inputs[1].value = torch.permute(op.inputs[1].value, [1, 0])
 
     def remove_dropout(self):
         removing_ops = []

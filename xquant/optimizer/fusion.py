@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
+from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
 from ppq.core import (
     QuantizationStates,
@@ -15,6 +15,77 @@ from ppq.quantization.optim import (
 from ppq.IR.search import SearchableGraph
 from ppq.executor import BaseGraphExecutor
 from ..defs import XQUANT_CONFIG, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE
+
+
+class FlattenGemmFusionPass(QuantizationOptimizationPass):
+    def __init__(self) -> None:
+        super().__init__("XQuant FlattenGemm Fusion")
+
+    def optimize(
+        self,
+        graph: BaseGraph,
+        dataloader: Iterable,
+        executor: BaseGraphExecutor,
+        **kwargs,
+    ) -> None:
+        search_engine = SearchableGraph(graph)
+        paths = search_engine.path_matching(
+            sp_expr=lambda x: x.type in {"Flatten"} and x.attributes.get("axis", 0) == 1,
+            rp_expr=lambda x, y: False,
+            ep_expr=lambda x: x.type in {"Gemm"}
+            and x.attributes.get("alpha", 1) == 1
+            and x.attributes.get("transA", 0) == 0
+            and len(x.inputs) >= 2
+            and x.inputs[1].is_parameter,
+            direction="down",
+        )
+
+        for path in paths:
+            path = path.tolist()
+            assert len(path) == 2, "Oops seems we got something unexpected."
+
+            flatten_op, gemm_op = path
+            assert isinstance(flatten_op, Operation) and isinstance(gemm_op, Operation)
+
+            transB = gemm_op.attributes.get("transB", 0)
+
+            w = gemm_op.parameters[0].value
+            if transB != 1:
+                w = torch.permute(w, [1, 0])
+
+            if not isinstance(flatten_op.inputs[0].shape, Sequence):
+                continue
+
+            weight_new_shape = [*w.shape, *flatten_op.inputs[0].shape[2:]]
+            weight_new_shape[1] = -1
+            w = w.reshape(weight_new_shape)
+            gemm_op.inputs[1].value = w
+            conv_attributes = {"dilations": [1, 1], "kernel_shape": [1, 1], "strides": [1, 1], "group": 1}
+            gemm_op.type = "Conv"
+            gemm_op.attributes.clear()
+            for k, v in conv_attributes.items():
+                gemm_op.attributes[k] = v
+
+            gemm_op.inputs[0] = flatten_op.inputs[0]
+            gemm_op.inputs[0].dest_ops.remove(flatten_op)
+            gemm_op.inputs[0].dest_ops.append(gemm_op)
+
+            temp_var = flatten_op.outputs[0]
+            flatten_op.outputs[0] = gemm_op.outputs[0]
+            gemm_op.outputs[0] = temp_var
+            flatten_op.inputs[0] = gemm_op.outputs[0]
+
+            flatten_op.inputs[0].dest_ops.remove(gemm_op)
+            flatten_op.inputs[0].dest_ops.append(flatten_op)
+
+            gemm_op.outputs[0].source_op = gemm_op
+            flatten_op.outputs[0].source_op = flatten_op
+
+        for op_name, op in graph.operations.items():
+            if op.type in {"Gemm"}:
+                if op.inputs[1].is_parameter and op.attributes.get("transB", 0) == 0:
+                    op.attributes["transB"] = 1
+                    op.inputs[1].value = torch.permute(op.inputs[1].value, [1, 0])
 
 
 class HardSwishFusionPass(QuantizationOptimizationPass):

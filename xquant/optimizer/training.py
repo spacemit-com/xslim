@@ -1,12 +1,13 @@
 from collections import defaultdict
-from typing import Callable, Dict, Iterable, List, Tuple
+from typing import Callable, Dict, Iterable, List, Tuple, Union, Sequence, Set
+import functools
 from tqdm import tqdm
 import random
 import numpy as np
 import torch
 from ppq.core import TensorQuantizationConfig, QuantizationProperty, QuantizationStates
 from ppq.executor import BaseGraphExecutor, TorchExecutor
-from ppq.IR import BaseGraph, BaseGraph, Operation, QuantableOperation
+from ppq.IR import BaseGraph, BaseGraph, Operation, QuantableOperation, Variable
 from ppq.IR.quantize import QuantableGraph
 from ppq.quantization.algorithm.training import LSQDelegator, TrainableBlock
 from ppq.quantization.measure import torch_mean_square_error, torch_snr_error
@@ -16,7 +17,216 @@ from ppq.utils.fetch import batch_random_fetch
 from ppq.utils.round import ppq_tensor_round
 from ppq.quantization.optim.base import QuantizationOptimizationPass
 from ppq.quantization.optim import LearnedStepSizePass
-from ..defs import xquant_info, xquant_debug
+from ..defs import xquant_info, xquant_debug, XQUANT_CONFIG
+
+
+class XQuantTrainableBlock(TrainableBlock):
+    OP_DEPTH_DICT = {
+        "Conv": 4,
+        "ConvTranspose": 4,
+        "Gemm": 4,
+        "MatMul": 4,
+        "LayerNormalization": 2,
+        "InstanceNormalization": 2,
+        "GroupNormalization": 2,
+        "MaxPool": 2,
+        "AveragePool": 2,
+        "GlobalMaxPool": 2,
+        "GlobalAveragePool": 2,
+        "ReduceMean": 2,
+        "Reshape": 0.5,
+        "Transpose": 0.5,
+        "Slice": 0.5,
+        "Squeeze": 0.5,
+        "Unsqueeze": 0.5,
+        "Gather": 0.5,
+        "Flatten": 0.5,
+        "Split": 0.5,
+    }
+
+    def __init__(self, sp: Operation, ep: Operation, rps: List[Operation], graph: BaseGraph):
+        super().__init__(sp, ep, rps)
+        self.graph: BaseGraph = graph
+        self.in_var_names = set()
+        self.out_var_names = set()
+        self.depth = 0
+        self.update_block_io_var_names()
+        self.get_depth()
+
+    @staticmethod
+    def get_sequence_block_depth(rps: List[Operation]):
+        depth = 0
+        for op in rps:
+            depth += XQuantTrainableBlock.OP_DEPTH_DICT.get(op.type, 1)
+        return depth
+
+    def get_depth(self):
+        block_ops = set(self.rps)
+
+        def visit_ops(in_vars: List[Variable], depth):
+            next_vars = []
+            max_depth = 0
+            for var in in_vars:
+                for dest_op in var.dest_ops:
+                    if dest_op in block_ops:
+                        block_ops.remove(dest_op)
+                        next_vars.extend(dest_op.outputs)
+                        max_depth = max(XQuantTrainableBlock.OP_DEPTH_DICT.get(dest_op.type, 1), max_depth)
+            depth = max_depth + depth
+            if len(next_vars) > 0:
+                return visit_ops(next_vars, depth)
+            return depth
+
+        in_vars = [self.graph.variables[name] for name in self.in_var_names]
+        depth = visit_ops(in_vars, 0)
+        self.depth = depth
+        return depth
+
+    def update_block_io_var_names(self) -> Tuple[Set[str], Set[str]]:
+        block_op_set = set(self.rps)
+        block_output_names_set = set()
+        block_input_names_set = set()
+        for operation in self.rps:
+            for o_var in operation.outputs:
+                if isinstance(o_var.dest_ops, Sequence) and len(o_var.dest_ops) > 0:
+                    for dest_op in o_var.dest_ops:
+                        if dest_op not in block_op_set:
+                            block_output_names_set.add(o_var.name)
+                            break
+                else:
+                    block_output_names_set.add(o_var.name)
+            for i_var in operation.inputs:
+                if i_var.source_op is not None:
+                    if i_var.source_op not in block_op_set:
+                        block_input_names_set.add(i_var.name)
+                elif not i_var.is_parameter and i_var.name != "":
+                    block_input_names_set.add(i_var.name)
+        self.in_var_names = block_input_names_set
+        self.out_var_names = block_output_names_set
+        return block_input_names_set, block_output_names_set
+
+
+class XQuantBlockBuilder:
+    def __init__(self, graph: BaseGraph, topo_order: List[Operation]) -> None:
+        self.graph = graph
+        self.op_orders = topo_order
+        self.sequence_blocks: List[XQuantTrainableBlock] = []
+        self.var_to_dest_blocks = dict()
+        self.var_to_src_blocks = dict()
+        self.sequence_init()
+        self.sequence_io_init()
+
+    def sequence_init(self):
+        """
+
+        初始化一个单序列的块列表
+        """
+        visited_ops = set()
+
+        def _find_coherent_ops(s_op: Operation, rps: List[Operation]) -> Operation:
+            rps.append(s_op)
+            downstrem_ops = self.graph.get_downstream_operations(s_op)
+            upstrem_ops = self.graph.get_upstream_operations(s_op)
+            if (
+                len(downstrem_ops) == 1
+                and len(upstrem_ops) == 1
+                and len(self.graph.get_upstream_operations(downstrem_ops[0])) == 1
+                and XQuantTrainableBlock.get_sequence_block_depth(rps) < XQUANT_CONFIG.min_block_size
+            ):
+                return _find_coherent_ops(downstrem_ops[0], rps)
+            else:
+                return s_op
+
+        for op in self.op_orders:
+            if op in visited_ops:
+                continue
+            s_op = op
+            rps = []
+            e_op = _find_coherent_ops(s_op, rps)
+            for _op in rps:
+                visited_ops.add(_op)
+            self.sequence_blocks.append(XQuantTrainableBlock(s_op, e_op, rps, self.graph))
+
+    def sequence_io_init(self):
+        self.var_to_dest_blocks.clear()
+        self.var_to_src_blocks.clear()
+        for block in self.sequence_blocks:
+            for var_name in block.in_var_names:
+                if var_name not in self.var_to_dest_blocks:
+                    self.var_to_dest_blocks[var_name] = []
+                self.var_to_dest_blocks[var_name].append(block)
+
+            for var_name in block.out_var_names:
+                if var_name not in self.var_to_src_blocks:
+                    self.var_to_src_blocks[var_name] = []
+                self.var_to_src_blocks[var_name].append(block)
+
+    def get_downstream_blocks(self, block: XQuantTrainableBlock):
+        downstream_blocks = set()
+        for var_name in block.out_var_names:
+            downstream_blocks.update(self.var_to_dest_blocks.get(var_name, []))
+        return list(downstream_blocks)
+
+    def get_upstream_blocks(self, block: XQuantTrainableBlock):
+        upstream_blocks = set()
+        for var_name in block.in_var_names:
+            upstream_blocks.update(self.var_to_src_blocks.get(var_name, []))
+        return list(upstream_blocks)
+
+    def build(self):
+        def _find_same_input_block(block: XQuantTrainableBlock):
+            visited_var_names = block.in_var_names | block.out_var_names
+            merge_blocks = []
+            for down_block in self.get_downstream_blocks(block):
+                visited_var_names.update(down_block.out_var_names)
+                if down_block.in_var_names <= visited_var_names and down_block not in merge_blocks:
+                    merge_blocks.append(down_block)
+            # 保持顺序
+            for down_block in self.get_downstream_blocks(block):
+                if down_block.in_var_names <= visited_var_names and down_block not in merge_blocks:
+                    merge_blocks.append(down_block)
+            return merge_blocks
+
+        def _merge_block(
+            start_block: XQuantTrainableBlock, end_block: XQuantTrainableBlock, rp_blocks: List[XQuantTrainableBlock]
+        ):
+            rp_blocks.append(start_block)
+            if end_block is start_block:
+                return
+            for down_block in self.get_downstream_blocks(start_block):
+                if down_block not in rp_blocks:
+                    _merge_block(down_block, end_block, rp_blocks)
+
+        for merge_step in range(XQUANT_CONFIG.merge_block_step):
+            valid_blocks = []
+            visited_block = set()
+            for block in self.sequence_blocks:
+                if block in visited_block:
+                    continue
+                visited_block.add(block)
+                merge_blocks = []
+                if block.depth < XQUANT_CONFIG.max_block_size:
+                    merge_blocks = _find_same_input_block(block)
+
+                update_block = block
+                if len(merge_blocks) > 0:
+                    max_add_depth = 0
+                    for rp_block in merge_blocks:
+                        max_add_depth = max(rp_block.depth, max_add_depth)
+
+                    if (max_add_depth + block.depth) < XQUANT_CONFIG.max_block_size:
+                        for rp_block in merge_blocks:
+                            visited_block.add(rp_block)
+                            update_block.rps.extend(rp_block.rps)
+                        update_block.ep = merge_blocks[-1].ep
+                        update_block.update_block_io_var_names()
+                        update_block.get_depth()
+                valid_blocks.append(update_block)
+
+            self.sequence_blocks = valid_blocks
+            self.sequence_io_init()
+
+        return self.sequence_blocks
 
 
 class LSQDelegatorDecorator(LSQDelegator):
@@ -57,11 +267,71 @@ class LSQDelegatorDecorator(LSQDelegator):
 
 
 class LearnedStepSizePassDecorator(LearnedStepSizePass):
+    def collect(
+        self,
+        graph: BaseGraph,
+        block: XQuantTrainableBlock,
+        executor: TorchExecutor,
+        dataloader: Iterable,
+        collate_fn: Callable,
+        collecting_device: str,
+        steps: int = None,
+        expire_device: str = "cpu",
+    ) -> Tuple[List[Dict[str, torch.Tensor]], List[Dict[str, torch.Tensor]]]:
+        def cache_fn(data: torch.Tensor):
+            # TODO move this function to ppq.core.IO
+            if not isinstance(data, torch.Tensor):
+                raise TypeError(
+                    "Unexpected Type of value, Except network output to be torch.Tensor, "
+                    f"however {type(data)} was given."
+                )
+            if collecting_device == "cpu":
+                data = data.cpu()
+            if collecting_device == "cuda":
+                data = data.cuda()
+            # TODO restrict collecting device.
+            return data
+
+        block_output_names = list(block.out_var_names)
+        block_input_names = list(block.in_var_names)
+        with torch.no_grad():
+            quant_graph = QuantableGraph(graph)  # helper class
+            fp_outputs, qt_inputs = [], []
+
+            cur_iter = 0
+            # dequantize graph, collect fp32 outputs
+            quant_graph.dequantize_graph(expire_device=expire_device)
+            for data in dataloader:
+                if collate_fn is not None:
+                    data = collate_fn(data)
+
+                fp_output = executor.forward(data, block_output_names)
+                fp_output = {var_name: cache_fn(value) for var_name, value in zip(block_output_names, fp_output)}
+                fp_outputs.append(fp_output)
+                cur_iter += 1
+                if steps is not None and cur_iter > steps:
+                    break
+
+            cur_iter = 0
+            # restore quantization state, collect quant inputs
+            quant_graph.restore_quantize_state(expire_device=expire_device)
+            for data in dataloader:
+                if collate_fn is not None:
+                    data = collate_fn(data)
+                qt_input = executor.forward(data, block_input_names)
+                qt_input = {var_name: cache_fn(value) for var_name, value in zip(block_input_names, qt_input)}
+                qt_inputs.append(qt_input)
+                cur_iter += 1
+                if steps is not None and cur_iter > steps:
+                    break
+
+        return qt_inputs, fp_outputs
+
     def finetune(
         self,
         steps: int,
         learning_rate: float,
-        block: TrainableBlock,
+        block: XQuantTrainableBlock,
         executor: TorchExecutor,
         qt_inputs: List[Dict[str, torch.Tensor]],
         fp_outputs: List[Dict[str, torch.Tensor]],

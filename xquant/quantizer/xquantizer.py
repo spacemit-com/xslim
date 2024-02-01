@@ -15,6 +15,7 @@ from ppq.core import (
     QuantizationStates,
     RoundingPolicy,
     common as ppq_common,
+    TargetPlatform,
 )
 from ppq import QuantizationSettingFactory
 from ppq.quantization.quantizer import BaseQuantizer
@@ -33,6 +34,7 @@ from ppq.quantization.optim import (
     ParameterBakingPass,
 )
 from ..optimizer import (
+    FlattenGemmFusionPass,
     ActivationClipRefine,
     HardSwishFusionPass,
     SwishFusionPass,
@@ -110,7 +112,38 @@ class XQuantizer(BaseQuantizer):
         quant_setting = QuantizationSettingFactory.default_setting()
         quant_setting.fusion_setting.align_quantization = False
 
-        return super().quantize(inputs, calib_dataloader, executor, quant_setting, **kwargs)
+        executor.load_graph(self._graph)
+        executor.tracing_operation_meta(inputs=inputs)
+        # step - 1, prequant pipeline:
+        # prequant pipeline will change your network structure and float value.
+        prequant_pipeline = self.build_prequant_pipeline(quant_setting, executor=executor)
+        prequant_pipeline.optimize(
+            graph=self._graph, dataloader=calib_dataloader, executor=executor, verbose=self._verbose, **kwargs
+        )
+
+        # step - 2, quantize all operations
+        executor.load_graph(self._graph)
+        executor.tracing_operation_meta(inputs=inputs)
+
+        for op_name, operation in self._graph.operations.items():
+            if operation.platform == TargetPlatform.UNSPECIFIED:
+                if operation.type in self.quant_operation_types:
+                    operation.platform = self.target_platform
+                else:
+                    operation.platform = TargetPlatform.FP32
+
+            if operation.platform not in {TargetPlatform.FP32, TargetPlatform.SOI}:
+                self.quantize_operation(op_name)
+
+        # quantize operation will modify network structure
+        # it is necessary calling self._executor before further execution
+        # step - 3, calling graph optimization pipeline
+        executor.load_graph(self._graph)
+        quant_pipeline = self.build_quant_pipeline(quant_setting)
+
+        quant_pipeline.optimize(
+            graph=self._graph, dataloader=calib_dataloader, executor=executor, verbose=self._verbose, **kwargs
+        )
 
     def report(self):
         pass
@@ -295,29 +328,7 @@ class XQuantizer(BaseQuantizer):
 
         list_of_passes = []
 
-        if setting.weight_split:
-            weight_split_setting = setting.weight_split_setting
-            list_of_passes.append(
-                HorizontalLayerSplitPass(
-                    interested_layers=weight_split_setting.interested_layers,
-                    method=weight_split_setting.method,
-                    value_threshold=weight_split_setting.value_threshold,
-                )
-            )
-
-        if setting.channel_split:
-            channel_split_setting = setting.channel_split_setting
-            list_of_passes.append(
-                ChannelwiseSplitPass(
-                    optimize_level=channel_split_setting.opt_level,
-                    iterations=channel_split_setting.iterations,
-                    threshold=channel_split_setting.value_threshold,
-                    including_bias=channel_split_setting.including_bias,
-                    including_act=channel_split_setting.including_act,
-                    bias_multiplier=channel_split_setting.bias_multiplier,
-                    act_multiplier=channel_split_setting.act_multiplier,
-                )
-            )
+        list_of_passes.append(FlattenGemmFusionPass())
 
         if self._auto_finetune_level.value >= AutoFinetuneLevel.DO_NOTHING.value:
             equalization_setting = setting.equalization_setting

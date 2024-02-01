@@ -12,3 +12,4 @@ onnxsim>=0.4.33
 nvidia-pyindex
 onnx-graphsurgeon
 onnxconverter_common>=1.14.0
+loguru

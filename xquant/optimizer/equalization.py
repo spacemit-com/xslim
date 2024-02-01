@@ -44,7 +44,7 @@ class CustomLayerwiseEqualizationPass(LayerwiseEqualizationPass):
             output_names.append(operation.outputs[0].name)
 
         output_collector = defaultdict(list)
-
+        executor.load_graph(graph)
         steps = min(steps, len(dataloader))
         loader_step_index = set(np.random.randint(0, len(dataloader), [steps]).tolist())
         for idx, batch in enumerate(dataloader):

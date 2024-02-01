@@ -164,7 +164,7 @@ parser.add_argument(
     default="output",
     help="Path to the Output directory.",
 )
-parser.add_argument("--filter", required=False, default="swin-small_16xb64_in1k", help="model name filter.")
+parser.add_argument("--filter", required=False, default="resnet18", help="model name filter.")
 parser.add_argument("--batch_size", required=False, default=1, help="batch_size.")
 parser.add_argument("--device", required=False, default="cuda", help="device.")
 parser.add_argument("--quant_disable", action="store_true", help="quant_disable.")
