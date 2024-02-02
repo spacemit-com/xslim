@@ -84,8 +84,7 @@ CONFIGS = [
     {
         "Model": "ppyoloe_m_dyn",
         "truncate_var_names": ["pred_bboxes", "y", "flatten_priors"],
-        "skip_onnxsim": True,
-    }
+    },
     # {
     #    "Model": "ppyoloe_m",
     #    "Output": ["/Concat_4_output_0", "/Concat_5_output_0"],
@@ -131,7 +130,6 @@ import json
 import torch
 import numpy as np
 import cv2
-from ppq.api import load_onnx_graph
 import xquant
 from xquant import xquant_info
 import argparse

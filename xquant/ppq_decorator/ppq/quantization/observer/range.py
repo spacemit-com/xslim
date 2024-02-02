@@ -401,6 +401,14 @@ class TorchPercentileObserver(BaseTensorObserver):
         if self._quant_cfg.state not in {QuantizationStates.INITIAL}:
             return
 
+        if self._none_value_detected:
+            logger.warning("None value detected at var {}".format(self._watch_on.name))
+            self._quant_cfg.scale = torch.tensor([1.0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.offset = torch.tensor([0], dtype=torch.float32, device=self._value_device).squeeze(0)
+            self._quant_cfg.state = QuantizationStates.ACTIVATED
+            self._quant_cfg.detail["NONE_VALUE"] = True
+            return
+
         if self._quant_cfg.policy.has_property(QuantizationProperty.PER_TENSOR):
             if len(self._percentile_collector) == 0:
                 raise ValueError(

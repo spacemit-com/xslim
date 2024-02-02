@@ -15,6 +15,7 @@ from ..ppq_decorator import (
     BaseGraphExecutor,
     LayerwiseEqualizationPass,
 )
+from ..defs import XQUANT_CONFIG
 
 EQUALIZATION_OPERATION_TYPE = {"Conv", "Gemm", "ConvTranspose"}
 
@@ -22,12 +23,12 @@ EQUALIZATION_OPERATION_TYPE = {"Conv", "Gemm", "ConvTranspose"}
 class XQuantLayerwiseEqualizationPass(LayerwiseEqualizationPass):
     def __init__(
         self,
-        iterations: int,
+        iterations: int = XQUANT_CONFIG.equalization_iterations,
         value_threshold: float = 0.5,
         including_weight: bool = True,
         weight_multiplier: float = 1.0,
-        including_bias: bool = False,
-        including_act: bool = False,
+        including_bias: bool = True,
+        including_act: bool = True,
         bias_multiplier: float = 0.5,
         act_multiplier: float = 0.5,
         interested_layers: List[str] = None,
@@ -110,7 +111,7 @@ class XQuantLayerwiseEqualizationPass(LayerwiseEqualizationPass):
 
         pairs = self.find_equalization_pair(graph=graph, interested_operations=interested_operations)
 
-        act_calib_steps = max(int(len(dataloader) / 5), 32)
+        act_calib_steps = max(int(len(dataloader) / XQUANT_CONFIG.equalization_iterations), 32)
 
         for iter_times in tqdm(range(self.iterations), desc="Layerwise Equalization", total=self.iterations):
             if self.including_act:

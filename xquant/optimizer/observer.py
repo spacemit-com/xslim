@@ -9,7 +9,7 @@ import numpy as np
 from xquant.logger import logger
 from ..ppq_decorator import (
     Variable,
-    TorchMinMaxObserver,
+    BaseTensorObserver,
     minmax_to_scale_offset,
     TensorQuantizationConfig,
     QuantizationProperty,
@@ -22,7 +22,7 @@ from ..ppq_decorator import (
 from ..defs import OBSERVER_FLOATING_MSE_FETCHES, OBSERVER_MIN_SCALE_THRESHOLD
 
 
-class TorchXQuantObserver(TorchMinMaxObserver):
+class TorchXQuantObserver(BaseTensorObserver):
     def __init__(
         self,
         watch_on: Variable,
@@ -30,6 +30,7 @@ class TorchXQuantObserver(TorchMinMaxObserver):
         hist_bins: int = OBSERVER_FLOATING_MSE_FETCHES,
         single_alg: str = None,
     ):
+        self._watch_on = watch_on
         self._phase = "Detecting Minmax"
         self._hist = None
         self._hist_scale = None

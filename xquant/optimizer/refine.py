@@ -76,7 +76,7 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
                     if torch.all(in_var.value.to(torch.int8) - in_var.value == 0):
                         scale = torch.tensor(1.0, dtype=torch.float32, device=in_var.value.device)
                         offset = torch.tensor(
-                            math.ceil((in_config.quant_max - in_config.quant_min) / 2),
+                            math.ceil((in_config.quant_max + in_config.quant_min) / 2),
                             dtype=torch.float32,
                             device=in_var.value.device,
                         )
@@ -224,9 +224,9 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
                     len(graph.get_downstream_operations(computing_op)) == 1
                     and len(graph.get_upstream_operations(act_op)) == 1
                 ):
-                    computing_op.config.output_quantization_config[
-                        0
-                    ].dominated_by = act_op.config.output_quantization_config[0]
+                    computing_op.config.output_quantization_config[0].dominated_by = (
+                        act_op.config.output_quantization_config[0]
+                    )
                     act_op.config.input_quantization_config[0].dominated_by = act_op.config.output_quantization_config[
                         0
                     ]

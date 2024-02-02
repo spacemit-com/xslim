@@ -412,10 +412,8 @@ class XQuantizer:
         if finetune_level >= AutoFinetuneLevel.DO_NOTHING.value:
             list_of_passes.append(
                 XQuantLayerwiseEqualizationPass(
-                    iterations=XQUANT_CONFIG.equalization_iterations,
-                    including_bias=True,
+                    optimize_level=2 if finetune_level > AutoFinetuneLevel.DO_NOTHING.value else 1,
                     including_act=finetune_level > AutoFinetuneLevel.DO_NOTHING.value,
-                    optimize_level=1,
                 )
             )
 
