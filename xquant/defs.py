@@ -25,6 +25,8 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
+        self.max_bias_val = 2**22
+
         self.version = "1.0.3"
 
 
@@ -58,7 +60,7 @@ BIAS_CORRECTION_INTERST_TYPE = {
 
 OBSERVER_FLOATING_MSE_FETCHES = 4096
 
-OBSERVER_MIN_SCALE_THRESHOLD = 2**-20
+OBSERVER_MIN_SCALE_THRESHOLD = 2**-22
 
 OBSERVER_MAX_SCALE_THRESHOLD = 2**8
 

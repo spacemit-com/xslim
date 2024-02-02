@@ -142,7 +142,7 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
 
             _b_scale = w_cfg.scale * i_cfg.scale
             _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
-            if torch.all(torch.abs(_i_bias) < 2 ** (b_cfg.num_of_bits - 1)) or operation.type not in {"Conv"}:
+            if torch.all(torch.abs(_i_bias) < XQUANT_CONFIG.max_bias_val) or operation.type not in {"Conv"}:
                 b_cfg.scale = _b_scale
             elif o_cfg.scale is not None:
                 # in frac + w frac无法表示就使用 out frac

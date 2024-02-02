@@ -149,7 +149,7 @@ class XQuantBlockBuilder:
             upstrem_ops = self.graph.get_upstream_operations(s_op)
             if (
                 len(downstrem_ops) == 1
-                and len(upstrem_ops) == 1
+                and len(upstrem_ops) <= 1
                 and len(self.graph.get_upstream_operations(downstrem_ops[0])) == 1
                 and XQuantTrainableBlock.get_sequence_block_depth(rps) < XQUANT_CONFIG.min_block_size
             ):
@@ -199,12 +199,14 @@ class XQuantBlockBuilder:
             merge_blocks = set()
             merge_block_list = []
             down_blocks = self.get_downstream_blocks(block)
-            for down_block in down_blocks:
-                visited_var_names.update(down_block.out_var_names)
-            for down_block in down_blocks:
-                if down_block.in_var_names <= visited_var_names and down_block not in merge_blocks:
-                    merge_blocks.add(down_block)
-                    merge_block_list.append(down_block)
+
+            for _ in range(len(down_blocks)):
+                # 因为一个块的合并，则另一个块也可能可以合并，但这个顺序不一定
+                for down_block in down_blocks:
+                    if down_block.in_var_names <= visited_var_names and down_block not in merge_blocks:
+                        merge_blocks.add(down_block)
+                        merge_block_list.append(down_block)
+                        visited_var_names.update(down_block.out_var_names)
             return merge_block_list
 
         def _merge_block(

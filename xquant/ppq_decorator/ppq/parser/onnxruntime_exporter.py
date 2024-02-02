@@ -453,9 +453,11 @@ class ONNXRUNTIMExporter(OnnxExporter):
                 inserting.type in PASSIVE_OPERATIONS and len(var.dest_ops) > 1
             ):
                 pass
-            elif inserting.type in {"Split"} and config.scale is not None:
+            elif inserting.type in {"Split"}:
                 pass
             else:
+                continue
+            if config.scale is None:
                 continue
 
             if var.is_parameter:

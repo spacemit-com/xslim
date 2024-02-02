@@ -71,15 +71,15 @@ def xquant_load_onnx_graph(
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
 
-    onnx_model = format_onnx_model(onnx_model)
-    onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
-
     if sim_en:
         logger.info("simplify onnx model...")
         try:
             onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
         except Exception as e:
             logger.warning("simplify onnx model error and skip.")
+
+    onnx_model = format_onnx_model(onnx_model)
+    onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
 
     graph = OnnxParser().build(onnx_model)
     return graph, truncate_left_graph, truncate_vars
@@ -156,7 +156,9 @@ def quantize_onnx_model(
     inputs_list = []
     for input_item in input_parametres:
         input_shape = input_item.input_shape
-        inputs_list.append(torch.zeros(size=input_shape, device=calibration_device, dtype=torch.float32))
+        inputs_list.append(
+            torch.zeros(size=input_shape, device=calibration_device, dtype=getattr(torch, input_item.dtype))
+        )
 
     calib_dataloader = torch.utils.data.DataLoader(data_set)
 
