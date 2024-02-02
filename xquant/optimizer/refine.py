@@ -147,7 +147,7 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
             elif o_cfg.scale is not None:
                 # in frac + w frac无法表示就使用 out frac
                 b_cfg.scale = o_cfg.scale
-                operation.attributes["quant_bias_apply"] = 1
+                b_cfg.detail["quant_bias_apply"] = 1
             else:
                 return
             b_cfg.state = QuantizationStates.PASSIVE

@@ -100,6 +100,9 @@ class ONNXRUNTIMExporter(OnnxExporter):
             if value_type in {torch.int16}:
                 created.attributes["domain"] = "spacemit_ops"
 
+            if config.detail.get("quant_bias_apply", 0) == 1:
+                created.attributes["quant_bias_apply"] = 1
+
             if var in op.inputs:
                 graph.insert_op_before(A=created, B=op, input_idx=op.inputs.index(var))
             elif var in op.outputs:
@@ -176,6 +179,9 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
             if value_type in {torch.int16}:
                 created.attributes["domain"] = "spacemit_ops"
+
+            if config.detail.get("quant_bias_apply", 0) == 1:
+                created.attributes["quant_bias_apply"] = 1
 
             if var in op.inputs:
                 graph.insert_op_before(A=created, B=op, input_idx=op.inputs.index(var))
