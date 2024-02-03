@@ -6,7 +6,7 @@ import numpy as np
 
 def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Tensor:
     """
-    读取path_list, 并依据input_parametr中的参数预处理, 返回一个一个torch.Tensor
+    读取path_list, 并依据input_parametr中的参数预处理, 返回一个torch.Tensor
 
     Args:
         path_list (Sequence[str]): 一个校准batch的文件列表

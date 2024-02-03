@@ -102,6 +102,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
             if config.detail.get("quant_bias_apply", 0) == 1:
                 created.attributes["quant_bias_apply"] = 1
+                created.attributes["domain"] = "spacemit_ops"
 
             if var in op.inputs:
                 graph.insert_op_before(A=created, B=op, input_idx=op.inputs.index(var))
@@ -182,6 +183,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
             if config.detail.get("quant_bias_apply", 0) == 1:
                 created.attributes["quant_bias_apply"] = 1
+                created.attributes["domain"] = "spacemit_ops"
 
             if var in op.inputs:
                 graph.insert_op_before(A=created, B=op, input_idx=op.inputs.index(var))

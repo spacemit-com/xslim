@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 from xquant.logger import logger
+from xquant.defs import OBSERVER_MIN_SCALE_THRESHOLD
 from ...core import (
     CUDA,
     OBSERVER_KL_COMPUTING_DEVICE,
@@ -31,7 +32,10 @@ from .base import BaseTensorObserver
 
 @ppq_quant_param_computing_function
 def minmax_to_scale_offset(
-    min_val: float, max_val: float, config: TensorQuantizationConfig, scale_threshold: float = OBSERVER_MIN_SCALE
+    min_val: float,
+    max_val: float,
+    config: TensorQuantizationConfig,
+    scale_threshold: float = OBSERVER_MIN_SCALE_THRESHOLD,
 ) -> Tuple[float, float]:
     """
     Solve scale and offset with given min, max value.
