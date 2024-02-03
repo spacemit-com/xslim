@@ -201,11 +201,11 @@ class CalibrationCollect:
 
                 elif file_type == "npy":
                     img = np.load(batch_item)
-                    batch_list.append(img)
+                    batch_list.append(torch.from_numpy(img))
 
                 elif file_type == "raw":
                     img = np.fromfile(batch_item, dtype=np.float32)
-                    batch_list.append(img)
+                    batch_list.append(torch.from_numpy(img))
 
                 else:
                     raise NotImplementedError("Calibration file type {}".format(file_type))

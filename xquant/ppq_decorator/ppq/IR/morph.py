@@ -506,7 +506,7 @@ class GraphFormatter(GraphCommandProcessor):
     def remove_identity(self):
         removing_ops = []
         for op in self.graph.operations.values():
-            if op.type == "Identity":
+            if op.type == "Identity" and not op.outputs[0].name in self.graph.outputs:
                 removing_ops.append(op)
 
         for op in removing_ops:
