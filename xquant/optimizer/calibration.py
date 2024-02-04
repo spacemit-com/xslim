@@ -22,7 +22,7 @@ from ..ppq_decorator import (
 from .refine import PassiveParameterBakingPass
 from .observer import TorchXQuantObserver
 from .training import LearnedStepSizePassDecorator, XQuantTrainableBlock, XQuantBlockBuilder
-from ..defs import COMPUTING_OP, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE, XQUANT_CONFIG
+from ..defs import COMPUTING_OP, PASSIVE_OPERATIONS, BIAS_CORRECTION_INTERST_TYPE, XQUANT_CONFIG, OBSERVER_MAX_BIAS_VAL
 
 
 class RuntimeBlockWiseCalibrationPass(QuantizationOptimizationPass):

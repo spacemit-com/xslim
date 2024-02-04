@@ -35,7 +35,7 @@ from .ppq.quantization.algorithm.training import LSQDelegator, TrainableBlock
 from .ppq.parser import OnnxParser
 from .ppq.parser import ONNXRUNTIMExporter
 from .ppq.quantization.measure import torch_mean_square_error, torch_snr_error, torch_cosine_similarity
-from .ppq.quantization.qfunction.linear import PPQLinearQuantFunction
+from .ppq.quantization.qfunction.linear import PPQLinearQuantFunction, PPQLinearQuant_toInt
 from .ppq.quantization import observer as ppq_observer
 from .ppq.quantization.observer import BaseTensorObserver, TorchMinMaxObserver, OperationObserver
 from .ppq.quantization.observer.range import minmax_to_scale_offset

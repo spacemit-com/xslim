@@ -24,6 +24,7 @@ from ..defs import (
     COMPUTING_OP,
     OBSERVER_MIN_SCALE_THRESHOLD,
     OBSERVER_SIGMOID_MAX_VALUE,
+    OBSERVER_MAX_BIAS_VAL,
 )
 
 
@@ -114,42 +115,42 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
         if operation.num_of_input == 3:
             i_cfg, w_cfg, b_cfg = operation.config.input_quantization_config
             o_cfg = operation.config.output_quantization_config[0]
-            if b_cfg.state not in {QuantizationStates.PASSIVE_INIT}:
+            if (
+                b_cfg.state not in {QuantizationStates.PASSIVE_INIT}
+                or not operation.inputs[1].is_parameter
+                or not operation.inputs[-1].is_parameter
+                or w_cfg.policy.has_property(QuantizationProperty.ASYMMETRICAL)
+                or b_cfg.policy.has_property(QuantizationProperty.ASYMMETRICAL)
+            ):
                 return
             bias = operation.inputs[-1].value
-            if bias is None:
-                raise ValueError(
-                    f"Bias Varaible {operation.inputs[-1].name} must be a constant. " "Please check it again."
-                )
             assert bias.numel() == bias.shape[-1], (
                 f"For op {operation.name}, expect Bias shape to be {[bias.numel()]}, " f"however {bias.shape} was given"
             )
             operation.inputs[-1].value = bias.squeeze()
-
             if operation.inputs[-1].value.ndim == 0 and operation.inputs[-1].value.numel() == 1:
                 operation.inputs[-1].value = operation.inputs[-1].value.unsqueeze(0)
             if w_cfg.scale is None or i_cfg.scale is None:
                 return
 
-            if w_cfg.scale.numel() > 1 and operation.type in {"Conv"}:
-                zero_channel = torch.where(w_cfg.scale < OBSERVER_MIN_SCALE_THRESHOLD)[0]
-                if zero_channel.numel() > 0:
-                    operation.inputs[1].value[zero_channel] = 0
-                    store_state = w_cfg.state
-                    w_cfg.state = QuantizationStates.INITIAL
-                    w_cfg.scale[zero_channel] = 1.0
-                    w_cfg.state = store_state
+            if w_cfg.scale.numel() > 1:
+                if operation.type in {"Conv"}:
+                    zero_channel = torch.where(w_cfg.scale <= OBSERVER_MIN_SCALE_THRESHOLD)[0]
+                    if zero_channel.numel() > 0:
+                        operation.inputs[1].value[zero_channel] = 0
+                        store_state = w_cfg.state
+                        w_cfg.state = QuantizationStates.INITIAL
+                        w_cfg.scale[zero_channel] = 1.0
+                        w_cfg.state = store_state
 
             _b_scale = w_cfg.scale * i_cfg.scale
             _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
-            if torch.all(torch.abs(_i_bias) < XQUANT_CONFIG.max_bias_val) or operation.type not in {"Conv"}:
-                b_cfg.scale = _b_scale
-            elif o_cfg.scale is not None:
-                # in frac + w frac无法表示就使用 out frac
-                b_cfg.scale = o_cfg.scale
-                b_cfg.detail["quant_bias_apply"] = 1
-            else:
-                return
+            b_cfg.scale = _b_scale
+            if operation.type in {"Conv"}:
+                if torch.any(torch.abs(_i_bias) > OBSERVER_MAX_BIAS_VAL):
+                    # in frac + w frac无法表示就使用 out frac
+                    b_cfg.scale = o_cfg.scale
+                    b_cfg.detail["quant_bias_apply"] = 1
             b_cfg.state = QuantizationStates.PASSIVE
             b_cfg.offset = torch.zeros_like(b_cfg.scale)
 

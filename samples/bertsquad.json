@@ -1,0 +1,26 @@
+{
+    "model_parameters": {
+        "onnx_model": "/home/share/modelzoo/nlp/bertsquad/bertsquad.onnx",
+        "working_dir": "./temp"
+    },
+    "calibration_parameters": {
+        "input_parametres": [
+            {
+                "file_type": "npy",
+                "data_list_path": "unique_ids_raw_output.txt"
+            },
+            {
+                "file_type": "npy",
+                "data_list_path": "segment_ids.txt"
+            },
+            {
+                "file_type": "npy",
+                "data_list_path": "input_mask.txt"
+            },
+            {
+                "file_type": "npy",
+                "data_list_path": "input_ids.txt"
+            }
+        ]
+    }
+}
