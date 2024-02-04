@@ -135,12 +135,17 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
 
             if w_cfg.scale.numel() > 1:
                 if operation.type in {"Conv"}:
-                    zero_channel = torch.where(w_cfg.scale <= OBSERVER_MIN_SCALE_THRESHOLD)[0]
-                    if zero_channel.numel() > 0:
-                        operation.inputs[1].value[zero_channel] = 0
+                    iw_zero_channel = torch.where(
+                        w_cfg.scale * i_cfg.scale <= (OBSERVER_MIN_SCALE_THRESHOLD * 2**-7)
+                    )[0]
+                    w_zero_channel = torch.where(w_cfg.scale <= OBSERVER_MIN_SCALE_THRESHOLD)[0]
+                    if iw_zero_channel.numel() > 0 or w_zero_channel.numel() > 0:
+                        operation.inputs[1].value[iw_zero_channel] = 0
+                        operation.inputs[1].value[w_zero_channel] = 0
                         store_state = w_cfg.state
                         w_cfg.state = QuantizationStates.INITIAL
-                        w_cfg.scale[zero_channel] = 1.0
+                        w_cfg.scale[iw_zero_channel] = 1.0
+                        w_cfg.scale[w_zero_channel] = 1.0
                         w_cfg.state = store_state
 
             _b_scale = w_cfg.scale * i_cfg.scale

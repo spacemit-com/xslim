@@ -19,7 +19,7 @@ from ..ppq_decorator import (
     torch_KL_divergence,
     ppq_observer,
 )
-from ..defs import OBSERVER_FLOATING_MSE_FETCHES, OBSERVER_MIN_SCALE_THRESHOLD
+from ..defs import OBSERVER_FLOATING_MSE_FETCHES, OBSERVER_MIN_SCALE_THRESHOLD, OBSERVER_PERCENTILE
 
 
 class TorchXQuantObserver(BaseTensorObserver):
@@ -39,14 +39,14 @@ class TorchXQuantObserver(BaseTensorObserver):
         self._hist_bins = hist_bins
         self._quant_cfg = quant_cfg
         if not ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE in quant_cfg.detail:
-            self._percentile = ppq_common.OBSERVER_PERCENTILE
+            self._percentile = OBSERVER_PERCENTILE
         else:
             self._percentile = quant_cfg.detail[ppq_common.OBSERVER_PERCENTILE_MANUL_OVERRIDE]
 
         if ppq_common.OBSERVER_MIN_SCALE_MANUL_OVERRIDE in quant_cfg.detail:
             self._scale_threshold = quant_cfg.detail[ppq_common.OBSERVER_MIN_SCALE_MANUL_OVERRIDE]
         else:
-            self._scale_threshold = ppq_common.OBSERVER_MIN_SCALE
+            self._scale_threshold = OBSERVER_MIN_SCALE_THRESHOLD
 
         self._single_alg = single_alg
         self._channel_min_max = []

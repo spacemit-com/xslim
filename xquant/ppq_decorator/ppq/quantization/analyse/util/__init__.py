@@ -3,8 +3,8 @@ from typing import Dict
 import math
 import torch
 from ....core.defs import ppq_warning
-from ppq.quantization.measure.cosine import torch_cosine_similarity
-from ppq.quantization.measure.norm import torch_mean_square_error, torch_snr_error
+from ...measure.cosine import torch_cosine_similarity
+from ...measure.norm import torch_mean_square_error, torch_snr_error
 
 
 class MeasureRecorder:

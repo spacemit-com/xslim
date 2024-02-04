@@ -477,9 +477,7 @@ class TorchMSEObserver(TorchHistObserver):
 
     def compute_mse_loss(self, histogram: list, start: int, step: int, end: int):
         if PPQ_CONFIG.USING_CUDA_KERNEL:
-            from ppq.core import CUDA
-
-            return CUDA.compute_mse_loss(histogram=histogram, start=start, step=step, end=end)
+            raise NotImplementedError()
         else:
             # 如果你觉得 mse 太慢，想办法加速这段代码就可以了
             # 求解 mse 时，我们假设每一个 bin 里面的数据都是均匀分布的

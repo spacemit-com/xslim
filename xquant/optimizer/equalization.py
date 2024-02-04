@@ -5,6 +5,7 @@ from typing import Callable, Dict, Iterable, List
 from enum import Enum
 import torch
 import numpy as np
+import random
 from tqdm import tqdm
 from ..ppq_decorator import (
     empty_ppq_cache,
@@ -57,7 +58,7 @@ class XQuantLayerwiseEqualizationPass(LayerwiseEqualizationPass):
         dataloader: Iterable,
         collate_fn: Callable,
         operations: List[Operation],
-        steps: int = 32,
+        steps: int = 50,
     ) -> Dict[str, torch.Tensor]:
         def aggregate(op: Operation, tensor: torch.Tensor):
             if op.type in {"Conv", "ConvTranspose"}:  # Conv result: [n,c,h,w]
@@ -78,7 +79,7 @@ class XQuantLayerwiseEqualizationPass(LayerwiseEqualizationPass):
         output_collector = defaultdict(list)
         executor.load_graph(graph)
         steps = min(steps, len(dataloader))
-        loader_step_index = set(np.random.randint(0, len(dataloader), [steps]).tolist())
+        loader_step_index = set(random.sample([i for i in range(len(dataloader))], steps))
         for idx, batch in enumerate(dataloader):
             if idx not in loader_step_index:
                 continue
@@ -111,7 +112,7 @@ class XQuantLayerwiseEqualizationPass(LayerwiseEqualizationPass):
 
         pairs = self.find_equalization_pair(graph=graph, interested_operations=interested_operations)
 
-        act_calib_steps = max(int(len(dataloader) / XQUANT_CONFIG.equalization_iterations), 32)
+        act_calib_steps = max(int(len(dataloader) / XQUANT_CONFIG.equalization_iterations), 50)
 
         for iter_times in tqdm(range(self.iterations), desc="Layerwise Equalization", total=self.iterations):
             if self.including_act:

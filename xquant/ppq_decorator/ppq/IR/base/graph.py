@@ -914,7 +914,7 @@ class BaseGraph(Serializable):
         Deep Copy: Deep repetition truly clones the underlying data.
         It is not shared between the first and therefore the copy.
         """
-        from ppq.IR.quantize import QuantableOperation
+        from ..quantize import QuantableOperation
 
         cloned = BaseGraph(name=self._name, built_from=self._built_from)
         for op in self.operations.values():

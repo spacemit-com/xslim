@@ -35,20 +35,7 @@ class TensorwiseFloatingQuantImpl(Function):
             raise NotImplementedError("This Feature must run with PPQ Cuda Kernel.")
 
         else:
-            from ppq.core import CUDA
-
-            # quantization function, pure cuda implementation
-            quantized = CUDA.FloatingQuantize_T(
-                tensor=tensor,
-                scales=scales,
-                offsets=offsets,
-                exponent=exponet_bits,
-                mantissa=mantissa_bits,
-                minimum=quant_min,
-                maximum=quant_max,
-                rounding=rounding.value,
-            )
-            return quantized
+            raise NotImplementedError()
 
     @staticmethod
     def backward(ctx, dy: torch.Tensor):
@@ -87,20 +74,7 @@ class ChannelwiseFloatingQuantImpl(Function):
             # generate a shape that likes [1, 1, -1, 1], the only -1 is at channel axe.
             raise NotImplementedError("This Feature must run with PPQ Cuda Kernel.")
         else:
-            from ppq.core import CUDA
-
-            quantized = CUDA.FloatingQuantize_C(
-                tensor=tensor,
-                scales=scales,
-                offsets=offsets,
-                channel_axis=channel_axis,
-                exponent=exponet_bits,
-                mantissa=mantissa_bits,
-                minimum=quant_min,
-                maximum=quant_max,
-                rounding=rounding.value,
-            )
-            return quantized
+            raise NotImplementedError()
 
     @staticmethod
     def backward(ctx, dy: torch.Tensor):
