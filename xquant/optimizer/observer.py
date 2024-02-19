@@ -236,8 +236,8 @@ class TorchXQuantObserver(BaseTensorObserver):
 
             losses = []
             num_of_quant_levels = (self._quant_cfg.quant_max - self._quant_cfg.quant_min) + 1
-            offset_step = hist_bins // num_of_quant_levels * 2
-            range_step = hist_bins // num_of_quant_levels * 2
+            offset_step = int(hist_bins // num_of_quant_levels * 2)
+            range_step = int(hist_bins // num_of_quant_levels * 2)
 
             percentile_scale, percentile_offset = minmax_to_scale_offset(
                 max(self._force_range_min, self._percentile_min_val),
@@ -246,14 +246,25 @@ class TorchXQuantObserver(BaseTensorObserver):
                 self._scale_threshold,
             )
 
-            if num_of_quant_levels > 2**10 or hist_scale == 0:
+            full_scale, full_offset = minmax_to_scale_offset(
+                max(self._force_range_min, self._full_min_val),
+                min(self._force_range_max, self._full_max_val),
+                config,
+                self._scale_threshold,
+            )
+
+            if hist_scale == 0.0 or abs(self._percentile_min_val - self._percentile_max_val) < self._scale_threshold:
+                logger.debug("observer render time cost {}".format(time.time() - t_start))
+                return full_scale, full_offset
+
+            percentile_bin_start = math.floor((self._percentile_min_val - self._full_min_val) / hist_scale)
+            percentile_bin_start = max(percentile_bin_start, 0)
+            percentile_bin_range = math.ceil((self._percentile_max_val - self._percentile_min_val) / hist_scale)
+            if num_of_quant_levels > 2**10:
+                logger.debug("observer render time cost {}".format(time.time() - t_start))
                 return percentile_scale, percentile_offset
 
             hist_sum = float(histogram.sum())
-
-            percentile_bin_start = math.floor((self._percentile_min_val - self._full_min_val) / hist_scale)
-            percentile_bin_start = percentile_bin_start if percentile_bin_start >= 0 else 0
-            percentile_bin_range = math.ceil((self._percentile_max_val - self._percentile_min_val) / hist_scale)
             percentile_kl_loss = self.compute_kl_loss(
                 histogram, percentile_bin_start, percentile_bin_range, num_of_quant_levels, hist_sum
             )
