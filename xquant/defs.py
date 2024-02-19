@@ -25,7 +25,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
-        self.version = "1.0.3"
+        self.version = "1.0.6"
 
 
 PASSIVE_OPERATIONS = {
@@ -51,9 +51,9 @@ BIAS_CORRECTION_INTERST_TYPE = {
     "Conv",
     "Gemm",
     "ConvTranspose",
-    "LayerNormalization",
-    "InstanceNormalization",
-    "GroupNormalization",
+    # "LayerNormalization",
+    # "InstanceNormalization",
+    # "GroupNormalization",
 }
 
 OBSERVER_FLOATING_MSE_FETCHES = 4096
@@ -77,9 +77,10 @@ class AutoFinetuneLevel(Enum):
 
 
 class PrecisionLevel(Enum):
-    BIT_8 = 0
-    BIT_8_16 = 1
-    GEMM_16 = 2
+    LEVEL_0 = 0
+    LEVEL_1 = 1
+    LEVEL_2 = 2
+    LEVEL_3 = 3
 
 
 XQUANT_CONFIG = XQUANT_GLOBAL_CONFIGURATION()

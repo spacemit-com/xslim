@@ -108,7 +108,7 @@ class CustomQuantizationParameterSetting(SettingSerialize):
 
 class QuantizationParameterSetting(SettingSerialize):
     def __init__(self) -> None:
-        self.precision_level: PrecisionLevel = PrecisionLevel.BIT_8
+        self.precision_level: PrecisionLevel = PrecisionLevel.LEVEL_0
         self.max_percentile: float = None
         self.finetune_level: AutoFinetuneLevel = AutoFinetuneLevel.LEVEL_1
         self.custom_setting: Sequence[CustomQuantizationParameterSetting] = None
@@ -127,7 +127,7 @@ class QuantizationParameterSetting(SettingSerialize):
             return obj_setting
 
     def check(self, qsetting):
-        if self.precision_level.value > PrecisionLevel.BIT_8.value:
+        if self.precision_level.value > PrecisionLevel.LEVEL_0.value:
             logger.info("set higher precision level.")
         if self.finetune_level.value > AutoFinetuneLevel.LEVEL_1.value:
             logger.info("set higher finetune level.")

@@ -900,7 +900,6 @@ class GraphMerger(GraphCommandProcessor):
                         if var != layernorm_input_var and var != layernorm_output_var:
                             self.graph.remove_variable(var)
                     self.graph.remove_operation(op)
-                fused = True
 
     def fuse_skiplayernorm(self):
         """Fuse Add + Layernorm to SkipLayernorm, SkipLayernorm is a plugin operation defined by TensorRT"""
@@ -932,8 +931,13 @@ class GraphMerger(GraphCommandProcessor):
         Pattern: * - Div - Erf - Add - Mul - Mul
                    |                 |
                    -------------------
+
+        Pattern: * - Pow - Mul - Add - Mul - Mul - Tanh - Add - Mul - Mul
+                   |           |                                    |
+                   -------------
+                   |                                                |
+                   --------------------------------------------------
         """
-        fused = False
         search_engine = SearchableGraph(graph=self.graph)
 
         matches = search_engine.pattern_matching(
@@ -962,7 +966,61 @@ class GraphMerger(GraphCommandProcessor):
             self.graph.remove_operation(mul2)
             self.graph.create_operation(op_type="Gelu", inputs=input_vars, outputs=output_vars)
             assert len(input_vars) == 1, "Fusion failed, Pattern unrecognized."
-            fused = True
+
+        def _check_value_equal(var, value):
+            return var.is_parameter and var.value.numel() == 1 and var.value == value
+
+        def _check_value_range(var, value):
+            return var.is_parameter and var.value.numel() == 1 and torch.abs(var.value - value) < 1e-7
+
+        matches = search_engine.pattern_matching(
+            patterns=[
+                lambda x: True,
+                lambda x: x.type == "Pow" and x.inputs[1].is_parameter and x.inputs[1].value == 3,
+                lambda x: x.type == "Mul"
+                and (
+                    _check_value_range(x.inputs[1], 0.04471499845) or (_check_value_range(x.inputs[0], 0.04471499845))
+                ),
+                "Add",
+                lambda x: x.type == "Mul"
+                and (_check_value_range(x.inputs[1], 0.7978845835) or (_check_value_range(x.inputs[0], 0.7978845835))),
+                "Tanh",
+                lambda x: x.type == "Add"
+                and (_check_value_equal(x.inputs[1], 1.0) or (_check_value_equal(x.inputs[0], 1.0))),
+                lambda x: x.type == "Mul"
+                and (_check_value_equal(x.inputs[1], 0.5) or (_check_value_equal(x.inputs[0], 0.5))),
+                "Mul",
+            ],
+            edges=[[0, 1], [1, 2], [2, 3], [0, 3], [3, 4], [4, 5], [5, 6], [6, 7], [7, 8], [0, 8]],
+            exclusive=True,
+        )
+
+        for _, pow, mul1, add1, mul2, tanh, add2, mul3, mul4 in matches:
+            removing_var = []
+            removing_var.extend(pow.outputs)
+            removing_var.extend(mul1.outputs)
+            removing_var.extend(add1.outputs)
+            removing_var.extend(mul2.outputs)
+            removing_var.extend(tanh.outputs)
+            removing_var.extend(add2.outputs)
+            removing_var.extend(mul3.outputs)
+
+            self.graph.remove_operation(pow)
+            self.graph.remove_operation(mul1)
+            self.graph.remove_operation(add1)
+            self.graph.remove_operation(mul2)
+            self.graph.remove_operation(tanh)
+            self.graph.remove_operation(add2)
+            self.graph.remove_operation(mul3)
+            for var in removing_var:
+                self.graph.remove_variable(var)
+
+            input_vars = _.outputs.copy()
+            output_vars = mul4.outputs.copy()
+
+            self.graph.remove_operation(mul4)
+            self.graph.create_operation(op_type="Gelu", inputs=input_vars, outputs=output_vars)
+            assert len(input_vars) == 1, "Fusion failed, Pattern unrecognized."
 
     def fuse_bias_add(self):
         """

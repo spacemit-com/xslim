@@ -14,6 +14,12 @@ def version():
     return content
 
 
+def license():
+    with open("LICENSE", encoding="utf-8") as f:
+        content = f.read()
+    return content
+
+
 setup(
     author="SpacemiT",
     version=version(),
@@ -33,7 +39,7 @@ setup(
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
     ],
-    license="Apache License 2.0",
+    license=license(),
     include_package_data=True,
     zip_safe=False,
 )

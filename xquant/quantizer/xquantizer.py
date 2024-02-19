@@ -59,7 +59,7 @@ class XQuantizer:
     def __init__(self, graph: BaseGraph) -> Union[torch.Tensor, list, dict]:
         self._graph = graph
         self._processor = QuantableGraph(GraphReplacer(self._graph))
-        self._precision_level = PrecisionLevel.BIT_8
+        self._precision_level = PrecisionLevel.LEVEL_0
         self._num_of_bits = 8
         self._quant_min, self._quant_max = _get_quant_min_max(self._num_of_bits)
         perchannel_policy = QuantizationPolicy(
@@ -363,8 +363,6 @@ class XQuantizer:
     def build_quant_pipeline(self, setting: XQuantSetting) -> QuantizationOptimizationPipeline:
         list_of_passes = []
 
-        list_of_passes.append(PassiveParameterBakingPass())
-
         list_of_passes.append(
             QuantizeFusionPass(
                 fuse_activation=True,
@@ -377,14 +375,16 @@ class XQuantizer:
 
         list_of_passes.append(ActivationClipRefine())
 
-        list_of_passes.append(ParameterQuantizePass(method="minmax"))
-
         list_of_passes.append(
             QuantizeConfigRefinePass(
                 setting.quantization_parameters.precision_level.value,
                 setting.quantization_parameters.custom_setting,
             )
         )
+
+        list_of_passes.append(PassiveParameterBakingPass())
+
+        list_of_passes.append(ParameterQuantizePass(method="minmax"))
 
         list_of_passes.append(
             RuntimeBlockWiseCalibrationPass(

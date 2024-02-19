@@ -181,6 +181,8 @@ class OnnxParser(GraphBuilder):
         outputs = [item.name for item in graph_pb.output]
         graph._detail["pb_inputs"] = inputs
         graph._detail["pb_outputs"] = outputs
+        graph._num_of_generated_op = len(graph.operations)
+        graph._num_of_generated_var = len(graph.variables)
         graph = self.build_variables(
             graph, graph_inputs=inputs, graph_outputs=outputs, op_inputs=op_inputs_dict, op_outputs=op_outputs_dict
         )

@@ -295,43 +295,26 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
         super().__init__(name="XQuant QuantizeConfigRefine Pass")
         self._precision_level = precision_level
         self._max_bits = XQUANT_CONFIG.max_bits
-        self._quant_max = 2**self._max_bits - 1
-        self._quant_min = 0
+        self._quant_max = 2 ** (self._max_bits - 1) - 1
+        self._quant_min = -(2 ** (self._max_bits - 1))
         self._custom_setting = custom_setting
 
     def precesion_level_2(self, operation: QuantableOperation):
-        if operation.type in {"Conv"}:
-            in_var = operation.inputs[0]
-            in_tqc = operation.input_quant_config[0]
-            out_var = operation.outputs[0]
-            out_tqc = operation.output_quant_config[0]
-            if in_tqc.dominated_by is in_tqc:
-                in_tqc.num_of_bits = self._max_bits
-                in_tqc._quant_min, in_tqc._quant_max = self._quant_min, self._quant_max
-            else:
-                in_tqc.num_of_bits = self._max_bits
-                in_tqc._quant_min, in_tqc._quant_max = self._quant_min, self._quant_max
-                in_tqc.dominated_by.num_of_bits = self._max_bits
-                in_tqc.dominated_by._quant_min, in_tqc.dominated_by._quant_max = (
-                    self._quant_min,
-                    self._quant_max,
-                )
+        if operation.type in COMPUTING_OP:
+            for in_tqc, in_var in zip(operation.input_quant_config, operation.inputs):
+                if in_var.is_parameter:
+                    continue
                 in_tqc.dominated_by.state = QuantizationStates.INITIAL
-            if out_tqc.dominated_by is out_tqc:
-                out_tqc.num_of_bits = self._max_bits
-                out_tqc._quant_min, out_tqc._quant_max = self._quant_min, self._quant_max
-            else:
-                out_tqc.num_of_bits = self._max_bits
-                out_tqc._quant_min, out_tqc._quant_max = self._quant_min, self._quant_max
-                out_tqc.dominated_by.num_of_bits = self._max_bits
-                out_tqc.dominated_by._quant_min, out_tqc.dominated_by._quant_max = (
-                    self._quant_min,
-                    self._quant_max,
-                )
+
+            for out_tqc, out_var in zip(operation.output_quant_config, operation.outputs):
+                out_tqc.dominated_by.state = QuantizationStates.INITIAL
         else:
-            for tqc, var in operation.config_with_variable:
-                if tqc.dominated_by is tqc and tqc.num_of_bits != self._max_bits:
-                    tqc.state = QuantizationStates.FP32
+            self.precesion_level_3(operation)
+
+    def precesion_level_3(self, operation: QuantableOperation):
+        for tqc, var in operation.config_with_variable:
+            if tqc.dominated_by is tqc and tqc.state == QuantizationStates.INITIAL:
+                tqc.state = QuantizationStates.FP32
 
     def custom_tqc_set(self, graph: BaseGraph, custom_tqc: "CustomQuantizationParameterSetting"):
         var_dict = graph.variables
@@ -375,8 +358,10 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
         for op in visited_ops:
             if not isinstance(op, QuantableOperation):
                 continue
-            if isinstance(precision_level, int) and precision_level >= 2:
+            if isinstance(precision_level, int) and precision_level == 2:
                 self.precesion_level_2(op)
+            elif isinstance(precision_level, int) and precision_level == 3:
+                self.precesion_level_3(op)
             tqc = op.config
 
             for in_var, in_tqc in zip(op.inputs, tqc.input_quantization_config):
@@ -394,12 +379,17 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
 
     @empty_ppq_cache
     def optimize(self, graph: BaseGraph, **kwargs) -> None:
-        if self._precision_level >= 2:
-            sorted_ops = graph.topological_sort()
+        sorted_ops = graph.topological_sort()
+        if self._precision_level == 2:
             for operation in sorted_ops:
                 if not isinstance(operation, QuantableOperation):
                     continue
                 self.precesion_level_2(operation)
+        elif self._precision_level == 3:
+            for operation in sorted_ops:
+                if not isinstance(operation, QuantableOperation):
+                    continue
+                self.precesion_level_3(operation)
 
         if isinstance(self._custom_setting, Sequence):
             for tqc_setting in self._custom_setting:
