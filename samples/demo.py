@@ -19,4 +19,5 @@ xquant.quantize_onnx_model("mobilenet_v3_small.json")
 # custom preprocess
 xquant.quantize_onnx_model("inception_v1.json")
 
-# xquant.quantize_onnx_model("bertsquad.json")
+# bert
+xquant.quantize_onnx_model("bertsquad.json")

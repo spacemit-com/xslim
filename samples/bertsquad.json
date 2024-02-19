@@ -7,20 +7,24 @@
         "input_parametres": [
             {
                 "file_type": "npy",
-                "data_list_path": "unique_ids_raw_output.txt"
+                "data_list_path": "quant_dataset/unique_ids_raw_output.txt"
             },
             {
                 "file_type": "npy",
-                "data_list_path": "segment_ids.txt"
+                "data_list_path": "quant_dataset/segment_ids.txt"
             },
             {
                 "file_type": "npy",
-                "data_list_path": "input_mask.txt"
+                "data_list_path": "quant_dataset/input_mask.txt"
             },
             {
                 "file_type": "npy",
-                "data_list_path": "input_ids.txt"
+                "data_list_path": "quant_dataset/input_ids.txt"
             }
         ]
+    },
+    "quantization_parameters": {
+        "finetune_level": 2,
+        "precision_level": 2
     }
 }
