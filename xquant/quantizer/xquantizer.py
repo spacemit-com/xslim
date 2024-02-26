@@ -364,6 +364,13 @@ class XQuantizer:
         list_of_passes = []
 
         list_of_passes.append(
+            QuantizeConfigRefinePass(
+                setting.quantization_parameters.precision_level.value,
+                setting.quantization_parameters.custom_setting,
+            )
+        )
+
+        list_of_passes.append(
             QuantizeFusionPass(
                 fuse_activation=True,
                 fuse_passive_op=True,
@@ -374,13 +381,6 @@ class XQuantizer:
         list_of_passes.append(QuantizeSimplifyPass())
 
         list_of_passes.append(ActivationClipRefine())
-
-        list_of_passes.append(
-            QuantizeConfigRefinePass(
-                setting.quantization_parameters.precision_level.value,
-                setting.quantization_parameters.custom_setting,
-            )
-        )
 
         list_of_passes.append(PassiveParameterBakingPass())
 

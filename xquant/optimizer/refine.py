@@ -299,19 +299,16 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
         self._quant_min = -(2 ** (self._max_bits - 1))
         self._custom_setting = custom_setting
 
-    def precesion_level_2(self, operation: QuantableOperation):
-        if operation.type in COMPUTING_OP:
-            for in_tqc, in_var in zip(operation.input_quant_config, operation.inputs):
-                if in_var.is_parameter:
-                    continue
-                in_tqc.dominated_by.state = QuantizationStates.INITIAL
+    def precesion_level_2(self, graph: BaseGraph, operation: QuantableOperation):
+        upstream_operations = graph.get_upstream_operations(operation)
+        downstream_operations = graph.get_downstream_operations(operation)
+        if (operation.type in {"Mul", "Add", "Sub", "Div"} and operation.num_of_parameter == 0) or operation.type in {
+            "Softmax",
+            "Sigmoid",
+        }:
+            self.precesion_level_3(graph, operation)
 
-            for out_tqc, out_var in zip(operation.output_quant_config, operation.outputs):
-                out_tqc.dominated_by.state = QuantizationStates.INITIAL
-        else:
-            self.precesion_level_3(operation)
-
-    def precesion_level_3(self, operation: QuantableOperation):
+    def precesion_level_3(self, graph: BaseGraph, operation: QuantableOperation):
         for tqc, var in operation.config_with_variable:
             if tqc.dominated_by is tqc and tqc.state == QuantizationStates.INITIAL:
                 tqc.state = QuantizationStates.FP32
@@ -359,9 +356,9 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
             if not isinstance(op, QuantableOperation):
                 continue
             if isinstance(precision_level, int) and precision_level == 2:
-                self.precesion_level_2(op)
+                self.precesion_level_2(graph, op)
             elif isinstance(precision_level, int) and precision_level == 3:
-                self.precesion_level_3(op)
+                self.precesion_level_3(graph, op)
             tqc = op.config
 
             for in_var, in_tqc in zip(op.inputs, tqc.input_quantization_config):
@@ -384,12 +381,12 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
             for operation in sorted_ops:
                 if not isinstance(operation, QuantableOperation):
                     continue
-                self.precesion_level_2(operation)
+                self.precesion_level_2(graph, operation)
         elif self._precision_level == 3:
             for operation in sorted_ops:
                 if not isinstance(operation, QuantableOperation):
                     continue
-                self.precesion_level_3(operation)
+                self.precesion_level_3(graph, operation)
 
         if isinstance(self._custom_setting, Sequence):
             for tqc_setting in self._custom_setting:
