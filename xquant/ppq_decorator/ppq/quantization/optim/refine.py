@@ -1,10 +1,10 @@
 from typing import Iterable, List, Set
-
+from collections import OrderedDict
 import torch
+from xquant.defs import PASSIVE_OPERATIONS
 from ...core import (
     ALIGNMENT_MANUL_OVERRIDE,
     TYPES_FOR_ALIGNMENT,
-    PASSIVE_OPERATIONS,
     QuantizationProperty,
     QuantizationStates,
     RoundingPolicy,
@@ -70,7 +70,14 @@ class QuantizeSimplifyPass(QuantizationOptimizationPass):
         super().__init__(name="PPQ Quantize Simplify Pass")
 
     def optimize(self, graph: BaseGraph, dataloader: Iterable, executor: BaseGraphExecutor, **kwargs) -> None:
-        for _, variable in graph.variables.items():
+        sorted_op = graph.topological_sort()
+        sorted_vars = OrderedDict()
+        for op in sorted_op:
+            for var in op.inputs:
+                sorted_vars[var.name] = var
+            for var in op.outputs:
+                sorted_vars[var.name] = var
+        for _, variable in sorted_vars.items():
             assert isinstance(variable, Variable)
             source_op = variable.source_op
 
@@ -78,6 +85,7 @@ class QuantizeSimplifyPass(QuantizationOptimizationPass):
                 continue  # input variables in network, they do not have a source
             if not isinstance(source_op, QuantableOperation):
                 continue
+
             source_config = source_op.config.output_quantization_config[source_op.outputs.index(variable)]
 
             if source_config.state in {QuantizationStates.FP32}:
@@ -223,9 +231,9 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
                     len(graph.get_downstream_operations(computing_op)) == 1
                     and len(graph.get_upstream_operations(act_op)) == 1
                 ):
-                    computing_op.config.output_quantization_config[
-                        0
-                    ].dominated_by = act_op.config.output_quantization_config[0]
+                    computing_op.config.output_quantization_config[0].dominated_by = (
+                        act_op.config.output_quantization_config[0]
+                    )
                     act_op.config.input_quantization_config[0].dominated_by = act_op.config.output_quantization_config[
                         0
                     ]
@@ -333,9 +341,9 @@ class QuantizeFusionPass(QuantizationOptimizationPass):
                     len(graph.get_downstream_operations(computing_op)) == 1
                     and len(graph.get_upstream_operations(act_op)) == 1
                 ):
-                    computing_op.config.output_quantization_config[
-                        0
-                    ].dominated_by = act_op.config.output_quantization_config[0]
+                    computing_op.config.output_quantization_config[0].dominated_by = (
+                        act_op.config.output_quantization_config[0]
+                    )
                     act_op.config.input_quantization_config[0].dominated_by = act_op.config.output_quantization_config[
                         0
                     ]
