@@ -60,8 +60,9 @@ class GraphLegalized:
     def format_div(self):
         for op in self._graph.operations.values():
             if op.type == "Div" and op.inputs[1].is_parameter:
-                op.type = "Mul"
-                op.inputs[1].value = 1 / op.inputs[1].value
+                if op.inputs[1].value.dtype in {torch.float32, torch.float64, torch.float16}:
+                    op.type = "Mul"
+                    op.inputs[1].value = 1 / op.inputs[1].value
 
     def format_reshape_squeeze(self):
         search_engine = SearchableGraph(graph=self._graph)
@@ -165,11 +166,6 @@ class GraphLegalized:
                 len(self._graph.get_downstream_operations(computing_op)) != 1
                 or len(self._graph.get_upstream_operations(mul_op)) != 1
             ):
-                logger.warning(
-                    f"XQuant can not merge operation {computing_op.name} and {mul_op.name}, "
-                    "this is not suppose to happen with your network, "
-                    "network with batchnorm inside might not be able to quantize and deploy."
-                )
                 continue
 
             parameter_index = [in_var.is_parameter for in_var in mul_op.inputs].index(True)
@@ -203,7 +199,8 @@ class GraphLegalized:
 
             if mul_op.type in {"Mul", "Div"}:
                 alpha = parameter.value
-
+                if alpha.dtype not in {torch.float32, torch.float64, torch.float16}:
+                    continue
                 if mul_op.type == "Div":
                     if parameter_index != 1:
                         continue

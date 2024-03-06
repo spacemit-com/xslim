@@ -1,8 +1,8 @@
 from typing import Callable, Dict, List, Union
 
 import torch
-
-from ..core import QuantizationStates, TargetPlatform, DataType, TensorQuantizationConfig, empty_ppq_cache, ppq_warning
+from xquant.logger import logger
+from ..core import QuantizationStates, TargetPlatform, DataType, TensorQuantizationConfig, empty_ppq_cache
 from ..IR import BaseGraph, Operation, QuantableOperation, RunnableGraph
 from ..IR.base.command import GraphDeployCommand
 from ..quantization.qfunction import PPQuantFunction
@@ -20,10 +20,11 @@ class TorchMetaDataTracingHook(RuntimeHook):
         # therefore we have to create meta for those none input value manually.
         for tensor, var in zip(inputs, self._hook_to.inputs):
             if tensor is None:
-                ppq_warning(
-                    f"Unexpected input value of operation {self._hook_to.name}, "
-                    f'recieving "None" at its input {self._hook_to.inputs.index(var)}'
-                )
+                pass
+                # logger.warning(
+                #    f"Unexpected input value of operation {self._hook_to.name}, "
+                #    f'recieving "None" at its input {self._hook_to.inputs.index(var)}'
+                # )
             else:
                 var.shape = tensor.shape
                 var.dtype = tensor.dtype

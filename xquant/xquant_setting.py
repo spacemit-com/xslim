@@ -8,6 +8,7 @@ import os
 import onnx
 from xquant.logger import logger
 from .defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel
+from .ppq_decorator import BaseGraph
 
 
 class SettingSerialize:
@@ -167,41 +168,38 @@ class CalibrationParameterSetting(SettingSerialize):
         if self.calibration_type != "default":
             logger.info("set calibration_type {}.".format(self.calibration_type))
 
-        if isinstance(qsetting, XQuantSetting):
-            onnx_model_path = qsetting.model_parameters.onnx_model
-            onnx_model = onnx.load(onnx_model_path)
+    def check_input_parametres(self, ppq_ir: BaseGraph):
+        assert len(self.input_parametres) == len(
+            ppq_ir.inputs
+        ), "Calibration input_parametres size should <= model inputs size."
 
-            assert len(self.input_parametres) == len(
-                onnx_model.graph.input
-            ), "Calibration input_parametres size should equal to model inputs size."
-
-            for input_idx, in_var in enumerate(onnx_model.graph.input):
-                calib_parameter = self.input_parametres[input_idx]
-                input_shape = [
-                    i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else None
-                    for i in in_var.type.tensor_type.shape.dim
-                ]
-                if isinstance(in_var.type.tensor_type.elem_type, int):
-                    input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[in_var.type.tensor_type.elem_type].name
+        pb_input_types = ppq_ir._detail.get("pb_input_types", [])
+        pb_inputs = ppq_ir._detail.get("pb_inputs", [])
+        for input_idx, in_type in enumerate(pb_input_types):
+            calib_parameter = self.input_parametres[input_idx]
+            input_shape = [
+                i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else None
+                for i in in_type.tensor_type.shape.dim
+            ]
+            if isinstance(in_type.tensor_type.elem_type, int):
+                input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[in_type.tensor_type.elem_type].name
+            else:
+                input_dtype = None
+            if input_dtype is not None:
+                calib_parameter.dtype = input_dtype
+            if calib_parameter.input_name is None:
+                calib_parameter.input_name = pb_inputs[input_idx]
+            if calib_parameter.input_shape is None:
+                input_shape[0] = input_shape[0] if isinstance(input_shape[0], int) else 1
+                if all([isinstance(i, int) for i in input_shape[1:]]):
+                    pass
                 else:
-                    input_dtype = None
-
-                if input_dtype is not None:
-                    calib_parameter.dtype = input_dtype
-
-                if calib_parameter.input_name is None:
-                    calib_parameter.input_name = in_var.name
-                if calib_parameter.input_shape is None:
-                    input_shape[0] = input_shape[0] if isinstance(input_shape[0], int) else 1
-                    if all([isinstance(i, int) for i in input_shape[1:]]):
-                        pass
-                    else:
-                        raise RuntimeError(
-                            "Calibration input_parametres.shape or Model input shape should be vaild for var {}".format(
-                                calib_parameter.input_name
-                            )
+                    raise RuntimeError(
+                        "Calibration input_parametres.shape or Model input shape should be vaild for var {}".format(
+                            calib_parameter.input_name
                         )
-                    calib_parameter.input_shape = input_shape
+                    )
+                calib_parameter.input_shape = input_shape
 
 
 class XQuantSetting(SettingSerialize):

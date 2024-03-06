@@ -1560,10 +1560,15 @@ def Resize_forward(
     value = values[0]
     # Not used roi
     # roi  = input_value[1] if len(input_value) > 1 else None
-    if len(values) > 2 and values[2] is not None:
-        scale_factor = values[2].cpu()
+    # IF RESIZE HAS ONLY 2 INPUT, THEN MARK SECOND INPUT AS SCALES
+    if len(values) == 3:
+        scale_factor = values[-1].cpu()
+    elif len(values) == 4:
+        if values[2] is not None:
+            scale_factor = values[2].cpu()
     else:
-        scale_factor = None
+        raise Exception("Resize Operator is Excepted to have at least 3 inputs.")
+
     size = values[-1].cpu().tolist() if (len(values) == 4 and values[-1] != None) else None
     mode = op.attributes.get("mode", "nearest")
     if mode == "cubic":
@@ -2255,7 +2260,7 @@ def ReduceL2_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBacken
 
 def PRelu_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     input_data, weight = values
-    output = F.prelu(input_data, weight)
+    output = F.prelu(input_data, weight.squeeze())
     return output
 
 
@@ -3304,7 +3309,9 @@ def LSTM_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendCon
     # first 3 are mandatory input
     x, w, r = values[:3]
     b = GET_VALUE_FROM_INPUTS(values, 3)
-    seq_len = GET_VALUE_FROM_INPUTS(values, 4)
+    seq_len = values[4]
+    if seq_len is not None:
+        raise NotImplementedError("PPQ do not support LSTM with seq_len.")
     initial_h = GET_VALUE_FROM_INPUTS(values, 5)
     initial_c = GET_VALUE_FROM_INPUTS(values, 6)
     p = GET_VALUE_FROM_INPUTS(values, 7)

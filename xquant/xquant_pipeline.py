@@ -142,25 +142,14 @@ def quantize_onnx_model(
 
     config_setting.model_parameters.working_dir = os.path.realpath(config_setting.model_parameters.working_dir)
 
-    data_set = XQuantDataset(config_setting.calibration_parameters)
     output_prefix = config_setting.model_parameters.output_prefix
     working_dir = config_setting.model_parameters.working_dir
     calibration_step = config_setting.calibration_parameters.calibration_step
     calibration_device = config_setting.calibration_parameters.calibration_device
-    input_parametres = config_setting.calibration_parameters.input_parametres
 
     if not os.path.exists(working_dir):
         logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
-
-    inputs_list = []
-    for input_item in input_parametres:
-        input_shape = input_item.input_shape
-        inputs_list.append(
-            torch.zeros(size=input_shape, device=calibration_device, dtype=getattr(torch, input_item.dtype))
-        )
-
-    calib_dataloader = torch.utils.data.DataLoader(data_set)
 
     ppq_ir, truncate_left_graph, truncate_vars = xquant_load_onnx_graph(
         model_path,
@@ -172,8 +161,17 @@ def quantize_onnx_model(
 
     ppq_ir = dispatch_graph(graph=ppq_ir, dispatcher="conservative")
 
-    dummy_input = inputs_list
+    config_setting.calibration_parameters.check_input_parametres(ppq_ir)
+    input_parametres = config_setting.calibration_parameters.input_parametres
+    dummy_input = []
+    for input_item in input_parametres:
+        input_shape = input_item.input_shape
+        dummy_input.append(
+            torch.zeros(size=input_shape, device=calibration_device, dtype=getattr(torch, input_item.dtype))
+        )
 
+    data_set = XQuantDataset(config_setting.calibration_parameters)
+    calib_dataloader = torch.utils.data.DataLoader(data_set)
     quantizer = XQuantizer(ppq_ir)
     executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
 

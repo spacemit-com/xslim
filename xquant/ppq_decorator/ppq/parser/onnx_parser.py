@@ -179,8 +179,6 @@ class OnnxParser(GraphBuilder):
 
         inputs = [item.name for item in graph_pb.input]
         outputs = [item.name for item in graph_pb.output]
-        graph._detail["pb_inputs"] = inputs
-        graph._detail["pb_outputs"] = outputs
         graph._num_of_generated_op = len(graph.operations)
         graph._num_of_generated_var = len(graph.variables)
         graph = self.build_variables(
@@ -188,4 +186,10 @@ class OnnxParser(GraphBuilder):
         )
         graph = self.initialize_params(graph, initializer)
         self.de_inplace(graph)
-        return self.refine_graph(graph)
+        self.refine_graph(graph)
+
+        graph._detail["pb_inputs"] = [item.name for item in graph_pb.input if item.name in graph.inputs]
+        graph._detail["pb_outputs"] = [item.name for item in graph_pb.output if item.name in graph.outputs]
+        graph._detail["pb_input_types"] = [item.type for item in graph_pb.input if item.name in graph.inputs]
+        graph._detail["pb_output_types"] = [item.type for item in graph_pb.output if item.name in graph.outputs]
+        return graph

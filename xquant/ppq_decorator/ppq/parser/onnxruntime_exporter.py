@@ -623,9 +623,28 @@ class ONNXRUNTIMExporter(OnnxExporter):
                 add_spacemit_ep = True
             _nodes.append(super().build_operator_proto(operation))
 
+        pb_inputs = graph._detail.get("pb_inputs", [])
+        pb_outputs = graph._detail.get("pb_outputs", [])
+        pb_input_types = graph._detail.get("pb_input_types", [])
+        pb_output_types = graph._detail.get("pb_output_types", [])
+
+        is_symbolic_shape = False
         for variable in graph.variables.values():
             tensor_proto = super().build_variable_proto(variable)
             if variable.name in graph.inputs:
+                if variable.name in pb_inputs:
+                    in_idx = pb_inputs.index(variable.name)
+                    pb_type = pb_input_types[in_idx]
+                    pb_input_shape = [
+                        i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else i.dim_param
+                        for i in pb_type.tensor_type.shape.dim
+                    ]
+                    if all([isinstance(s, int) for s in pb_input_shape]):
+                        pass
+                    else:
+                        is_symbolic_shape = True
+                        variable.shape = pb_input_shape
+                tensor_proto = super().build_variable_proto(variable)
                 _inputs.append(tensor_proto)
             if variable.name in graph.outputs:
                 _outputs.append(tensor_proto)
@@ -634,8 +653,22 @@ class ONNXRUNTIMExporter(OnnxExporter):
             else:
                 _value_info.append(tensor_proto)
 
-        pb_inputs = graph._detail.get("pb_inputs", [])
-        pb_outputs = graph._detail.get("pb_outputs", [])
+        if is_symbolic_shape:
+            # 仅当模型是dynshape时才使用原shape覆盖, 否则认为当前给定的shape是用户想修改的
+            _outputs.clear()
+            _value_info.clear()
+            for k, variable in graph.outputs.items():
+                if variable.name in pb_outputs:
+                    out_idx = pb_outputs.index(variable.name)
+                    pb_type = pb_output_types[out_idx]
+                    pb_output_shape = [
+                        i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else i.dim_param
+                        for i in pb_type.tensor_type.shape.dim
+                    ]
+                    variable.shape = pb_output_shape
+                tensor_proto = super().build_variable_proto(variable)
+                _outputs.append(tensor_proto)
+
         _inputs = sorted(_inputs, key=lambda x: pb_inputs.index(x.name) if x.name in pb_inputs else len(_inputs))
         _outputs = sorted(_outputs, key=lambda x: pb_outputs.index(x.name) if x.name in pb_outputs else len(pb_outputs))
         graph_def = helper.make_graph(
