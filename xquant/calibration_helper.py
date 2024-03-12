@@ -210,7 +210,5 @@ class CalibrationCollect:
                 else:
                     raise NotImplementedError("Calibration file type {}".format(file_type))
 
-            dst_data_item[k] = (
-                torch.cat(batch_list, dim=0).to(getattr(torch, input_info.dtype)).to(self.calibration_device)
-            )
-        return dst_data_item
+            dst_data_item[k] = torch.cat(batch_list, dim=0).to(getattr(torch, input_info.dtype))
+        return dst_data_item  # .to(self.calibration_device)
