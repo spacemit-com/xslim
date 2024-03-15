@@ -153,9 +153,9 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
             b_cfg.scale = _b_scale
             if operation.type in {"Conv"}:
                 if torch.any(torch.abs(_i_bias) > OBSERVER_MAX_BIAS_VAL):
-                    # in frac + w frac无法表示就使用 out frac
                     b_cfg.scale = o_cfg.scale
-                    b_cfg.detail["quant_bias_apply"] = 1
+                    b_cfg.state = QuantizationStates.FP32
+                    return
             b_cfg.state = QuantizationStates.PASSIVE
             b_cfg.offset = torch.zeros_like(b_cfg.scale)
 
