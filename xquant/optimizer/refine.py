@@ -151,7 +151,7 @@ class PassiveParameterBakingPass(QuantizationOptimizationPass):
             _b_scale = w_cfg.scale * i_cfg.scale
             _i_bias = bias.to(torch.float64) / _b_scale.to(torch.float64)
             b_cfg.scale = _b_scale
-            if operation.type in {"Conv"}:
+            if operation.type in {"Conv"} and operation.attributes.get("group", 1) == 1:
                 if torch.any(torch.abs(_i_bias) > OBSERVER_MAX_BIAS_VAL):
                     b_cfg.scale = o_cfg.scale
                     b_cfg.state = QuantizationStates.FP32
