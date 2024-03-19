@@ -5,7 +5,6 @@ import functools
 from collections import deque
 from tqdm import tqdm
 import torch
-import joblib
 from ..ppq_decorator import (
     QuantizationStates,
     ppq_common,
