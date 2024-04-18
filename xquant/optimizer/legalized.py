@@ -44,6 +44,27 @@ class GraphLegalized:
         self.format_ms_domain()
         self.fuse_mul_add()
         self.fuse_mul_add()
+        # self.fuse_matmul_bias()
+
+    def fuse_matmul_bias(self):
+        for current_op in [_ for _ in self._graph.operations.values()]:
+            if current_op.type != "MatMul":
+                continue
+
+            next_ops = self._graph.get_downstream_operations(current_op)
+            if len(next_ops) != 1:
+                continue
+            if next_ops[0].type != "Add":
+                continue
+
+            fusing_op = next_ops[0]
+            if fusing_op.num_of_parameter == 1:
+                bias = fusing_op.parameters[0].value
+                if bias.ndim in {0, 1}:
+                    self._graph.remove_operation(fusing_op, keep_coherence=True)
+                    self._graph.create_variable(value=bias, is_parameter=True, dest_ops=[current_op])
+                    current_op.type = "BatchMatMul"
+                    current_op.attributes["domain"] = "spacemit_ops"
 
     def format_cast(self):
         interested_ops = []

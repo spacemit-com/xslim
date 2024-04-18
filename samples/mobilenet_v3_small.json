@@ -1,6 +1,6 @@
 {
     "model_parameters": {
-        "onnx_model": "/home/share/modelzoo/classification/mobilenet_v3_small/mobilenet_v3_small.onnx",
+        "onnx_model": "models/mobilenet_v3_small.onnx",
         "working_dir": "./temp"
     },
     "calibration_parameters": {
@@ -18,15 +18,15 @@
                 ],
                 "color_format": "rgb",
                 "preprocess_file": "PT_IMAGENET",
-                "data_list_path": "/home/share/modelzoo/dataset/Imagenet/calib_img_list.txt"
+                "data_list_path": "./Imagenet/calib_img_list.txt"
             }
         ]
     },
     "quantization_parameters": {
         "custom_setting": [
             {
-                "input_names": ["input_0"],
-                "output_names": ["/features/features.1/block/block.0/block.0.0/Conv_output_0"],
+                "input_names": ["input"],
+                "output_names": ["input.12"],
                 "precision_level": 2
             }
         ]

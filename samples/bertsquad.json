@@ -1,6 +1,6 @@
 {
     "model_parameters": {
-        "onnx_model": "/home/share/modelzoo/nlp/bertsquad/bertsquad.onnx",
+        "onnx_model": "models/bertsquad.onnx",
         "working_dir": "./temp"
     },
     "calibration_parameters": {

@@ -3,6 +3,7 @@
 from typing import Iterable, List, Set, Union, Dict, Callable, Tuple, Sequence
 import torch
 import math
+from xquant.logger import logger
 from ..ppq_decorator import (
     QuantizationProperty,
     QuantizationStates,
@@ -355,6 +356,7 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
         for op in visited_ops:
             if not isinstance(op, QuantableOperation):
                 continue
+            logger.info("set custom tqc for operation: {}".format(op.name))
             if isinstance(precision_level, int) and precision_level == 2:
                 self.precesion_level_2(graph, op)
             elif isinstance(precision_level, int) and precision_level == 3:

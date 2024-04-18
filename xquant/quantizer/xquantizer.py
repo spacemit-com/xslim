@@ -76,6 +76,7 @@ class XQuantizer:
             "ConvTranspose": pertensor_policy,
             "Gemm": pertensor_policy,
             "MatMul": pertensor_policy,
+            "BatchMatMul": pertensor_policy,
         }
         self._observer_mapping = {
             "default": "xquant",
@@ -291,6 +292,16 @@ class XQuantizer:
                 if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
                     in_tqc.channel_axis = 0
 
+        elif operation.type in {"BatchMatMul"}:
+            for in_tqc in base_quant_config.input_quantization_config[2:]:
+                in_tqc.state = QuantizationStates.FP32
+            if operation.inputs[1].is_parameter:
+                in_tqc = base_quant_config.input_quantization_config[1]
+                in_tqc.num_of_bits = 8
+                in_tqc._quant_min, in_tqc._quant_max = _get_quant_min_max(in_tqc.num_of_bits)
+                in_tqc.policy = self._op_type_to_policy[operation.type]
+                in_tqc.observer_algorithm = "minmax"
+
         elif operation.type in {"LayerNormalization", "InstanceNormalization", "BatchNormalization"}:
             for in_tqc in base_quant_config.input_quantization_config[1:]:
                 in_tqc.state = QuantizationStates.FP32
@@ -304,6 +315,7 @@ class XQuantizer:
             "ConvTranspose",
             "Gemm",
             "MatMul",
+            "BatchMatMul",
             #
             "Relu",
             "PRelu",

@@ -1,6 +1,6 @@
 {
     "model_parameters": {
-        "onnx_model": "/home/share/modelzoo/classification/resnet18/resnet18.onnx",
+        "onnx_model": "models/resnet18.onnx",
         "working_dir": "./temp"
     },
     "calibration_parameters": {
@@ -18,7 +18,7 @@
                 ],
                 "color_format": "rgb",
                 "preprocess_file": "PT_IMAGENET",
-                "data_list_path": "/home/share/modelzoo/dataset/Imagenet/calib_img_list.txt"
+                "data_list_path": "./Imagenet/calib_img_list.txt"
             }
         ]
     }

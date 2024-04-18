@@ -1,5 +1,5 @@
 from typing import Dict, List
-
+from collections import OrderedDict
 import onnx
 import torch
 from onnx import helper
@@ -674,22 +674,20 @@ class ONNXRUNTIMExporter(OnnxExporter):
         graph_def = helper.make_graph(
             name=name, nodes=_nodes, inputs=_inputs, outputs=_outputs, initializer=_initilizers, value_info=_value_info
         )
-        extra_opsets = self.required_opsets
+        import_opsets = OrderedDict({"ai.onnx": 13})
 
         if add_spacemit_ep:
-            extra_opsets["spacemit_ops"] = 1
+            import_opsets["spacemit_ops"] = 1
 
-        opsets = []
         if GRAPH_OPSET_ATTRIB in graph._detail:
             for opset in graph._detail[GRAPH_OPSET_ATTRIB]:
-                if opset["domain"] in extra_opsets or opset["domain"] == "":
-                    continue
-                op = onnx.OperatorSetIdProto()
-                op.domain = opset["domain"]
-                op.version = opset["version"]
-                opsets.append(op)
+                if opset["domain"] in import_opsets or opset["domain"] == "":
+                    import_opsets["ai.onnx"] = max(opset["version"], import_opsets["ai.onnx"])
+                else:
+                    import_opsets[opset["domain"]] = opset["version"]
 
-        for key, value in extra_opsets.items():
+        opsets = []
+        for key, value in import_opsets.items():
             op = onnx.OperatorSetIdProto()
             # PATCH 2024.01.30
             # 我也不知道为什么 onnx checker 会对 ai.onnx 这个 domain 报错

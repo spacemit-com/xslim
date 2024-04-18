@@ -45,7 +45,7 @@ PASSIVE_OPERATIONS = {
     "Gather",
 }
 
-COMPUTING_OP = {"Conv", "Gemm", "ConvTranspose", "MatMul"}
+COMPUTING_OP = {"Conv", "Gemm", "ConvTranspose", "MatMul", "BatchMatMul"}
 
 BIAS_CORRECTION_INTERST_TYPE = {
     "Conv",

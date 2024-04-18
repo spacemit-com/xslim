@@ -1,6 +1,6 @@
 {
     "model_parameters": {
-        "onnx_model": "/home/share/modelzoo/classification/inception_v1/inception_v1.onnx",
+        "onnx_model": "inception_v1.onnx",
         "working_dir": "./temp"
     },
     "calibration_parameters": {
@@ -18,7 +18,7 @@
                 ],
                 "color_format": "bgr",
                 "preprocess_file": "./preprocess.py:preprocess_impl",
-                "data_list_path": "/home/share/modelzoo/dataset/Imagenet/calib_img_list.txt"
+                "data_list_path": "./Imagenet/calib_img_list.txt"
             }
         ]
     }

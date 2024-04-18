@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# Copyright (c) 2023 SpacemiT. All rights reserved.
 from collections import defaultdict
 from typing import Callable, Dict, Iterable, List, Tuple, Union, Sequence, Set
 import functools
@@ -79,7 +81,8 @@ class XQuantTrainableBlock(TrainableBlock):
                 for dest_op in var.dest_ops:
                     if (
                         dest_op in block_ops
-                        and set([var for var in dest_op.inputs if not var.is_parameter and var.source_op is not None]) <= visited_vars
+                        and set([var for var in dest_op.inputs if not var.is_parameter and var.source_op is not None])
+                        <= visited_vars
                     ):
                         toposort_ops.append(dest_op)
                         block_ops.remove(dest_op)

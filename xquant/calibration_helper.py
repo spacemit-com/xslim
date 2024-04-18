@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Any, Union, Dict, Sequence, Callable
+from typing import Any, Union, Dict, Sequence, Callable, Tuple
 from collections import OrderedDict
 import os
 import sys
@@ -9,6 +9,7 @@ import torch
 import numpy as np
 from PIL import Image
 import importlib
+import functools
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 from .xquant_setting import CalibrationParameterSetting, InputParameterSetting
@@ -153,16 +154,17 @@ class CalibrationCollect:
                 self.custom_transforms[input_info.input_name] = getattr(custom_module, func_name)
 
     def __call__(self, data_item) -> Any:
-        dst_data_item = dict()
-        for k, v in data_item.items():
-            input_info = self.input_info_dict[k]
-            if isinstance(self.custom_transforms[k], Callable):
-                dst_data_item[k] = (
-                    self.custom_transforms[k](v, input_info.to_dict())
-                    .to(getattr(torch, input_info.dtype))
-                    .to(self.calibration_device)
+        @functools.lru_cache(maxsize=(1024 * 1024 * 256))
+        def calibration_data_collect(
+            collector: CalibrationCollect,
+            file_names: Tuple[str],
+            tensor_name: str,
+        ) -> torch.Tensor:
+            input_info = collector.input_info_dict[tensor_name]
+            if isinstance(collector.custom_transforms[tensor_name], Callable):
+                return collector.custom_transforms[tensor_name](file_names, input_info.to_dict()).to(
+                    getattr(torch, input_info.dtype)
                 )
-                continue
 
             file_type = input_info.file_type
             file_type = input_info.file_type
@@ -171,16 +173,16 @@ class CalibrationCollect:
             mean_value = np.array(input_info.mean_value) if input_info.mean_value is not None else 0
             std_value = np.array(input_info.std_value) if input_info.std_value is not None else 1
             batch_list = []
-            for batch_item in v:
+            for batch_item in file_names:
                 if isinstance(batch_item, torch.Tensor):
                     batch_list.append(batch_item)
                     continue
                 elif file_type == "img":
-                    if self.imagenet_transforms[k] is not None:
+                    if collector.imagenet_transforms[k] is not None:
                         img = cv2.imread(batch_item)
                         if color_format == "rgb":
                             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        img = self.imagenet_transforms[k](img)
+                        img = collector.imagenet_transforms[k](img)
                         img = torch.unsqueeze(img, 0)
                         batch_list.append(img)
                     else:
@@ -190,25 +192,24 @@ class CalibrationCollect:
                             img = np.expand_dims(img, -1)
                         elif color_format == "rgb":
                             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
                         img = cv2.resize(img, (input_shape[-1], input_shape[-2]), interpolation=cv2.INTER_AREA)
-
                         img = img.astype(np.float32)
                         img = (img - mean_value) / std_value
                         img = np.transpose(img, (2, 0, 1))
                         img = torch.unsqueeze(torch.from_numpy(img), 0)
                         batch_list.append(img)
-
                 elif file_type == "npy":
                     img = np.load(batch_item)
                     batch_list.append(torch.from_numpy(img))
-
                 elif file_type == "raw":
                     img = np.fromfile(batch_item, dtype=np.float32)
                     batch_list.append(torch.from_numpy(img))
-
                 else:
                     raise NotImplementedError("Calibration file type {}".format(file_type))
 
-            dst_data_item[k] = torch.cat(batch_list, dim=0).to(getattr(torch, input_info.dtype))
-        return dst_data_item  # .to(self.calibration_device)
+            return torch.cat(batch_list, dim=0).to(getattr(torch, input_info.dtype))
+
+        dst_data_item = {}
+        for k, v in data_item.items():
+            dst_data_item[k] = calibration_data_collect(self, tuple(v), k)
+        return dst_data_item

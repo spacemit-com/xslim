@@ -2207,6 +2207,17 @@ def MatMul_forward(
     return output
 
 
+def BatchMatMul_forward(
+    op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs
+) -> torch.Tensor:
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=3)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    output = torch.matmul(values[0], values[1])
+    if len(values) > 2:
+        output = output + values[2]
+    return output
+
+
 def Softmax_forward(
     op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs
 ) -> torch.Tensor:
@@ -3990,6 +4001,7 @@ DEFAULT_BACKEND_TABLE = {
     "Less": Less_forward,
     "LogSoftmax": LogSoftmax_forward,
     "MatMul": MatMul_forward,
+    "BatchMatMul": BatchMatMul_forward,
     "Max": Eltwise_forward,
     "MaxPool": MaxPool2d_forward,
     "Min": Eltwise_forward,

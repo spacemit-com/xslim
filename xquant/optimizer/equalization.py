@@ -85,6 +85,11 @@ class XQuantLayerwiseEqualizationPass(LayerwiseEqualizationPass):
                 continue
             if collate_fn is not None:
                 data = collate_fn(batch)
+            if isinstance(data, dict):
+                data = {k: v.to(executor._executing_context.executing_device) for k, v in data.items()}
+            elif isinstance(data, torch.Tensor):
+                data = data.to(executor._executing_context.executing_device)
+
             outputs = executor.forward(data, output_names=output_names)
             for name, output in zip(output_names, outputs):
                 op = graph.variables[name].source_op
