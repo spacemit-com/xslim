@@ -118,10 +118,12 @@ class RunnableGraph(GraphCommandProcessor):
             # if variable is a shape-related variable, send it to cpu.
             if variable.is_parameter:
                 if len(variable.dest_ops) > 1:
-                    raise PermissionError(
-                        f"PPQ can not process parameter variable({variable.name})"
-                        f" with multiple destinations({[op.name for op in variable.dest_ops]}), split it first."
-                    )
+                    # raise PermissionError(
+                    #    f"PPQ can not process parameter variable({variable.name})"
+                    #    f" with multiple destinations({[op.name for op in variable.dest_ops]}), split it first."
+                    # )
+                    variable.value = convert_any_to_torch_tensor(variable.value, accept_none=True).to("cpu")
+                    continue
                 dest_op = variable.dest_ops[0]
                 dest_idx = dest_op.inputs.index(variable)
 
