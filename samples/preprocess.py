@@ -15,13 +15,14 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
     Returns:
         torch.Tensor: 一个batch的校准数据
     """
+    # print("Custom Preprocessing ...")
     batch_list = []
     mean_value = input_parametr["mean_value"]
     std_value = input_parametr["std_value"]
     input_shape = input_parametr["input_shape"]
     for file_path in path_list:
         img = cv2.imread(file_path)
-
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (input_shape[-1], input_shape[-2]), interpolation=cv2.INTER_AREA)
         img = img.astype(np.float32)
         img = (img - mean_value) / std_value

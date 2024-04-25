@@ -1,20 +1,20 @@
 {
     "model_parameters": {
-        "onnx_model": "inception_v1.onnx",
+        "onnx_model": "models/resnet18.onnx",
         "working_dir": "./temp"
     },
     "calibration_parameters": {
         "input_parametres": [
             {
                 "mean_value": [
-                    104,
-                    117,
-                    123
+                    123.675,
+                    116.28,
+                    103.53
                 ],
                 "std_value": [
-                    1.0,
-                    1.0,
-                    1.0
+                    58.395,
+                    57.12,
+                    57.375
                 ],
                 "color_format": "bgr",
                 "preprocess_file": "./preprocess.py:preprocess_impl",
