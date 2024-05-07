@@ -539,7 +539,14 @@ class TorchExecutor(BaseGraphExecutor, torch.nn.Module):
 
                 # forward and collecting result
                 if isinstance(operation_forward_func, TorchExecutor):
-                    outputs = operation_forward_func.forward(inputs=inputs)
+                    function_input_dict = {
+                        in_name: inputs[idx]
+                        for idx, in_name in enumerate(operation_forward_func._graph._detail["function_input"])
+                    }
+                    function_output_names = [_ for _ in operation_forward_func._graph._detail["function_output"]]
+                    outputs = operation_forward_func.forward(
+                        inputs=function_input_dict, output_names=function_output_names
+                    )
                 else:
                     outputs = operation_forward_func(operation, inputs, self._executing_context)
                 outputs = outputs if isinstance(outputs, (list, tuple)) else [outputs]

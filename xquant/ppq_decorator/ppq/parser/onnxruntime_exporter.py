@@ -560,6 +560,37 @@ class ONNXRUNTIMExporter(OnnxExporter):
 
         return self.remove_duplicated_quant_op(graph)
 
+    def export_function(self, function_impl: BaseGraph) -> onnx.FunctionProto:
+        nodes = []
+        for operation in [_ for _ in function_impl.topological_sort()]:
+            node_proto = super().build_operator_proto(operation)
+            nodes.append(node_proto)
+
+        import_opset_list = function_impl._detail.get(
+            "function_opset_import", [{"domain": "", "version": MIN_ONNX_OPSET_VERSION}]
+        )
+        import_opsets = {opset["domain"]: opset["version"] for opset in import_opset_list}
+        opsets = []
+        for key, value in import_opsets.items():
+            op = onnx.OperatorSetIdProto()
+            if key == ONNX_DOMAIN:
+                key = ""
+            op.domain = key
+            op.version = value
+            opsets.append(op)
+
+        function_proto = helper.make_function(
+            domain=function_impl._detail["function_domain"],
+            fname=function_impl._name,
+            inputs=function_impl._detail["function_input"],
+            outputs=function_impl._detail["function_output"],
+            nodes=nodes,
+            opset_imports=opsets,
+            attributes=function_impl._detail.get("function_attribute", []),
+            attribute_protos=function_impl._detail.get("function_attribute_proto", []),
+        )
+        return function_proto
+
     def export(
         self,
         graph: BaseGraph,
@@ -614,13 +645,13 @@ class ONNXRUNTIMExporter(OnnxExporter):
         if not name:
             name = "XQuant Export"
 
-        add_spacemit_ep = False
+        add_spacemit_functions = False
 
         # Ready to export onnx graph definition.
         _inputs, _outputs, _initilizers, _nodes, _value_info = [], [], [], [], []
         for operation in graph.topological_sort():
-            if not add_spacemit_ep and operation.attributes.get("domain", None) == "spacemit_ops":
-                add_spacemit_ep = True
+            if not add_spacemit_functions and operation.attributes.get("domain", None) == "spacemit_functions":
+                add_spacemit_functions = True
             node_proto = super().build_operator_proto(operation)
             if "{}.{}".format(operation.opset.domain, operation.type) in graph._detail[GLOBAL_FUNCTIONS_MAPPING]:
                 node_proto.domain = operation.opset.domain
@@ -685,8 +716,8 @@ class ONNXRUNTIMExporter(OnnxExporter):
         )
         import_opsets = OrderedDict({ONNX_DOMAIN: MIN_ONNX_OPSET_VERSION})
 
-        if add_spacemit_ep:
-            import_opsets["spacemit_ops"] = 1
+        if add_spacemit_functions:
+            import_opsets["spacemit_functions"] = 1
 
         if "pb_opset_import" in graph._detail:
             for opset in graph._detail["pb_opset_import"]:
@@ -712,7 +743,18 @@ class ONNXRUNTIMExporter(OnnxExporter):
         onnx_model.producer_name = graph._detail["pb_producer_name"]
         onnx_model.producer_version = graph._detail["pb_producer_version"]
         onnx_model.model_version = graph._detail["pb_model_version"]
-        onnx_model.functions.extend(graph._detail["pb_functions"])
+
+        existed_function_type = [
+            "{}.{}".format(function_proto.domain, function_proto.name)
+            for function_proto in graph._detail["pb_functions"]
+        ]
+        for function_type, function_impl in graph._detail[GLOBAL_FUNCTIONS_MAPPING].items():
+            if function_type in existed_function_type:
+                onnx_model.functions.append(graph._detail["pb_functions"][existed_function_type.index(function_type)])
+                continue
+            function_proto = self.export_function(function_impl)
+            onnx_model.functions.append(function_proto)
+
         onnx_model.metadata_props.extend(graph._detail["pb_metadata_props"])
 
         export_time = onnx_model.metadata_props.add()

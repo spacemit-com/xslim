@@ -5,6 +5,7 @@ import numpy as np
 import onnx
 import torch
 from xquant.logger import logger
+from xquant.defs import MIN_ONNX_OPSET_VERSION, GLOBAL_FUNCTIONS_MAPPING
 from ..ppq_decorator import (
     convert_any_to_torch_tensor,
     DataType,
@@ -13,6 +14,8 @@ from ..ppq_decorator import (
     SearchableGraph,
     GraphMerger,
     GraphFormatter,
+    BaseGraph,
+    Opset,
 )
 
 
@@ -44,9 +47,52 @@ class GraphLegalized:
         self.format_ms_domain()
         self.fuse_mul_add()
         self.fuse_mul_add()
-        # self.fuse_matmul_bias()
+        self.fuse_matmul_bias()
 
     def fuse_matmul_bias(self):
+        function_impl = BaseGraph(name="BatchMatMul")
+        var_A = Variable(name="A", dtype=DataType.FP32)
+        var_B = Variable(name="B", dtype=DataType.FP32)
+        var_C = Variable(name="C", dtype=DataType.FP32)
+        var_temp = Variable(name="MatMul_temp", dtype=DataType.FP32)
+        var_Y = Variable(name="Y", dtype=DataType.FP32)
+        function_impl.operations["MatMul"] = Operation(
+            name="MatMul",
+            op_type="MatMul",
+            attributes={},
+            inputs=[var_A, var_B],
+            outputs=[var_temp],
+        )
+        function_impl.operations["Add"] = Operation(
+            name="Add",
+            op_type="Add",
+            attributes={},
+            inputs=[var_temp, var_C],
+            outputs=[var_Y],
+        )
+        var_A.dest_ops.append(function_impl.operations["MatMul"])
+        var_B.dest_ops.append(function_impl.operations["MatMul"])
+        var_C.dest_ops.append(function_impl.operations["Add"])
+        var_temp.dest_ops.append(function_impl.operations["Add"])
+        var_temp.source_op = function_impl.operations["MatMul"]
+        var_Y.source_op = function_impl.operations["Add"]
+        for op in function_impl.operations.values():
+            for in_var in op.inputs:
+                function_impl.variables[in_var.name] = in_var
+            for out_var in op.outputs:
+                function_impl.variables[out_var.name] = out_var
+
+        function_impl.inputs[var_A.name] = var_A
+        function_impl.inputs[var_B.name] = var_B
+        function_impl.inputs[var_C.name] = var_C
+        function_impl.outputs[var_Y.name] = var_Y
+        function_impl._detail["function_input"] = [var_A.name, var_B.name, var_C.name]
+        function_impl._detail["function_output"] = [var_Y.name]
+        function_impl._detail["function_domain"] = "spacemit_functions"
+        function_impl._detail["function_opset_import"] = [{"domain": "", "version": MIN_ONNX_OPSET_VERSION}]
+        function_impl._detail["function_attribute"] = ["transA", "transB", "transY"]
+
+        add_function_impl = False
         for current_op in [_ for _ in self._graph.operations.values()]:
             if current_op.type != "MatMul":
                 continue
@@ -61,10 +107,18 @@ class GraphLegalized:
             if fusing_op.num_of_parameter == 1:
                 bias = fusing_op.parameters[0].value
                 if bias.ndim in {0, 1}:
+                    add_function_impl = True
                     self._graph.remove_operation(fusing_op, keep_coherence=True)
                     self._graph.create_variable(value=bias, is_parameter=True, dest_ops=[current_op])
                     current_op.type = "BatchMatMul"
-                    current_op.attributes["domain"] = "spacemit_ops"
+                    current_op.attributes["domain"] = "spacemit_functions"
+                    current_op.attributes["transA"] = 0
+                    current_op.attributes["transB"] = 0
+                    current_op.attributes["transY"] = 0
+                    current_op.opset = Opset("spacemit_functions", version=1)
+
+        if add_function_impl:
+            self._graph._detail[GLOBAL_FUNCTIONS_MAPPING]["spacemit_functions.BatchMatMul"] = function_impl
 
     def format_cast(self):
         interested_ops = []

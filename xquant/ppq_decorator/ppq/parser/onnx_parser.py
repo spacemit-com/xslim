@@ -163,6 +163,8 @@ class OnnxParser(GraphBuilder):
         else:
             inputs = [item for item in graph_or_function.input]
             outputs = [item for item in graph_or_function.output]
+            graph._detail["function_input"] = graph_or_function.input
+            graph._detail["function_output"] = graph_or_function.output
             graph._detail["function_domain"] = graph_or_function.domain
             graph._detail["function_opset_import"] = self.convert_opsets_to_str(graph_or_function.opset_import)
             graph._detail["function_attribute"] = graph_or_function.attribute

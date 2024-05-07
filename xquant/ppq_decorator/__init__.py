@@ -17,6 +17,7 @@ from .ppq import (
 )
 from .ppq.IR import BaseGraph, Operation, QuantableOperation, Variable, QuantableGraph, GraphReplacer
 from .ppq.IR.search import SearchableGraph
+from .ppq.IR.base.opdef import Opset
 from .ppq.IR import GraphMerger, GraphFormatter
 from .ppq.executor import TorchExecutor, BaseGraphExecutor
 from .ppq.scheduler import DISPATCHER_TABLE, GraphDispatcher

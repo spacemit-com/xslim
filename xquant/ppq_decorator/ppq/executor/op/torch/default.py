@@ -4001,7 +4001,7 @@ DEFAULT_BACKEND_TABLE = {
     "Less": Less_forward,
     "LogSoftmax": LogSoftmax_forward,
     "MatMul": MatMul_forward,
-    "BatchMatMul": BatchMatMul_forward,
+    # "BatchMatMul": BatchMatMul_forward,
     "Max": Eltwise_forward,
     "MaxPool": MaxPool2d_forward,
     "Min": Eltwise_forward,
