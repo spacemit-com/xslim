@@ -6,6 +6,7 @@ import copy
 import onnx_graphsurgeon as osg
 import onnx
 from xquant.logger import logger
+from xquant.defs import MIN_ONNX_OPSET_VERSION
 
 
 def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
@@ -18,7 +19,7 @@ def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
     return opset_dict
 
 
-def format_onnx_model(onnx_model: onnx.ModelProto, min_onnx_version: int = 13) -> onnx.ModelProto:
+def format_onnx_model(onnx_model: onnx.ModelProto, min_onnx_version: int = MIN_ONNX_OPSET_VERSION) -> onnx.ModelProto:
     """
     Regularize an onnx model, including removing shape fields, value_info fields, etc., to avoid entering bugs.
 

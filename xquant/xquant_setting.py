@@ -173,22 +173,20 @@ class CalibrationParameterSetting(SettingSerialize):
             ppq_ir.inputs
         ), "Calibration input_parametres size should <= model inputs size."
 
-        pb_input_types = ppq_ir._detail.get("pb_input_types", [])
-        pb_inputs = ppq_ir._detail.get("pb_inputs", [])
-        for input_idx, in_type in enumerate(pb_input_types):
-            calib_parameter = self.input_parametres[input_idx]
+        pb_input = ppq_ir._detail.get("pb_input", [])
+        for in_type, calib_parameter in zip(pb_input, self.input_parametres):
             input_shape = [
                 i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else None
-                for i in in_type.tensor_type.shape.dim
+                for i in in_type.type.tensor_type.shape.dim
             ]
-            if isinstance(in_type.tensor_type.elem_type, int):
-                input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[in_type.tensor_type.elem_type].name
+            if isinstance(in_type.type.tensor_type.elem_type, int):
+                input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[in_type.type.tensor_type.elem_type].name
             else:
                 input_dtype = None
             if input_dtype is not None:
                 calib_parameter.dtype = input_dtype
             if calib_parameter.input_name is None:
-                calib_parameter.input_name = pb_inputs[input_idx]
+                calib_parameter.input_name = in_type.name
             if calib_parameter.input_shape is None:
                 input_shape[0] = input_shape[0] if isinstance(input_shape[0], int) else 1
                 if all([isinstance(i, int) for i in input_shape[1:]]):

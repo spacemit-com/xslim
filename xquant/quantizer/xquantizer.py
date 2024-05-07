@@ -302,7 +302,7 @@ class XQuantizer:
                 in_tqc.policy = self._op_type_to_policy[operation.type]
                 in_tqc.observer_algorithm = "minmax"
 
-        elif operation.type in {"LayerNormalization", "InstanceNormalization", "BatchNormalization"}:
+        elif operation.type in {"LayerNormalization", "LayerNorm", "InstanceNormalization", "BatchNormalization"}:
             for in_tqc in base_quant_config.input_quantization_config[1:]:
                 in_tqc.state = QuantizationStates.FP32
 
@@ -324,6 +324,7 @@ class XQuantizer:
             "HardSwish",
             "HardSigmoid",
             "Gelu",
+            "GELU",
             "LRN",
             "Clip",
             #
@@ -344,6 +345,7 @@ class XQuantizer:
             # "Max",
             #
             "LayerNormalization",
+            "LayerNorm",
             "InstanceNormalization",
             "GroupNormalization",
             #

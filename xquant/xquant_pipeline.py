@@ -74,7 +74,9 @@ def xquant_load_onnx_graph(
     if sim_en:
         logger.info("simplify onnx model...")
         try:
+            function_protos = onnx_model.functions
             onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
+            onnx_model.functions.extend(function_protos)
         except Exception as e:
             logger.warning("simplify onnx model error and skip.")
 

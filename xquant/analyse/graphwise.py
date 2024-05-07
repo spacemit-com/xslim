@@ -27,7 +27,7 @@ class DetailedRecorder(RuntimeHook):
             if input.numel() > 0:
                 if self.i_indexer[idx] is None:
                     self.i_indexer[idx] = generate_torch_indexer(self.fetchs, input.numel())
-                self.i_storage[idx].append(input.flatten()[self.i_indexer[idx]].to("cpu"))
+                self.i_storage[idx].append(input.flatten()[self.i_indexer[idx]])
             else:
                 self.i_storage[idx].append(torch.ones([1]))
         return super().pre_forward_hook(inputs, **kwargs)
@@ -37,7 +37,7 @@ class DetailedRecorder(RuntimeHook):
             if output.numel() > 0:
                 if self.o_indexer[idx] is None:
                     self.o_indexer[idx] = generate_torch_indexer(self.fetchs, output.numel())
-                self.o_storage[idx].append(output.flatten()[self.o_indexer[idx]].to("cpu"))
+                self.o_storage[idx].append(output.flatten()[self.o_indexer[idx]])
             else:
                 self.o_storage[idx].append(torch.ones([1]))
         return super().post_forward_hook(outputs, **kwargs)

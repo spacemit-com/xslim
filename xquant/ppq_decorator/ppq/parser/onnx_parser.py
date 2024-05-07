@@ -1,8 +1,8 @@
 from typing import Any, Dict, Iterable, List, Union
-
 import onnx
 from onnx import helper, mapping, numpy_helper
-from ..core import DEFAULT_OPSET_DOMAIN, DEFAULT_OPSET_VERSION, GRAPH_OPSET_ATTRIB, NetworkFramework, is_file_exist
+from xquant.defs import MIN_ONNX_OPSET_VERSION, GLOBAL_FUNCTIONS_MAPPING
+from ..core import DEFAULT_OPSET_DOMAIN, GRAPH_OPSET_ATTRIB, NetworkFramework, is_file_exist
 from ..IR import BaseGraph, GraphBuilder, Operation, Opset, Variable
 
 
@@ -124,8 +124,64 @@ class OnnxParser(GraphBuilder):
             results.append({"domain": opset.domain, "version": opset.version})
         return results
 
+    def build_graph(self, graph_or_function: [onnx.GraphProto, onnx.FunctionProto], import_opset_dict) -> BaseGraph:
+        _rand_seed = 0
+        graph = BaseGraph(name=graph_or_function.name, built_from=NetworkFramework.ONNX)
+        op_inputs_dict, op_outputs_dict = {}, {}
+        for node in graph_or_function.node:
+            op_name = node.name
+            if len(op_name) == 0:  # some operation do not have a name, we just generate one.
+                op_name = "generated_name_" + str(_rand_seed)
+                _rand_seed += 1
+
+            if op_name in graph.operations:
+                raise KeyError(f"Duplicated operation {op_name} was found.")
+
+            opset_tmp = Opset(
+                domain=DEFAULT_OPSET_DOMAIN if node.domain == "" else node.domain,
+                version=import_opset_dict[node.domain],
+            )
+
+            graph.operations[op_name] = Operation(
+                name=op_name,
+                op_type=node.op_type,
+                attributes={item.name: helper.get_attribute_value(item) for item in node.attribute},
+                opset=opset_tmp,
+            )
+            op_inputs_dict[op_name] = [var_name for var_name in node.input]
+            op_outputs_dict[op_name] = [var_name for var_name in node.output]
+
+        initializer = {}
+        if isinstance(graph_or_function, onnx.GraphProto):
+            for item in graph_or_function.initializer:
+                init_name = item.name
+                value = numpy_helper.to_array(item)
+                initializer[init_name] = value
+
+            inputs = [item.name for item in graph_or_function.input]
+            outputs = [item.name for item in graph_or_function.output]
+        else:
+            inputs = [item for item in graph_or_function.input]
+            outputs = [item for item in graph_or_function.output]
+            graph._detail["function_domain"] = graph_or_function.domain
+            graph._detail["function_opset_import"] = self.convert_opsets_to_str(graph_or_function.opset_import)
+            graph._detail["function_attribute"] = graph_or_function.attribute
+            graph._detail["function_attribute_proto"] = {
+                item.name: helper.get_attribute_value(item) for item in graph_or_function.attribute_proto
+            }
+
+        graph._num_of_generated_op = len(graph.operations)
+        graph._num_of_generated_var = len(graph.variables)
+        graph = self.build_variables(
+            graph, graph_inputs=inputs, graph_outputs=outputs, op_inputs=op_inputs_dict, op_outputs=op_outputs_dict
+        )
+        graph = self.initialize_params(graph, initializer)
+        self.de_inplace(graph)
+        self.refine_graph(graph)
+
+        return graph
+
     def build(self, file_path_or_proto: Union[str, onnx.ModelProto]) -> BaseGraph:
-        _rand_seed = 0  # used for name generation.
         if isinstance(file_path_or_proto, str):
             if not is_file_exist(file_path_or_proto):
                 raise FileNotFoundError(f"file {file_path_or_proto} does not exist, or it is a directory.")
@@ -141,55 +197,32 @@ class OnnxParser(GraphBuilder):
             model_pb, onnx.ModelProto
         ), f"onnx load failed, only ProtoBuffer object is expected here, while {type(model_pb)} is loaded."
         graph_pb = model_pb.graph
-        graph = BaseGraph(name=graph_pb.name, built_from=NetworkFramework.ONNX)
-        graph._detail[GRAPH_OPSET_ATTRIB] = self.convert_opsets_to_str(opsets)
-        graph._detail["ir_version"] = model_pb.ir_version
 
-        onnx_import_opset = DEFAULT_OPSET_VERSION
-        for opset in graph._detail[GRAPH_OPSET_ATTRIB]:
-            if opset["domain"] == DEFAULT_OPSET_DOMAIN or opset["domain"] == "":
-                onnx_import_opset = opset["version"]
-                break
+        # graph = BaseGraph(name=graph_pb.name, built_from=NetworkFramework.ONNX)
+        # graph._detail[GRAPH_OPSET_ATTRIB] = self.convert_opsets_to_str(opsets)
 
-        # a temporary storage for operation's inputs and outputs
-        op_inputs_dict, op_outputs_dict = {}, {}
-        for node in graph_pb.node:
-            op_name = node.name
-            if len(op_name) == 0:  # some operation do not have a name, we just generate one.
-                op_name = "generated_name_" + str(_rand_seed)
-                _rand_seed += 1
+        model_opset_import = self.convert_opsets_to_str(opsets)
+        import_opset_dict = {}
+        for opset in model_opset_import:
+            import_opset_dict[opset["domain"]] = opset["version"]
 
-            if op_name in graph.operations:
-                raise KeyError(f"Duplicated operation {op_name} was found.")
+        graph = self.build_graph(graph_pb, import_opset_dict)
 
-            graph.operations[op_name] = Operation(
-                name=op_name,
-                op_type=node.op_type,
-                attributes={item.name: helper.get_attribute_value(item) for item in node.attribute},
-                opset=Opset(domain=DEFAULT_OPSET_DOMAIN, version=onnx_import_opset),
-            )
-            op_inputs_dict[op_name] = [var_name for var_name in node.input]
-            op_outputs_dict[op_name] = [var_name for var_name in node.output]
+        graph._detail[GLOBAL_FUNCTIONS_MAPPING] = {}
+        for function_proto in model_pb.functions:
+            function_impl = self.build_graph(function_proto, import_opset_dict)
+            graph._detail[GLOBAL_FUNCTIONS_MAPPING][
+                "{}.{}".format(function_proto.domain, function_proto.name)
+            ] = function_impl
 
-        initializer = {}
-        for item in graph_pb.initializer:
-            init_name = item.name
-            value = numpy_helper.to_array(item)
-            initializer[init_name] = value
-
-        inputs = [item.name for item in graph_pb.input]
-        outputs = [item.name for item in graph_pb.output]
-        graph._num_of_generated_op = len(graph.operations)
-        graph._num_of_generated_var = len(graph.variables)
-        graph = self.build_variables(
-            graph, graph_inputs=inputs, graph_outputs=outputs, op_inputs=op_inputs_dict, op_outputs=op_outputs_dict
-        )
-        graph = self.initialize_params(graph, initializer)
-        self.de_inplace(graph)
-        self.refine_graph(graph)
-
-        graph._detail["pb_inputs"] = [item.name for item in graph_pb.input if item.name in graph.inputs]
-        graph._detail["pb_outputs"] = [item.name for item in graph_pb.output if item.name in graph.outputs]
-        graph._detail["pb_input_types"] = [item.type for item in graph_pb.input if item.name in graph.inputs]
-        graph._detail["pb_output_types"] = [item.type for item in graph_pb.output if item.name in graph.outputs]
+        graph._detail["pb_opset_import"] = model_opset_import
+        graph._detail["pb_input"] = [item for item in graph_pb.input if item.name in graph.inputs]
+        graph._detail["pb_output"] = [item for item in graph_pb.output if item.name in graph.outputs]
+        graph._detail["pb_functions"] = model_pb.functions
+        graph._detail["pb_metadata_props"] = model_pb.metadata_props
+        graph._detail["pb_model_version"] = model_pb.model_version
+        graph._detail["pb_producer_name"] = model_pb.producer_name
+        graph._detail["pb_producer_version"] = model_pb.producer_version
+        graph._detail["pb_doc_string"] = model_pb.doc_string
+        graph._detail["pb_ir_version"] = model_pb.ir_version
         return graph

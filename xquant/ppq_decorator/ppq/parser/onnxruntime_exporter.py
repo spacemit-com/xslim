@@ -1,18 +1,18 @@
 from typing import Dict, List
 from collections import OrderedDict
 import onnx
+import onnx.helper
 import torch
+from datetime import datetime
 from onnx import helper
-from xquant.defs import PASSIVE_OPERATIONS
+from xquant.defs import PASSIVE_OPERATIONS, MIN_ONNX_OPSET_VERSION, GLOBAL_FUNCTIONS_MAPPING, XQUANT_CONFIG
 from ..core import (
-    GRAPH_OPSET_ATTRIB,
-    PPQ_CONFIG,
     QuantizationProperty,
     QuantizationStates,
     QuantizationVisibility,
     TensorQuantizationConfig,
     convert_any_to_torch_tensor,
-    ppq_warning,
+    ONNX_DOMAIN,
 )
 from ..IR import BaseGraph, Operation, QuantableOperation, QuantableVariable, Variable
 from ..quantization.qfunction.linear import PPQLinearQuant_toInt
@@ -621,19 +621,24 @@ class ONNXRUNTIMExporter(OnnxExporter):
         for operation in graph.topological_sort():
             if not add_spacemit_ep and operation.attributes.get("domain", None) == "spacemit_ops":
                 add_spacemit_ep = True
-            _nodes.append(super().build_operator_proto(operation))
+            node_proto = super().build_operator_proto(operation)
+            if "{}.{}".format(operation.opset.domain, operation.type) in graph._detail[GLOBAL_FUNCTIONS_MAPPING]:
+                node_proto.domain = operation.opset.domain
+            _nodes.append(node_proto)
 
-        pb_inputs = graph._detail.get("pb_inputs", [])
-        pb_outputs = graph._detail.get("pb_outputs", [])
-        pb_input_types = graph._detail.get("pb_input_types", [])
-        pb_output_types = graph._detail.get("pb_output_types", [])
+        pb_input = graph._detail.get("pb_input", [])
+        pb_output = graph._detail.get("pb_output", [])
+        pb_input_names = [item.name for item in pb_input]
+        pb_output_names = [item.name for item in pb_output]
+        pb_input_types = [item.type for item in pb_input]
+        pb_output_types = [item.type for item in pb_output]
 
         is_symbolic_shape = False
         for variable in graph.variables.values():
             tensor_proto = super().build_variable_proto(variable)
             if variable.name in graph.inputs:
-                if variable.name in pb_inputs:
-                    in_idx = pb_inputs.index(variable.name)
+                if variable.name in pb_input_names:
+                    in_idx = pb_input_names.index(variable.name)
                     pb_type = pb_input_types[in_idx]
                     pb_input_shape = [
                         i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else i.dim_param
@@ -658,8 +663,8 @@ class ONNXRUNTIMExporter(OnnxExporter):
             _outputs.clear()
             _value_info.clear()
             for k, variable in graph.outputs.items():
-                if variable.name in pb_outputs:
-                    out_idx = pb_outputs.index(variable.name)
+                if variable.name in pb_output_names:
+                    out_idx = pb_output_names.index(variable.name)
                     pb_type = pb_output_types[out_idx]
                     pb_output_shape = [
                         i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else i.dim_param
@@ -669,20 +674,24 @@ class ONNXRUNTIMExporter(OnnxExporter):
                 tensor_proto = super().build_variable_proto(variable)
                 _outputs.append(tensor_proto)
 
-        _inputs = sorted(_inputs, key=lambda x: pb_inputs.index(x.name) if x.name in pb_inputs else len(_inputs))
-        _outputs = sorted(_outputs, key=lambda x: pb_outputs.index(x.name) if x.name in pb_outputs else len(pb_outputs))
+        _inputs = sorted(
+            _inputs, key=lambda x: pb_input_names.index(x.name) if x.name in pb_input_names else len(_inputs)
+        )
+        _outputs = sorted(
+            _outputs, key=lambda x: pb_output_names.index(x.name) if x.name in pb_output_names else len(pb_output_names)
+        )
         graph_def = helper.make_graph(
             name=name, nodes=_nodes, inputs=_inputs, outputs=_outputs, initializer=_initilizers, value_info=_value_info
         )
-        import_opsets = OrderedDict({"ai.onnx": 13})
+        import_opsets = OrderedDict({ONNX_DOMAIN: MIN_ONNX_OPSET_VERSION})
 
         if add_spacemit_ep:
             import_opsets["spacemit_ops"] = 1
 
-        if GRAPH_OPSET_ATTRIB in graph._detail:
-            for opset in graph._detail[GRAPH_OPSET_ATTRIB]:
+        if "pb_opset_import" in graph._detail:
+            for opset in graph._detail["pb_opset_import"]:
                 if opset["domain"] in import_opsets or opset["domain"] == "":
-                    import_opsets["ai.onnx"] = max(opset["version"], import_opsets["ai.onnx"])
+                    import_opsets[ONNX_DOMAIN] = max(opset["version"], import_opsets[ONNX_DOMAIN])
                 else:
                     import_opsets[opset["domain"]] = opset["version"]
 
@@ -692,13 +701,26 @@ class ONNXRUNTIMExporter(OnnxExporter):
             # PATCH 2024.01.30
             # 我也不知道为什么 onnx checker 会对 ai.onnx 这个 domain 报错
             # 按照规范 ai.onnx 与 "" 是等价的写法
-            if key == "ai.onnx":
+            if key == ONNX_DOMAIN:
                 key = ""
             op.domain = key
             op.version = value
             opsets.append(op)
 
         onnx_model = helper.make_model(graph_def, producer_name="xquant", opset_imports=opsets)
-        onnx_model.ir_version = graph._detail["ir_version"]
+        onnx_model.ir_version = graph._detail["pb_ir_version"]
+        onnx_model.producer_name = graph._detail["pb_producer_name"]
+        onnx_model.producer_version = graph._detail["pb_producer_version"]
+        onnx_model.model_version = graph._detail["pb_model_version"]
+        onnx_model.functions.extend(graph._detail["pb_functions"])
+        onnx_model.metadata_props.extend(graph._detail["pb_metadata_props"])
+
+        export_time = onnx_model.metadata_props.add()
+        export_time.key = "xquant_export_time"
+        export_time.value = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+
+        xquant_version = onnx_model.metadata_props.add()
+        xquant_version.key = "xquant_version"
+        xquant_version.value = XQUANT_CONFIG.version
 
         return onnx_model

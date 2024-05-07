@@ -25,7 +25,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
-        self.version = "1.0.7"
+        self.version = "1.1.0"
 
 
 PASSIVE_OPERATIONS = {
@@ -67,6 +67,10 @@ OBSERVER_MAX_BIAS_VAL = 2**20
 OBSERVER_PERCENTILE = 0.9999
 
 OBSERVER_SIGMOID_MAX_VALUE = 10
+
+MIN_ONNX_OPSET_VERSION = 13
+
+GLOBAL_FUNCTIONS_MAPPING = "GLOBAL_FUNCTIONS_MAPPING"
 
 
 class AutoFinetuneLevel(Enum):
