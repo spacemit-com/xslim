@@ -218,7 +218,7 @@ class GraphLegalized:
                 op.attributes["domain"] = "com.microsoft"
                 has_ms_domain = True
         if has_ms_domain:
-            self._graph._detail["GRAPH_OPSET"].append({"domain": "com.microsoft", "version": 1})
+            self._graph._detail["pb_opset_import"].append({"domain": "com.microsoft", "version": 1})
 
     def fuse_mul_add(self):
         search_engine = SearchableGraph(graph=self._graph)
