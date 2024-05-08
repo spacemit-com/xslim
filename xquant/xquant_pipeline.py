@@ -165,17 +165,27 @@ def quantize_onnx_model(
 
     config_setting.calibration_parameters.check_input_parametres(ppq_ir)
     input_parametres = config_setting.calibration_parameters.input_parametres
-    dummy_input = []
-    for input_item in input_parametres:
-        input_shape = input_item.input_shape
-        dummy_input.append(
-            torch.zeros(size=input_shape, device=calibration_device, dtype=getattr(torch, input_item.dtype))
-        )
 
     data_set = XQuantDataset(config_setting.calibration_parameters)
     calib_dataloader = torch.utils.data.DataLoader(data_set)
     quantizer = XQuantizer(ppq_ir)
     executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
+
+    collate_fn = CalibrationCollect(input_parametres, calibration_device)
+
+    single_graph_input_name = None
+    dummy_input = None
+    for k, v in ppq_ir.inputs.items():
+        single_graph_input_name = k
+    for data in calib_dataloader:
+        data = collate_fn(data)
+        if isinstance(data, torch.Tensor) and len(ppq_ir.inputs) == 1:
+            if collate_fn is not None:
+                dummy_input = {single_graph_input_name: data}
+        elif isinstance(data, dict):
+            dummy_input = data
+        else:
+            raise TypeError(type(data))
 
     quantizer.quantize(
         inputs=dummy_input,
@@ -183,7 +193,7 @@ def quantize_onnx_model(
         executor=executor,
         xquant_setting=config_setting,
         calib_steps=calibration_step,
-        collate_fn=CalibrationCollect(input_parametres, calibration_device),
+        collate_fn=collate_fn,
     )
 
     if config_setting.quantization_parameters.analysis_enable:
@@ -193,7 +203,7 @@ def quantize_onnx_model(
             quantizer._graph,
             calibration_device,
             test_dataloader,
-            CalibrationCollect(input_parametres, calibration_device),
+            collate_fn,
             steps=XQUANT_CONFIG.analyse_steps,
             report_path=report_path,
         )

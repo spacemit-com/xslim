@@ -187,17 +187,17 @@ class CalibrationParameterSetting(SettingSerialize):
                 calib_parameter.dtype = input_dtype
             if calib_parameter.input_name is None:
                 calib_parameter.input_name = in_type.name
-            if calib_parameter.input_shape is None:
-                input_shape[0] = input_shape[0] if isinstance(input_shape[0], int) else 1
-                if all([isinstance(i, int) for i in input_shape[1:]]):
-                    pass
-                else:
-                    raise RuntimeError(
-                        "Calibration input_parametres.shape or Model input shape should be vaild for var {}".format(
-                            calib_parameter.input_name
-                        )
-                    )
-                calib_parameter.input_shape = input_shape
+            # if calib_parameter.input_shape is None:
+            # input_shape[0] = input_shape[0] if isinstance(input_shape[0], int) else 1
+            # if all([isinstance(i, int) for i in input_shape[1:]]):
+            #    pass
+            # else:
+            #    raise RuntimeError(
+            #        "Calibration input_parametres.shape or Model input shape should be vaild for var {}".format(
+            #            calib_parameter.input_name
+            #        )
+            #    )
+            # calib_parameter.input_shape = input_shape
 
 
 class XQuantSetting(SettingSerialize):

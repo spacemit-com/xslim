@@ -47,7 +47,7 @@ class GraphLegalized:
         self.format_ms_domain()
         self.fuse_mul_add()
         self.fuse_mul_add()
-        self.fuse_matmul_bias()
+        # self.fuse_matmul_bias()
 
     def fuse_matmul_bias(self):
         function_impl = BaseGraph(name="BatchMatMul")
