@@ -27,6 +27,7 @@ class GraphLegalized:
 
     def __call__(self) -> Any:
         self._formatter.remove_constant_input()
+        self.remove_empty_sequence_input()
         self._formatter.convert_to_tensor()
         self.format_cast()
         self._formatter.format_parameter()
@@ -47,7 +48,22 @@ class GraphLegalized:
         self.format_ms_domain()
         self.fuse_mul_add()
         self.fuse_mul_add()
-        # self.fuse_matmul_bias()
+        self.fuse_matmul_bias()
+
+    def remove_empty_sequence_input(self) -> None:
+        removing_ops = []
+        for op in self._graph.operations.values():
+            if op.type == "SequenceEmpty":
+                removing_ops.append(op)
+
+        for const_op in removing_ops:
+            assert isinstance(const_op, Operation)
+            dtype = DataType(const_op.attributes.get("dtype", DataType.FP32))
+            constant_value = np.empty(0, dtype=DataType.to_numpy(dtype))
+            output_var = const_op.outputs[0]
+            output_var._is_parameter = True
+            output_var.value = constant_value
+            self._graph.remove_operation(removing_op=const_op)
 
     def fuse_matmul_bias(self):
         function_impl = BaseGraph(name="BatchMatMul")
