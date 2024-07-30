@@ -1,0 +1,9 @@
+{
+    "model_parameters": {
+        "onnx_model": "models/mobilenet_v3_small.onnx",
+        "working_dir": "./temp"
+    },
+    "quantization_parameters": {
+        "precision_level": 3
+    }
+}

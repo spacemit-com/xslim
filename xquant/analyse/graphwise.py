@@ -24,7 +24,7 @@ class DetailedRecorder(RuntimeHook):
 
     def pre_forward_hook(self, inputs: List[torch.Tensor], **kwargs) -> list:
         for idx, input in enumerate(inputs):
-            if input.numel() > 0:
+            if isinstance(input, torch.Tensor) and input.numel() > 0:
                 if self.i_indexer[idx] is None:
                     self.i_indexer[idx] = generate_torch_indexer(self.fetchs, input.numel())
                 self.i_storage[idx].append(input.flatten()[self.i_indexer[idx]])
@@ -34,7 +34,7 @@ class DetailedRecorder(RuntimeHook):
 
     def post_forward_hook(self, outputs: List[torch.Tensor], **kwargs) -> list:
         for idx, output in enumerate(outputs):
-            if output.numel() > 0:
+            if isinstance(output, torch.Tensor) and output.numel() > 0:
                 if self.o_indexer[idx] is None:
                     self.o_indexer[idx] = generate_torch_indexer(self.fetchs, output.numel())
                 self.o_storage[idx].append(output.flatten()[self.o_indexer[idx]])

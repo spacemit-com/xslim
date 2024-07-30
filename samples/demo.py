@@ -1,7 +1,7 @@
 import xquant
 
 # common
-xquant.quantize_onnx_model("resnet18.json")
+# xquant.quantize_onnx_model("resnet18.json")
 
 # xquant.quantize_onnx_model("resnet18.json", "/home/share/modelzoo/classification/resnet18/resnet18.onnx")
 
@@ -21,3 +21,6 @@ xquant.quantize_onnx_model("resnet18.json")
 #
 ## bert
 # xquant.quantize_onnx_model("bertsquad.json")
+
+## dynamic quantize
+# xquant.quantize_onnx_model("mobilenet_v3_small_dyn_quantize.json")

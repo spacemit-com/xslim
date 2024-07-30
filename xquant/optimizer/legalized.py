@@ -48,7 +48,7 @@ class GraphLegalized:
         self.format_ms_domain()
         self.fuse_mul_add()
         self.fuse_mul_add()
-        self.fuse_matmul_bias()
+        # self.fuse_matmul_bias()
 
     def remove_empty_sequence_input(self) -> None:
         removing_ops = []

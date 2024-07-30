@@ -96,6 +96,39 @@ def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
     return XQuantSettingFactory.from_json(config_dict)
 
 
+def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto]):
+    from onnxruntime.quantization.matmul_4bits_quantizer import MatMul4BitsQuantizer
+    from onnxruntime.quantization import QuantType, QuantizationMode
+    from onnxruntime.quantization.onnx_quantizer import ONNXQuantizer
+
+    logger.info("quantize onnx model dynamic...")
+
+    if isinstance(file_or_model, onnx.ModelProto):
+        onnx_model = file_or_model
+    elif isinstance(file_or_model, str):
+        onnx_model = onnx.load(file_or_model)
+    else:
+        raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
+
+    extra_options = {}
+    quantizer = ONNXQuantizer(
+        onnx_model,
+        True,  # per channel
+        False,  # reduce_range
+        QuantizationMode.IntegerOps,
+        False,  # static
+        QuantType.QUInt8,
+        QuantType.QUInt8,
+        None,
+        [],
+        [],
+        ["MatMul", "Attention", "LSTM", "Gemm"],
+        extra_options,
+    )
+    quantizer.quantize_model()
+    return quantizer.model.model
+
+
 def quantize_onnx_model(
     path_or_config: Union[str, dict],
     input_onnx_model_or_path: Optional[Union[str, onnx.ModelProto]] = None,
@@ -153,66 +186,72 @@ def quantize_onnx_model(
         logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
 
-    ppq_ir, truncate_left_graph, truncate_vars = xquant_load_onnx_graph(
-        model_path,
-        not config_setting.model_parameters.skip_onnxsim,
-        config_setting.quantization_parameters.truncate_var_names,
-    )
-
-    GraphLegalized(ppq_ir)()
-
-    ppq_ir = dispatch_graph(graph=ppq_ir, dispatcher="conservative")
-
-    config_setting.calibration_parameters.check_input_parametres(ppq_ir)
-    input_parametres = config_setting.calibration_parameters.input_parametres
-
-    data_set = XQuantDataset(config_setting.calibration_parameters)
-    calib_dataloader = torch.utils.data.DataLoader(data_set)
-    quantizer = XQuantizer(ppq_ir)
-    executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
-
-    collate_fn = CalibrationCollect(input_parametres, calibration_device)
-
-    single_graph_input_name = None
-    dummy_input = None
-    for k, v in ppq_ir.inputs.items():
-        single_graph_input_name = k
-    for data in calib_dataloader:
-        data = collate_fn(data)
-        if isinstance(data, torch.Tensor) and len(ppq_ir.inputs) == 1:
-            if collate_fn is not None:
-                dummy_input = {single_graph_input_name: data}
-        elif isinstance(data, dict):
-            dummy_input = data
-        else:
-            raise TypeError(type(data))
-
-    quantizer.quantize(
-        inputs=dummy_input,
-        calib_dataloader=calib_dataloader,
-        executor=executor,
-        xquant_setting=config_setting,
-        calib_steps=calibration_step,
-        collate_fn=collate_fn,
-    )
-
-    if config_setting.quantization_parameters.analysis_enable:
-        test_dataloader = torch.utils.data.DataLoader(data_set, shuffle=True)
-        report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
-        graphwise_analyse_results = statistical_analyse(
-            quantizer._graph,
-            calibration_device,
-            test_dataloader,
-            collate_fn,
-            steps=XQUANT_CONFIG.analyse_steps,
-            report_path=report_path,
+    if config_setting.quantization_parameters.precision_level.value >= 3:
+        quant_onnx_model = dynamic_quantize_onnx_model(model_path)
+    else:
+        ppq_ir, truncate_left_graph, truncate_vars = xquant_load_onnx_graph(
+            model_path,
+            not config_setting.model_parameters.skip_onnxsim,
+            config_setting.quantization_parameters.truncate_var_names,
         )
 
-    quant_onnx_model = ONNXRUNTIMExporter().export(
-        quantizer._graph,
-    )
+        GraphLegalized(ppq_ir)()
 
-    quant_onnx_model = merge_onnx_model(quant_onnx_model, truncate_left_graph, truncate_vars)
+        ppq_ir = dispatch_graph(graph=ppq_ir, dispatcher="conservative")
+
+        config_setting.calibration_parameters.check_input_parametres(ppq_ir)
+        input_parametres = config_setting.calibration_parameters.input_parametres
+
+        data_set = XQuantDataset(config_setting.calibration_parameters)
+        calib_dataloader = torch.utils.data.DataLoader(data_set)
+        quantizer = XQuantizer(ppq_ir)
+        executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
+
+        collate_fn = CalibrationCollect(input_parametres, calibration_device)
+
+        single_graph_input_name = None
+        dummy_input = None
+        for k, v in ppq_ir.inputs.items():
+            single_graph_input_name = k
+        for data in calib_dataloader:
+            data = collate_fn(data)
+            if isinstance(data, torch.Tensor) and len(ppq_ir.inputs) == 1:
+                if collate_fn is not None:
+                    dummy_input = {single_graph_input_name: data}
+            elif isinstance(data, dict):
+                dummy_input = data
+            else:
+                raise TypeError(type(data))
+
+        quantizer.quantize(
+            inputs=dummy_input,
+            calib_dataloader=calib_dataloader,
+            executor=executor,
+            xquant_setting=config_setting,
+            calib_steps=calibration_step,
+            collate_fn=collate_fn,
+        )
+
+        if config_setting.quantization_parameters.analysis_enable:
+            try:
+                test_dataloader = torch.utils.data.DataLoader(data_set, shuffle=True)
+                report_path = os.path.join(working_dir, "{}_report.md".format(output_prefix))
+                graphwise_analyse_results = statistical_analyse(
+                    quantizer._graph,
+                    calibration_device,
+                    test_dataloader,
+                    collate_fn,
+                    steps=XQUANT_CONFIG.analyse_steps,
+                    report_path=report_path,
+                )
+            except:
+                logger.warning("quantize analysis failed and skiped.")
+
+        quant_onnx_model = ONNXRUNTIMExporter().export(
+            quantizer._graph,
+        )
+
+        quant_onnx_model = merge_onnx_model(quant_onnx_model, truncate_left_graph, truncate_vars)
 
     onnx.save(quant_onnx_model, os.path.join(working_dir, "{}.onnx".format(output_prefix)))
 
