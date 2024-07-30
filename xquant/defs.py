@@ -25,7 +25,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
-        self.version = "1.1.1"
+        self.version = "1.2.1"
 
 
 PASSIVE_OPERATIONS = {
