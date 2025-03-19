@@ -44,10 +44,11 @@ def format_onnx_model(onnx_model: onnx.ModelProto, min_onnx_version: int = MIN_O
     if ai_onnx_version < min_onnx_version:
         logger.warning("convert ai.onnx version {} to {}...".format(ai_onnx_version, min_onnx_version))
         onnx_model = onnx.version_converter.convert_version(onnx_model, min_onnx_version)
-        try:
-            onnx_model = onnx.shape_inference.infer_shapes(onnx_model, data_prop=True)
-        except Exception as e:
-            logger.warning("shape_inference error with {}, skiped".format(e))
+
+    try:
+        onnx_model = onnx.shape_inference.infer_shapes(onnx_model, data_prop=True)
+    except Exception as e:
+        logger.warning("shape_inference error with {}, skiped".format(e))
 
     return onnx_model
 
