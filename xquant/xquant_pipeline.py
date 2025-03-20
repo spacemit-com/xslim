@@ -97,7 +97,6 @@ def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
 
 
 def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto]):
-    from onnxruntime.quantization.matmul_4bits_quantizer import MatMul4BitsQuantizer
     from onnxruntime.quantization import QuantType, QuantizationMode
     from onnxruntime.quantization.onnx_quantizer import ONNXQuantizer
 
@@ -109,6 +108,14 @@ def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto]):
         onnx_model = onnx.load(file_or_model)
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
+
+    dynamic_q_op_types = {"MatMul", "Attention", "LSTM", "Gemm", "Conv"}
+    ignore_op_types = os.environ.get("ORT_DYNAMIC_QUANTIZE_IGNORE_OP_TYPES", "")
+    ignore_op_types_list = ignore_op_types.strip().split(";")
+
+    for ignore_op in ignore_op_types_list:
+        if ignore_op in dynamic_q_op_types:
+            dynamic_q_op_types.remove(ignore_op)
 
     extra_options = {}
     quantizer = ONNXQuantizer(
@@ -122,7 +129,7 @@ def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto]):
         None,
         [],
         [],
-        ["MatMul", "Attention", "LSTM", "Gemm"],
+        list(dynamic_q_op_types),
         extra_options,
     )
     quantizer.quantize_model()
@@ -186,7 +193,7 @@ def quantize_onnx_model(
         logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
 
-    if config_setting.quantization_parameters.precision_level.value >= 3:
+    if config_setting.quantization_parameters.precision_level.value == 3:
         quant_onnx_model = dynamic_quantize_onnx_model(model_path)
     else:
         ppq_ir, truncate_left_graph, truncate_vars = xquant_load_onnx_graph(
