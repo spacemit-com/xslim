@@ -1571,6 +1571,8 @@ def Resize_forward(
 
     size = values[-1].cpu().tolist() if (len(values) == 4 and values[-1] != None) else None
     mode = op.attributes.get("mode", "nearest")
+    if mode == "":
+        mode = "nearest"
     if mode == "cubic":
         mode = "bicubic"
     # onnx resize 'linear' model include N-linear interpolate for N-D tensor

@@ -4,6 +4,7 @@ from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
 from collections import OrderedDict
 from enum import Enum
 import torch
+import os
 import numpy as np
 import functools
 from xquant.logger import logger
@@ -86,6 +87,10 @@ class XQuantizer:
             "percentile": "percentile",
         }
         self._verbose = False
+        self._bias_to_fp32 = bool(int(os.environ.get("XQUANT_BIAS_TO_FP32", "0")) > 0)
+
+        if self._bias_to_fp32:
+            logger.info("Set Bias to Float32.")
 
     @property
     def target_platform(self) -> TargetPlatform:
@@ -285,12 +290,15 @@ class XQuantizer:
             # if operation has bias
             if operation.num_of_input > 2 and operation.inputs[-1].is_parameter:
                 in_tqc = base_quant_config.input_quantization_config[-1]
-                in_tqc.policy = self._op_type_to_policy[operation.type]
-                in_tqc.num_of_bits = 32
-                in_tqc._quant_min, in_tqc._quant_max = _get_quant_min_max(in_tqc.num_of_bits)
-                in_tqc.state = QuantizationStates.PASSIVE_INIT
-                if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
-                    in_tqc.channel_axis = 0
+                if self._bias_to_fp32:
+                    in_tqc.state = QuantizationStates.FP32
+                else:
+                    in_tqc.policy = self._op_type_to_policy[operation.type]
+                    in_tqc.num_of_bits = 32
+                    in_tqc._quant_min, in_tqc._quant_max = _get_quant_min_max(in_tqc.num_of_bits)
+                    in_tqc.state = QuantizationStates.PASSIVE_INIT
+                    if in_tqc.policy.has_property(QuantizationProperty.PER_CHANNEL):
+                        in_tqc.channel_axis = 0
 
         elif operation.type in {"BatchMatMul"}:
             for in_tqc in base_quant_config.input_quantization_config[2:]:
