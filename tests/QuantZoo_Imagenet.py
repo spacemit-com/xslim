@@ -131,22 +131,24 @@ CONFIGS = [
     },
 ]
 
-from typing import Callable, Optional
+import argparse
 import os
-import torch
+import time
+from typing import Callable, Optional
+
 import cv2
 import numpy as np
-import time
-import argparse
-from tqdm import tqdm
+import torch
 import torchvision.datasets as datasets
-from torch.utils.data.dataloader import DataLoader
-import xquant
-from xquant.logger import logger
-from xquant.ppq_decorator import load_onnx_graph, TorchExecutor, BaseGraph
-from xquant.calibration_helper import PTImagenetPreprocess, ImagenetPreprocess
-from torch.utils.data.dataset import Subset
 import torchvision.transforms as transforms
+from torch.utils.data.dataloader import DataLoader
+from torch.utils.data.dataset import Subset
+from tqdm import tqdm
+
+import xquant
+from xquant.calibration_helper import ImagenetPreprocess, PTImagenetPreprocess
+from xquant.logger import logger
+from xquant.ppq_decorator import BaseGraph, TorchExecutor, load_onnx_graph
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -488,7 +490,7 @@ if __name__ == "__main__":
 
         output_model_path = os.path.join(output_dir, "{}.onnx".format(demo_json["model_parameters"]["output_prefix"]))
 
-        if True:  # args.eval_quant:
+        if args.eval_quant:
             quantized_export_graph = load_onnx_graph(output_model_path)
 
             logger.info(f"Evaluate quantized Model Accurarcy....")
