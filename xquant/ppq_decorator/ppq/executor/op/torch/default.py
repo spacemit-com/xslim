@@ -1,25 +1,29 @@
 import operator
+import os
 from functools import reduce
 from typing import List
 
-from xquant.logger import logger
 import torch
 import torch.nn.functional as F
 from torch import _VF
-from ....core import (
-    GRU_FLATTEN_WEIGHT_ATTRIB,
-    LSTM_FLATTEN_WEIGHT_ATTRIB,
-    DataType,
-    TargetPlatform,
-    convert_any_to_python_primary_type,
-)
+
+from xquant.logger import logger
+
+from ....core import (GRU_FLATTEN_WEIGHT_ATTRIB, LSTM_FLATTEN_WEIGHT_ATTRIB,
+                      DataType, TargetPlatform,
+                      convert_any_to_python_primary_type)
 from ....IR import Operation
 from ....utils import process_attribute
 from .base import *
+from .xquant_qfunction import (quantize_blockwise, quantize_channel_blockwise,
+                               quantize_groupwise, quantize_tensorwise)
 
 # Reference:
 # onnx op: https://github.com/onnx/onnx/blob/master/docs/Operators.md
 # torch func: https://pytorch.org/docs/stable/nn.functional.html
+
+
+XQUANT_EVAL_Q4 = bool(int(os.environ.get("XQUANT_EVAL_Q4", "0")) > 0)
 
 
 def convert_onnx_pads_to_torch(onnx_pads: List[int], mode: str = None) -> List[int]:
@@ -311,7 +315,17 @@ def Conv_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendCon
                 x = F.pad(x, pad=[p_left, p_right, p_top, p_bottom])
                 onnx_pads = 0
 
-        output = F.conv2d(input=x, weight=w, bias=b, groups=groups, padding=onnx_pads, dilation=dilation, stride=stride)
+        if XQUANT_EVAL_Q4:
+            batch, ic = x.shape[0], x.shape[1]
+            oc = w.shape[0]
+            output_dtype = x.dtype
+            x_quantize = quantize_channel_blockwise(x.reshape(batch, ic, -1).permute(0, 2, 1).reshape(-1, ic)).to(torch.float16)
+            x_quantize = x_quantize.reshape(batch, -1, ic).permute(0, 2, 1).reshape(x.shape)
+            w_quantize = quantize_groupwise(w.reshape(oc, -1)).to(torch.float16).reshape(w.shape)
+            output = F.conv2d(input=x_quantize, weight=w_quantize, bias=b.to(torch.float16), groups=groups, padding=onnx_pads, dilation=dilation, stride=stride)
+            output = output.to(output_dtype)
+        else:
+            output = F.conv2d(input=x, weight=w, bias=b, groups=groups, padding=onnx_pads, dilation=dilation, stride=stride)
 
     # conv - 3d
     elif ndim == 5:
@@ -2205,8 +2219,26 @@ def MatMul_forward(
     """
     ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=2)
     values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
-    output = torch.matmul(values[0], values[1])
-    return output
+
+    if XQUANT_EVAL_Q4:
+        val_lhs_shape = values[0].shape
+        val_rhs_shape = values[1].shape
+        output_dtype = values[0].dtype
+        M = val_lhs_shape[-2]
+        K = val_lhs_shape[-1]
+        N = val_rhs_shape[-1]
+
+        val_lhs = values[0].reshape(-1, K)
+        val_rhs = values[1].reshape(-1, K, N).permute(0, 2, 1).reshape(-1, K)
+
+        val_lhs_quant = quantize_blockwise(val_lhs).reshape(val_lhs_shape).to(torch.float16)
+        val_rhs_quant = quantize_groupwise(val_rhs).reshape(-1, N, K).permute(0, 2, 1).reshape(val_rhs_shape).to(torch.float16)
+
+        output = torch.matmul(val_lhs_quant, val_rhs_quant)
+        return output.to(output_dtype)
+    else:
+        output = torch.matmul(values[0], values[1])
+        return output
 
 
 def BatchMatMul_forward(
