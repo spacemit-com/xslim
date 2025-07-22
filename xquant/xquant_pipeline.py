@@ -1,31 +1,30 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Union, Dict, Sequence, Optional, List
-from collections import OrderedDict, deque
-import json
-import torch
-import os
-import onnx
-import time
 import copy
-import onnxsim
+import json
+import os
+import time
+from collections import OrderedDict, deque
+from typing import Dict, List, Optional, Sequence, Union
+
+import numpy as np
+import onnx
+import onnxslim
+import torch
+
 from xquant.logger import logger
-from .ppq_decorator import (
-    TargetPlatform,
-    BaseGraph,
-    TorchExecutor,
-    DISPATCHER_TABLE,
-    GraphDispatcher,
-    ONNXRUNTIMExporter,
-    OnnxParser,
-)
-from .defs import XQUANT_CONFIG
-from .calibration_helper import XQuantDataset, CalibrationCollect
-from .optimizer import GraphLegalized
+
 from .analyse import statistical_analyse
-from .xquant_setting import XQuantSettingFactory, XQuantSetting
-from .quantizer import XQuantizer
-from .onnx_graph_helper import format_onnx_model, truncate_onnx_model, merge_onnx_model
+from .calibration_helper import CalibrationCollect, XQuantDataset
+from .defs import XQUANT_CONFIG
+from .onnx_graph_helper import (format_onnx_model, merge_onnx_model,
+                                truncate_onnx_model)
+from .optimizer import GraphLegalized
+from .ppq_decorator import (DISPATCHER_TABLE, BaseGraph, GraphDispatcher,
+                            OnnxParser, ONNXRUNTIMExporter, TargetPlatform,
+                            TorchExecutor)
+from .quantizer import XQuantizer, dynamic_quantize_onnx_model
+from .xquant_setting import XQuantSetting, XQuantSettingFactory
 
 
 def dispatch_graph(graph: BaseGraph, dispatcher: Union[str, GraphDispatcher] = "conservative") -> BaseGraph:
@@ -71,16 +70,7 @@ def xquant_load_onnx_graph(
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
 
-    if sim_en:
-        logger.info("simplify onnx model...")
-        try:
-            function_protos = onnx_model.functions
-            onnx_model, _ = onnxsim.simplify(onnx_model, mutable_initializer=True)
-            onnx_model.functions.extend(function_protos)
-        except Exception as e:
-            logger.warning("simplify onnx model error and skip.")
-
-    onnx_model = format_onnx_model(onnx_model)
+    onnx_model = format_onnx_model(onnx_model, sim_en)
     onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
 
     graph = OnnxParser().build(onnx_model)
@@ -94,47 +84,6 @@ def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
             config_dict = json.load(fp)
 
     return XQuantSettingFactory.from_json(config_dict)
-
-
-def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto]):
-    from onnxruntime.quantization import QuantType, QuantizationMode
-    from onnxruntime.quantization.onnx_quantizer import ONNXQuantizer
-
-    logger.info("quantize onnx model dynamic...")
-
-    if isinstance(file_or_model, onnx.ModelProto):
-        onnx_model = file_or_model
-    elif isinstance(file_or_model, str):
-        onnx_model = onnx.load(file_or_model)
-    else:
-        raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
-
-    dynamic_q_op_types = {"MatMul", "Attention", "LSTM", "Gemm", "Conv"}
-    ignore_op_types = os.environ.get("ORT_DYNAMIC_QUANTIZE_IGNORE_OP_TYPES", "")
-    ignore_op_types_list = ignore_op_types.strip().split(";")
-
-    for ignore_op in ignore_op_types_list:
-        if ignore_op in dynamic_q_op_types:
-            dynamic_q_op_types.remove(ignore_op)
-
-    extra_options = {}
-    quantizer = ONNXQuantizer(
-        onnx_model,
-        True,  # per channel
-        False,  # reduce_range
-        QuantizationMode.IntegerOps,
-        False,  # static
-        QuantType.QUInt8,
-        QuantType.QUInt8,
-        None,
-        [],
-        [],
-        list(dynamic_q_op_types),
-        extra_options,
-    )
-    quantizer.quantize_model()
-    return quantizer.model.model
-
 
 def quantize_onnx_model(
     path_or_config: Union[str, dict],
@@ -193,8 +142,8 @@ def quantize_onnx_model(
         logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
 
-    if config_setting.quantization_parameters.precision_level.value == 3:
-        quant_onnx_model = dynamic_quantize_onnx_model(model_path)
+    if config_setting.quantization_parameters.precision_level.value >= 3:
+        quant_onnx_model = dynamic_quantize_onnx_model(model_path, not config_setting.model_parameters.skip_onnxsim)
     else:
         ppq_ir, truncate_left_graph, truncate_vars = xquant_load_onnx_graph(
             model_path,

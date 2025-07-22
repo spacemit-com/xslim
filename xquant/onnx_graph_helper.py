@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Union, Dict, Sequence, Optional, List
-from collections import OrderedDict, deque
 import copy
-import onnx_graphsurgeon as osg
+import os
+import pathlib
+from collections import OrderedDict, deque
+from tempfile import TemporaryDirectory
+from typing import Dict, List, Optional, Sequence, Union
+
 import onnx
-from xquant.logger import logger
+import onnx_graphsurgeon as osg
+from onnxruntime.tools.onnx_model_utils import (get_optimization_level,
+                                                optimize_model)
+
 from xquant.defs import MIN_ONNX_OPSET_VERSION
+from xquant.logger import logger
+
+from .onnxslim_pass import optimize_onnx_model
 
 
 def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
@@ -19,7 +28,7 @@ def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
     return opset_dict
 
 
-def format_onnx_model(onnx_model: onnx.ModelProto, min_onnx_version: int = MIN_ONNX_OPSET_VERSION) -> onnx.ModelProto:
+def format_onnx_model(onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: int = MIN_ONNX_OPSET_VERSION) -> onnx.ModelProto:
     """
     Regularize an onnx model, including removing shape fields, value_info fields, etc., to avoid entering bugs.
 
@@ -39,11 +48,35 @@ def format_onnx_model(onnx_model: onnx.ModelProto, min_onnx_version: int = MIN_O
         except:
             pass
 
+    empty_name_count = 0
+    for node in onnx_model.graph.node:
+        if node.name == "":
+            node.name = f"{node.op_type}_{empty_name_count}"
+            empty_name_count += 1
+
     opset_dict = get_onnx_opset(onnx_model)
     ai_onnx_version = opset_dict.get("ai.onnx", min_onnx_version)
     if ai_onnx_version < min_onnx_version:
         logger.warning("convert ai.onnx version {} to {}...".format(ai_onnx_version, min_onnx_version))
         onnx_model = onnx.version_converter.convert_version(onnx_model, min_onnx_version)
+
+    if sim_en:
+        logger.info("simplify onnx model...")
+    try:
+        onnx_model = optimize_onnx_model(onnx_model)
+    except Exception as e:
+        logger.warning("simplify onnx model error and skip. {}".format(e))
+
+    # try:
+    #     logger.info("symplify onnx model with onnxruntime...")
+    #     with TemporaryDirectory() as tempdir:
+    #         src_path = os.path.join(tempdir, "onnx_model_src.onnx")
+    #         dst_path = os.path.join(tempdir, "onnx_model_dst.onnx")
+    #         onnx.save(onnx_model, src_path)
+    #         optimize_model(pathlib.Path(src_path), pathlib.Path(dst_path), get_optimization_level("basic"))
+    #         onnx_model = onnx.load(dst_path)
+    # except Exception as e:
+    #     logger.warning("simplify onnx model with onnxruntime error and skip. {}".format(e))
 
     try:
         onnx_model = onnx.shape_inference.infer_shapes(onnx_model, data_prop=True)

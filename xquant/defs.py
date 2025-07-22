@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from enum import Enum
 import logging
-from .logger import xquant_info, xquant_warning, xquant_debug, xquant_error, xquant_trace
+from enum import Enum
+
+from .logger import (xquant_debug, xquant_error, xquant_info, xquant_trace,
+                     xquant_warning)
 
 
 class XQUANT_GLOBAL_CONFIGURATION:
@@ -25,7 +27,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
-        self.version = "1.2.1"
+        self.version = "2.0.0"
 
 
 PASSIVE_OPERATIONS = {
@@ -68,7 +70,7 @@ OBSERVER_PERCENTILE = 0.9999
 
 OBSERVER_SIGMOID_MAX_VALUE = 10
 
-MIN_ONNX_OPSET_VERSION = 13
+MIN_ONNX_OPSET_VERSION = 17
 
 GLOBAL_FUNCTIONS_MAPPING = "GLOBAL_FUNCTIONS_MAPPING"
 
