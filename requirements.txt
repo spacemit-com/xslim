@@ -13,3 +13,4 @@ onnx-graphsurgeon
 onnxconverter_common>=1.14.0
 loguru
 sympy>=1.12.0
+onnxslim
