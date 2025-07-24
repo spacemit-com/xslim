@@ -1,51 +1,34 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Iterable, List, Set, Union, Dict, Callable, Tuple
+import functools
+import os
 from collections import OrderedDict
 from enum import Enum
-import torch
-import os
+from typing import Callable, Dict, Iterable, List, Set, Tuple, Union
+
 import numpy as np
-import functools
+import torch
+
 from xquant.logger import logger
-from ..ppq_decorator import (
-    BaseGraph,
-    Operation,
-    QuantableOperation,
-    Variable,
-    QuantableGraph,
-    GraphReplacer,
-    QuantizeOperationCommand,
-    OperationQuantizationConfig,
-    QuantizationPolicy,
-    QuantizationProperty,
-    QuantizationStates,
-    RoundingPolicy,
-    ppq_common,
-    TargetPlatform,
-    TensorQuantizationConfig,
-    BaseGraphExecutor,
-    QuantizationOptimizationPipeline,
-    QuantizeFusionPass,
-    QuantizeSimplifyPass,
-    ParameterQuantizePass,
-    ParameterBakingPass,
-)
-from ..optimizer import (
-    FormatBatchNormalizationPass,
-    FlattenGemmFusionPass,
-    ActivationClipRefine,
-    HardSwishFusionPass,
-    SwishFusionPass,
-    PassiveParameterBakingPass,
-    AsymmetricaUnsignlAlignSign,
-    RuntimeBlockWiseCalibrationPass,
-    ComputingFusionPass,
-    PassiveParameterBakingPass,
-    XQuantLayerwiseEqualizationPass,
-    QuantizeConfigRefinePass,
-)
-from ..defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel, PASSIVE_OPERATIONS
+
+from ..defs import (PASSIVE_OPERATIONS, XQUANT_CONFIG, AutoFinetuneLevel,
+                    PrecisionLevel)
+from ..optimizer import (ActivationClipRefine, AsymmetricaUnsignlAlignSign,
+                         ComputingFusionPass, FlattenGemmFusionPass,
+                         FormatBatchNormalizationPass, HardSwishFusionPass,
+                         PassiveParameterBakingPass, QuantizeConfigRefinePass,
+                         RuntimeBlockWiseCalibrationPass, SwishFusionPass,
+                         XQuantLayerwiseEqualizationPass)
+from ..ppq_decorator import (BaseGraph, BaseGraphExecutor, GraphReplacer,
+                             Operation, OperationQuantizationConfig,
+                             ParameterBakingPass, ParameterQuantizePass,
+                             QuantableGraph, QuantableOperation,
+                             QuantizationOptimizationPipeline,
+                             QuantizationPolicy, QuantizationProperty,
+                             QuantizationStates, QuantizeFusionPass,
+                             QuantizeOperationCommand, QuantizeSimplifyPass,
+                             RoundingPolicy, TargetPlatform,
+                             TensorQuantizationConfig, Variable, ppq_common)
 from ..xquant_setting import XQuantSetting
 
 
@@ -87,7 +70,7 @@ class XQuantizer:
             "percentile": "percentile",
         }
         self._verbose = False
-        self._bias_to_fp32 = bool(int(os.environ.get("XQUANT_BIAS_TO_FP32", "0")) > 0)
+        self._bias_to_fp32 = bool(int(os.environ.get("XQUANT_BIAS_TO_FP32", "1")) > 0)
 
         if self._bias_to_fp32:
             logger.info("Set Bias to Float32.")
