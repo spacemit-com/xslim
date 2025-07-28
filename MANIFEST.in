@@ -1,7 +1,8 @@
 include requirements.txt
 include samples/demo.py
-include samples/preprocess.py
 include samples/demo.sh
+include samples/README.md
+include samples/preprocess.py
 include samples/resnet18.json
-include samples/mobilenet_v3_small.json
-include samples/inception_v1.json
+include samples/resnet18_custom_preprocess.json
+include samples/mobilenet_v3_small_dyn_quantize.json
