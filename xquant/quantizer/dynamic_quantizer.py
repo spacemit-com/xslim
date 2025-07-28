@@ -79,11 +79,14 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, quant_bits=8)
         weight_quant_list = []
         for i in range(weight_value.shape[0]):
             weight_value_i = weight_value[i]
-            _, _, zero_point, scale, quantized_per_channel_data = ort_quantize_data(
-                weight_value_i,
-                onnx.TensorProto.INT8,
-                True,
-                False
+            # _, _, zero_point, scale, quantized_per_channel_data = ort_quantize_data(
+            #     weight_value_i,
+            #     onnx.TensorProto.INT8,
+            #     True,
+            #     False
+            # )
+            zero_point, scale, quantized_per_channel_data = ort_quantize_data(
+                weight_value_i, onnx.TensorProto.INT8, True, False
             )
             weight_scale_list.append(scale)
             weight_zp_list.append(zero_point)
