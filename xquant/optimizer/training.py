@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from collections import defaultdict
-from typing import Callable, Dict, Iterable, List, Tuple, Union, Sequence, Set
 import functools
-from tqdm import tqdm
 import random
+from collections import defaultdict
+from typing import Callable, Dict, Iterable, List, Sequence, Set, Tuple, Union
+
 import numpy as np
 import torch
+from tqdm import tqdm
+
 from xquant.logger import logger
+
+from ..defs import XQUANT_CONFIG
 from ..ppq_decorator import (
-    TensorQuantizationConfig,
+    BaseGraph,
+    BaseGraphExecutor,
+    LearnedStepSizePass,
+    LSQDelegator,
+    Operation,
+    PPQLinearQuantFunction,
+    QuantableGraph,
+    QuantableOperation,
     QuantizationProperty,
     QuantizationStates,
-    BaseGraphExecutor,
+    TensorQuantizationConfig,
     TorchExecutor,
-    BaseGraph,
-    Operation,
-    QuantableOperation,
+    TrainableBlock,
     Variable,
-    QuantableGraph,
-    LearnedStepSizePass,
     torch_mean_square_error,
     torch_snr_error,
-    PPQLinearQuantFunction,
-    LSQDelegator,
-    TrainableBlock,
 )
-from ..defs import XQUANT_CONFIG
 
 
 class XQuantTrainableBlock(TrainableBlock):
@@ -372,7 +375,7 @@ class LearnedStepSizePassDecorator(LearnedStepSizePass):
                 )
 
                 for name, quant_output in zip(block_output_names, qt_output):
-                    batch_loss = loss_fn(quant_output, fp_output[name].to(executor._device))
+                    batch_loss = loss_fn(quant_output.to(executor._device), fp_output[name].to(executor._device))
                     losses[name] += batch_loss.detach().item()
 
             for name in losses:

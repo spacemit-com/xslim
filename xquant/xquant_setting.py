@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Union, Sequence, Dict, Literal, Pattern
-from enum import Enum
-import json
 import copy
+import json
 import os
+from enum import Enum
+from typing import Dict, Literal, Pattern, Sequence, Union
+
 import onnx
+
 from xquant.logger import logger
+
 from .defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel
 from .ppq_decorator import BaseGraph
 
@@ -115,6 +118,8 @@ class QuantizationParameterSetting(SettingSerialize):
         self.custom_setting: Sequence[CustomQuantizationParameterSetting] = None
         self.analysis_enable: bool = True
         self.truncate_var_names: Sequence[str] = []
+        self.ignore_op_types: Sequence[str] = []
+        self.ignore_op_names: Sequence[str] = []
 
     def from_list(self, value_name, obj_setting, qsetting):
         if value_name == "custom_setting":

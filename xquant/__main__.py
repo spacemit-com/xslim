@@ -10,6 +10,8 @@ parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument("-c", "--config", required=False, default=None, help="Path to the Xquant Config.")
 parser.add_argument("-i", "--input_path", required=False, default=None, help="Path to the Input ONNX Model.")
 parser.add_argument("-o", "--output_path", required=False, default=None, help="Path to the Output ONNX Model.")
+parser.add_argument("--ignore_op_types", required=False, default="", help="Ignore op types.")
+parser.add_argument("--ignore_op_names", required=False, default="", help="Ignore op names.")
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -23,6 +25,8 @@ if __name__ == "__main__":
         args.config = {
             "quantization_parameters": {
                 "precision_level": 3,
+                "ignore_op_types": [i for i in args.ignore_op_types.split(",") if i != ""],
+                "ignore_op_names": [i for i in args.ignore_op_names.split(",") if i != ""],
             },
         }
 

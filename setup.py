@@ -1,4 +1,7 @@
-from setuptools import find_packages, setup
+import os
+
+from setuptools import Command, find_packages, setup
+
 from xquant.defs import XQUANT_CONFIG
 
 
@@ -22,6 +25,7 @@ def license():
 
 setup(
     author="SpacemiT",
+    author_email="xquant@spacemit.com",
     version=version(),
     description="XQuant is an offline quantization tools based on PPQ",
     long_description=readme(),
@@ -34,10 +38,7 @@ setup(
         "Development Status :: 3 - Alpha",
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3",
     ],
     license=license(),
     include_package_data=True,

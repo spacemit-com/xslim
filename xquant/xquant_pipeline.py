@@ -85,6 +85,7 @@ def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
 
     return XQuantSettingFactory.from_json(config_dict)
 
+
 def quantize_onnx_model(
     path_or_config: Union[str, dict],
     input_onnx_model_or_path: Optional[Union[str, onnx.ModelProto]] = None,
@@ -143,7 +144,16 @@ def quantize_onnx_model(
         os.makedirs(working_dir)
 
     if config_setting.quantization_parameters.precision_level.value >= 3:
-        quant_onnx_model = dynamic_quantize_onnx_model(model_path, not config_setting.model_parameters.skip_onnxsim)
+        if len(config_setting.quantization_parameters.ignore_op_types) > 0:
+            logger.info(f"Ignoring op types: {config_setting.quantization_parameters.ignore_op_types}")
+        if len(config_setting.quantization_parameters.ignore_op_names) > 0:
+            logger.info(f"Ignoring op names: {config_setting.quantization_parameters.ignore_op_names}")
+        quant_onnx_model = dynamic_quantize_onnx_model(
+            model_path,
+            config_setting.quantization_parameters.ignore_op_types,
+            config_setting.quantization_parameters.ignore_op_names,
+            not config_setting.model_parameters.skip_onnxsim,
+        )
     else:
         ppq_ir, truncate_left_graph, truncate_vars = xquant_load_onnx_graph(
             model_path,

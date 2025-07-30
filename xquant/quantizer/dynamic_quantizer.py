@@ -6,7 +6,7 @@ import os
 from collections import OrderedDict
 from datetime import datetime
 from enum import Enum
-from typing import Callable, Dict, Iterable, List, Set, Tuple, Union
+from typing import Sequence, Set, Tuple, Union
 
 import numpy as np
 import onnx
@@ -20,7 +20,7 @@ from xquant.logger import logger
 from ..onnx_graph_helper import format_onnx_model
 
 
-def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, quant_bits=8):
+def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, ignore_op_names_list, quant_bits=8):
     quant_min = -(2 ** (quant_bits - 1))
     quant_max = 2 ** (quant_bits - 1) - 1
     new_nodes = []
@@ -109,8 +109,11 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, quant_bits=8)
     osg_graph = osg.import_onnx(onnx_model)
 
     for node in osg_graph.nodes:
+
         def eval_error(weight_value, weight_q_value, weight_value_scale, weight_value_zp):
-            requant_weight_value = (weight_q_value.astype(np.float32) - weight_value_zp.reshape(-1, 1)) * weight_value_scale.reshape(-1, 1)
+            requant_weight_value = (
+                weight_q_value.astype(np.float32) - weight_value_zp.reshape(-1, 1)
+            ) * weight_value_scale.reshape(-1, 1)
             error = np.sum(np.abs(weight_value - requant_weight_value)) / weight_value.size
             cosine = cosine_error(weight_value, requant_weight_value)
             # print(f"node: [{node.op}]({node.name}), error: {error}, cosine: {cosine}")
@@ -119,10 +122,21 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, quant_bits=8)
             if node.op in ignore_op_types_list:
                 continue
 
+            if node.name in ignore_op_names_list:
+                continue
+
             axis = 0
             if isinstance(node.inputs[1], osg.Constant):
                 weight_value = node.inputs[1].values
                 weight_shape = weight_value.shape
+
+                if np.allclose(
+                    weight_value.astype(np.float32),
+                    weight_value.astype(np.int32).astype(np.float32),
+                    rtol=1e-03,
+                    atol=1e-05,
+                ):
+                    continue
 
                 if node.op == "Conv" or (node.op == "Gemm" and node.attrs.get("transB", 0) == 1):
                     weight_value = weight_value.reshape(weight_shape[0], -1)
@@ -154,7 +168,10 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, quant_bits=8)
 
                 new_nodes.append(
                     make_dq_node(
-                        quant_weight_value, weight_value_scale.reshape(-1).astype(np.float32), weight_value_zp.reshape(-1).astype(np.int8), axis
+                        quant_weight_value,
+                        weight_value_scale.reshape(-1).astype(np.float32),
+                        weight_value_zp.reshape(-1).astype(np.int8),
+                        axis,
                     )
                 )
                 node.inputs[1] = new_nodes[-1].outputs[0]
@@ -165,7 +182,12 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, quant_bits=8)
     return new_onnx_model
 
 
-def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto], sim_en: bool = True):
+def dynamic_quantize_onnx_model(
+    file_or_model: Union[str, onnx.ModelProto],
+    ignore_op_types_list: Sequence[str],
+    ignore_op_names_list: Sequence[str],
+    sim_en: bool = True,
+):
     from onnxruntime.quantization import QuantizationMode, QuantType
     from onnxruntime.quantization.onnx_quantizer import ONNXQuantizer
 
@@ -179,8 +201,6 @@ def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto], sim_
     onnx_model = format_onnx_model(onnx_model, sim_en)
 
     dynamic_q_op_types = {"Attention", "LSTM", "MatMul"}
-    ignore_op_types = os.environ.get("ORT_DYNAMIC_QUANTIZE_IGNORE_OP_TYPES", "")
-    ignore_op_types_list = ignore_op_types.strip().split(";")
 
     for ignore_op in ignore_op_types_list:
         if ignore_op in dynamic_q_op_types:
@@ -205,7 +225,7 @@ def dynamic_quantize_onnx_model(file_or_model: Union[str, onnx.ModelProto], sim_
     logger.info("quantize onnx model dynamic...")
     quantizer.quantize_model()
     quantized_model = quantizer.model.model
-    quantized_model = dynamic_weight_only_quantize(quantized_model, ignore_op_types_list)
+    quantized_model = dynamic_weight_only_quantize(quantized_model, ignore_op_types_list, ignore_op_names_list)
     quantized_model = format_onnx_model(quantized_model, True)
 
     quantized_model.producer_name = "xquant"
