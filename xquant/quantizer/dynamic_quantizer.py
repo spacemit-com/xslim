@@ -206,6 +206,8 @@ def dynamic_quantize_onnx_model(
         if ignore_op in dynamic_q_op_types:
             dynamic_q_op_types.remove(ignore_op)
 
+    nodes_to_exclude = ignore_op_names_list
+
     extra_options = {"WeightSymmetric": True, "MatMulConstBOnly": True}
     quantizer = ONNXQuantizer(
         onnx_model,
@@ -217,7 +219,7 @@ def dynamic_quantize_onnx_model(
         QuantType.QUInt8,
         None,
         [],
-        [],
+        nodes_to_exclude,
         list(dynamic_q_op_types),
         extra_options,
     )
