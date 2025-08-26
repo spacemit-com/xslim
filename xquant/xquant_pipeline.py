@@ -23,7 +23,7 @@ from .optimizer import GraphLegalized
 from .ppq_decorator import (DISPATCHER_TABLE, BaseGraph, GraphDispatcher,
                             OnnxParser, ONNXRUNTIMExporter, TargetPlatform,
                             TorchExecutor)
-from .quantizer import XQuantizer, dynamic_quantize_onnx_model
+from .quantizer import XQuantizer, dynamic_quantize_onnx_model, convert_to_fp16_onnx_model
 from .xquant_setting import XQuantSetting, XQuantSettingFactory
 
 
@@ -85,7 +85,6 @@ def parse_xquant_config(file_or_dict: Union[str, dict]) -> XQuantSetting:
 
     return XQuantSettingFactory.from_json(config_dict)
 
-
 def quantize_onnx_model(
     path_or_config: Union[str, dict],
     input_onnx_model_or_path: Optional[Union[str, onnx.ModelProto]] = None,
@@ -143,7 +142,18 @@ def quantize_onnx_model(
         logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
 
-    if config_setting.quantization_parameters.precision_level.value >= 3:
+    if config_setting.quantization_parameters.precision_level.value >= 4:
+        if len(config_setting.quantization_parameters.ignore_op_types) > 0:
+            logger.info(f"Ignoring op types: {config_setting.quantization_parameters.ignore_op_types}")
+        if len(config_setting.quantization_parameters.ignore_op_names) > 0:
+            logger.info(f"Ignoring op names: {config_setting.quantization_parameters.ignore_op_names}")
+        quant_onnx_model = convert_to_fp16_onnx_model(
+        model_path,
+        config_setting.quantization_parameters.ignore_op_types,
+        config_setting.quantization_parameters.ignore_op_names,
+        not config_setting.model_parameters.skip_onnxsim,
+        )
+    elif config_setting.quantization_parameters.precision_level.value == 3:
         if len(config_setting.quantization_parameters.ignore_op_types) > 0:
             logger.info(f"Ignoring op types: {config_setting.quantization_parameters.ignore_op_types}")
         if len(config_setting.quantization_parameters.ignore_op_names) > 0:
