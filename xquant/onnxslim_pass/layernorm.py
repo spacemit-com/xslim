@@ -43,12 +43,20 @@ class LayernormPatternMatcher(PatternMatcher):
 
         input_variable = reduce_mean_0_node.inputs[0]
 
-        if isinstance(pow_0_node.inputs[1], osg.Constant) and \
-            pow_0_node.inputs[1].values is not None and \
-            np.allclose(2.0, pow_0_node.inputs[1].values) and \
-            isinstance(add_0_node.inputs[1], osg.Constant) and \
-            isinstance(mul_0_node.inputs[1], osg.Constant) and \
-            isinstance(add_1_node.inputs[1], osg.Constant):
+        if (
+            isinstance(pow_0_node.inputs[1], osg.Constant)
+            and pow_0_node.inputs[1].values is not None
+            and np.allclose(2.0, pow_0_node.inputs[1].values)
+            and isinstance(add_0_node.inputs[1], osg.Constant)
+            and isinstance(mul_0_node.inputs[1], osg.Constant)
+            and isinstance(add_1_node.inputs[1], osg.Constant)
+        ):
+
+            norm_scale_constant = mul_0_node.inputs[1]
+            norm_bias_constant = add_1_node.inputs[1]
+
+            if not len(norm_scale_constant.shape) == 1 or not len(norm_bias_constant.shape) == 1:
+                return
 
             axis = max(axes_0)
             epsilon = float(add_0_node.inputs[1].values)
@@ -66,7 +74,7 @@ class LayernormPatternMatcher(PatternMatcher):
                     "outputs": [output_variable],
                     "domain": None,
                     "attrs": {"axis": axis, "epsilon": epsilon},
-                    "name": reduce_mean_0_node.name
+                    "name": reduce_mean_0_node.name,
                 }
             }
 
