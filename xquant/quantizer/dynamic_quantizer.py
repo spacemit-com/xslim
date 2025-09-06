@@ -155,7 +155,7 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, ignore_op_nam
                     group = node.attrs.get("group", 1)
                     weight_value = weight_value.reshape(group, weight_shape[0] // group, weight_shape[1], -1)
                     permute_weight_value = np.transpose(weight_value, (0, 2, 1, 3))
-                    permute_weight_value = permute_weight_value.reshape(weight_shape[0] * group, -1)
+                    permute_weight_value = permute_weight_value.reshape(group * weight_shape[1], -1)
 
                     weight_value_scale, weight_value_zp, permute_quant_weight_value = get_scale_zp(permute_weight_value)
                     permute_quant_weight_value = permute_quant_weight_value.reshape(
