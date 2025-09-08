@@ -23,7 +23,7 @@ from .optimizer import GraphLegalized
 from .ppq_decorator import (DISPATCHER_TABLE, BaseGraph, GraphDispatcher,
                             OnnxParser, ONNXRUNTIMExporter, TargetPlatform,
                             TorchExecutor)
-from .quantizer import XQuantizer, dynamic_quantize_onnx_model, convert_to_fp16_onnx_model
+from .quantizer import XQuantizer, convert_to_fp16_onnx_model, dynamic_quantize_onnx_model
 from .xquant_setting import XQuantSetting, XQuantSettingFactory
 
 
@@ -179,7 +179,7 @@ def quantize_onnx_model(
         input_parametres = config_setting.calibration_parameters.input_parametres
 
         data_set = XQuantDataset(config_setting.calibration_parameters)
-        calib_dataloader = torch.utils.data.DataLoader(data_set)
+        calib_dataloader = torch.utils.data.DataLoader(data_set, batch_size=data_set.auto_batch_size)
         quantizer = XQuantizer(ppq_ir)
         executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
 

@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
-from typing import Any, Union, Dict, Sequence, Callable, Tuple
-from collections import OrderedDict
+import functools
+import importlib
 import os
 import sys
+from collections import OrderedDict
+from typing import Any, Callable, Dict, Sequence, Tuple, Union
+
 import cv2
-import torch
 import numpy as np
-from PIL import Image
-import importlib
-import functools
-from torch.utils.data import Dataset
+import torch
 import torchvision.transforms as transforms
+from PIL import Image
+from torch.utils.data import Dataset
+
 from .xquant_setting import CalibrationParameterSetting, InputParameterSetting
 
 
@@ -44,6 +46,20 @@ class XQuantDataset(Dataset):
             else:
                 min_size = min(len(self._data_dict[input_name]), min_size)
 
+        self.auto_batch_size = (
+            input_parametres[0].input_shape[0]
+            if len(input_parametres) == 1 and input_parametres[0].file_type == "img"
+            else 1
+        )
+
+        self.auto_batch_size = (
+            calibration_parameters.calibration_batch_size
+            if calibration_parameters.calibration_batch_size > 1
+            else self.auto_batch_size
+        )
+
+        min_size = (min_size // self.auto_batch_size) * self.auto_batch_size
+
         for i in range(min_size):
             data_iter = OrderedDict()
             for k, v in self._data_dict.items():
@@ -55,7 +71,6 @@ class XQuantDataset(Dataset):
 
     def __getitem__(self, idx):
         return self._data_list[idx]
-
 
 class PTImagenetPreprocess:
     def __init__(self, out_height, out_width, mean_value, std_value):
