@@ -4,7 +4,6 @@ import torch
 
 from ..core import DataType, convert_any_to_python_primary_type, convert_any_to_torch_tensor, ppq_warning
 from ..IR.search import SearchableGraph
-
 from .base.command import (
     GraphCommand,
     GraphCommandType,
@@ -725,6 +724,13 @@ class GraphMerger(GraphCommandProcessor):
             layernorm_input_var: Variable,
             layernorm_output_var: Variable,
         ) -> Operation:
+            if scale is not None:
+                if scale.ndim != 1:
+                    return None
+            if bias is not None:
+                if bias.ndim != 1:
+                    return None
+
             if rm2.type == rm1.type == "ReduceMean":
                 if "axes" not in rm1.attributes:
                     return None
@@ -792,7 +798,7 @@ class GraphMerger(GraphCommandProcessor):
         for _, rm1, sub, pow, rm2, add, sqrt, div, mul in matches:
             layernorm_ops = [rm1, sub, pow, rm2, add, sqrt, div, mul]
 
-            layernorm_scale = mul.inputs[-1].value
+            layernorm_scale = mul.inputs[-1].value if mul.inputs[-1].is_parameter else mul.inputs[0].value
             layernorm_output_var = div.outputs[0]
             layernorm_input_var = sub.inputs[0]
 
@@ -803,6 +809,10 @@ class GraphMerger(GraphCommandProcessor):
                 bias_op = next_op[0]
                 if bias_op.inputs[-1].is_parameter:
                     layernorm_bias = bias_op.inputs[-1].value
+                    layernorm_output_var = bias_op.outputs[0]
+                    layernorm_ops.append(bias_op)
+                elif bias_op.inputs[0].is_parameter:
+                    layernorm_bias = bias_op.inputs[0].value
                     layernorm_output_var = bias_op.outputs[0]
                     layernorm_ops.append(bias_op)
 

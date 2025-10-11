@@ -1760,7 +1760,10 @@ def ReduceMax_forward(
 
 
 def ReduceMean_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
-    [input_value] = values
+    if op.opset.onnx_opset_version() >= 18:
+        [input_value, _] = values
+    else:
+        [input_value] = values
     dim = op.attributes.get("axes", None)
     keepdim = bool(op.attributes.get("keepdims", 1))
     if len(input_value) == 0:

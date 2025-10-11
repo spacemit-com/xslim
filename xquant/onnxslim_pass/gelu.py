@@ -31,9 +31,11 @@ class GeluPatternMatcher(PatternMatcher):
         mul_node = self.mul_0
         div_node = self.div_0
 
-        if isinstance(div_node.inputs[1], osg.Constant) and \
-            div_node.inputs[1].values is not None and \
-            np.allclose(1.4142135381698608, div_node.inputs[1].values):
+        if (
+            isinstance(div_node.inputs[1], osg.Constant)
+            and div_node.inputs[1].values is not None
+            and np.allclose(1.4142135381698608, div_node.inputs[1].values)
+        ):
             input_variable.outputs.remove(mul_node)
             input_variable.outputs.remove(div_node)
 
@@ -46,9 +48,11 @@ class GeluPatternMatcher(PatternMatcher):
                     "inputs": [input_variable],
                     "outputs": [output_variable],
                     "domain": "com.microsoft",
-                    "name": self.mul_1.name
+                    "name": self.mul_1.name,
                 }
             }
+        else:
+            return {}
 
 
 register_fusion_pattern(GeluPatternMatcher(1))
