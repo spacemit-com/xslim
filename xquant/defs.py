@@ -3,8 +3,7 @@
 import logging
 from enum import Enum
 
-from .logger import (xquant_debug, xquant_error, xquant_info, xquant_trace,
-                     xquant_warning)
+from .logger import xquant_debug, xquant_error, xquant_info, xquant_trace, xquant_warning
 
 
 class XQUANT_GLOBAL_CONFIGURATION:
@@ -27,7 +26,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
-        self.version = "2.0.3"
+        self.version = "2.0.4"
 
 
 PASSIVE_OPERATIONS = {
