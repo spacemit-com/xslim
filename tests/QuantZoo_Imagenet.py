@@ -153,7 +153,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--base_dir",
     required=False,
-    default="/home/share/modelzoo",
+    default="/modelzoo",
     help="Path to the QuantZoo Base directory.",
 )
 parser.add_argument(

@@ -1,5 +1,5 @@
 # Test Quantization System Performace on OCR Models with IC15 Dataset
-OUTPUT_DIR = "/home/huangjinghui/1_workspace/2_ppq/Output/ocr"
+OUTPUT_DIR = "Output/ocr"
 # 开启浮点模型精度评估
 EVAL_FP_EN = False
 # 开启量化模型精度评估

@@ -149,7 +149,7 @@ parser.add_argument(
 parser.add_argument(
     "--output_dir",
     required=False,
-    default="/home/huangjinghui/1_workspace/2_ppq/Output/detection",
+    default="Output/detection",
     help="Path to the Output directory.",
 )
 parser.add_argument("--filter", required=False, default="ppyoloe_m_dyn", help="model name filter.")
