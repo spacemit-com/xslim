@@ -9,6 +9,6 @@
 __pycache__/
 /build
 /dist
-/xquant.egg-info
+/xslim.egg-info
 /samples/temp
 /tests/output

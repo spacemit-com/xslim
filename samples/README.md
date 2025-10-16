@@ -6,5 +6,5 @@ bash download_data.sh
 
 2. 使用python脚本或shell调用
 ~~~
-python -m xquant -c resnet18.jsons
+python -m xslim -c resnet18.jsons
 ~~~

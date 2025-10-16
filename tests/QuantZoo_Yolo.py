@@ -124,19 +124,20 @@ CONFIGS = [
     # },
 ]
 
-from typing import Callable, Optional, Sequence
-import os
-import json
-import torch
-import numpy as np
-import cv2
-import xquant
-from xquant import xquant_info
 import argparse
-from tqdm import tqdm
+import json
+import os
+from typing import Callable, Optional, Sequence
+
 import coco_eval_helper
+import cv2
+import numpy as np
 import onnx
 import onnxruntime as ort
+import torch
+import xslim
+from tqdm import tqdm
+from xslim import xslim_info
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -287,7 +288,7 @@ if __name__ == "__main__":
         }
 
         if args.eval_fp:
-            xquant_info(f"Evaluate float Model Accurarcy....")
+            xslim_info(f"Evaluate float Model Accurarcy....")
             eval_yolo_results(
                 input_model_path,
                 test_loader,
@@ -299,12 +300,12 @@ if __name__ == "__main__":
             )
 
         if not args.quant_disable:
-            quantized_graph = xquant.quantize_onnx_model(demo_json)
+            quantized_graph = xslim.quantize_onnx_model(demo_json)
 
         output_model_path = os.path.join(output_dir, "{}.onnx".format(demo_json["model_parameters"]["output_prefix"]))
 
         if args.eval_quant:
-            xquant_info(f"Evaluate quantized Model Accurarcy....")
+            xslim_info(f"Evaluate quantized Model Accurarcy....")
             eval_yolo_results(
                 output_model_path,
                 test_loader,

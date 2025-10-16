@@ -1,8 +1,7 @@
 import os
 
 from setuptools import Command, find_packages, setup
-
-from xquant.defs import XQUANT_CONFIG
+from xslim.defs import XQUANT_CONFIG
 
 
 def readme():
@@ -25,14 +24,14 @@ def license():
 
 setup(
     author="SpacemiT",
-    author_email="xquant@spacemit.com",
+    author_email="xslim@spacemit.com",
     version=version(),
-    description="XQuant is an offline quantization tools based on PPQ",
+    description="XSlim is an offline quantization tools based on PPQ",
     long_description=readme(),
     long_description_content_type="text/markdown",
     install_requires=open("requirements.txt").readlines(),
     python_requires=">=3.6",
-    name="xquant",
+    name="xslim",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",

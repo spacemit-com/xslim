@@ -141,14 +141,13 @@ import numpy as np
 import torch
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import xslim
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Subset
 from tqdm import tqdm
-
-import xquant
-from xquant.calibration_helper import ImagenetPreprocess, PTImagenetPreprocess
-from xquant.logger import logger
-from xquant.ppq_decorator import BaseGraph, TorchExecutor, load_onnx_graph
+from xslim.calibration_helper import ImagenetPreprocess, PTImagenetPreprocess
+from xslim.logger import logger
+from xslim.ppq_decorator import BaseGraph, TorchExecutor, load_onnx_graph
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -202,15 +201,17 @@ def load_imagenet_from_directory(
     """
     dataset = datasets.ImageFolder(
         directory,
-        custom_transforms
-        if custom_transforms
-        else transforms.Compose(
-            [
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
+        (
+            custom_transforms
+            if custom_transforms
+            else transforms.Compose(
+                [
+                    transforms.Resize(256),
+                    transforms.CenterCrop(224),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ]
+            )
         ),
         loader=custom_loader if custom_loader else None,
     )
@@ -424,7 +425,7 @@ if __name__ == "__main__":
         opt_model_path = input_model_path
         float_graph = load_onnx_graph(input_model_path)
 
-        xquant.GraphLegalized(float_graph)()
+        xslim.GraphLegalized(float_graph)()
         mean_value = config.get("mean_value", [123.675, 116.28, 103.53])
         std_value = config.get("std_value", [58.395, 57.12, 57.375])
         input_shape = config.get("input_shape", [1, 3, 224, 224])
@@ -474,7 +475,7 @@ if __name__ == "__main__":
         if isinstance(max_percentile, float):
             demo_json["quantization_parameters"]["max_percentile"] = max_percentile
         if not args.quant_disable:
-            quantized_graph = xquant.quantize_onnx_model(demo_json)
+            quantized_graph = xslim.quantize_onnx_model(demo_json)
 
         if args.eval_fp:
             logger.info(f"Evaluate float Model Accurarcy....")

@@ -1,26 +1,26 @@
-import xquant
+import xslim
 
 # common
-# xquant.quantize_onnx_model("resnet18.json")
+# xslim.quantize_onnx_model("resnet18.json")
 
-# xquant.quantize_onnx_model("resnet18.json", "/home/share/modelzoo/classification/resnet18/resnet18.onnx")
+# xslim.quantize_onnx_model("resnet18.json", "/home/share/modelzoo/classification/resnet18/resnet18.onnx")
 
-# xquant.quantize_onnx_model(
+# xslim.quantize_onnx_model(
 #    "resnet18.json", "/home/share/modelzoo/classification/resnet18/resnet18.onnx", "resnet18_output.onnx"
 # )
 
 # import onnx
 # onnx_model = onnx.load("/home/share/modelzoo/classification/resnet18/resnet18.onnx")
-# quantized_onnx_model = xquant.quantize_onnx_model("resnet18.json", onnx_model)
+# quantized_onnx_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 
 # custom quantize config
-# xquant.quantize_onnx_model("mobilenet_v3_small.json")
+# xslim.quantize_onnx_model("mobilenet_v3_small.json")
 #
 ## custom preprocess
-# xquant.quantize_onnx_model("resnet18_custom_preprocess.json")
+# xslim.quantize_onnx_model("resnet18_custom_preprocess.json")
 #
 ## bert
-# xquant.quantize_onnx_model("bertsquad.json")
+# xslim.quantize_onnx_model("bertsquad.json")
 
 ## dynamic quantize
-# xquant.quantize_onnx_model("mobilenet_v3_small_dyn_quantize.json")
+# xslim.quantize_onnx_model("mobilenet_v3_small_dyn_quantize.json")
