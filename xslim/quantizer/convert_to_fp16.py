@@ -38,4 +38,5 @@ def convert_to_fp16_onnx_model(
         raise
 
     model_fp16 = format_onnx_model(model_fp16)
+
     return model_fp16

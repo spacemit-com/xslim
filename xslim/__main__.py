@@ -11,6 +11,7 @@ parser.add_argument("-c", "--config", required=False, default=None, help="Path t
 parser.add_argument("-i", "--input_path", required=False, default=None, help="Path to the Input ONNX Model.")
 parser.add_argument("-o", "--output_path", required=False, default=None, help="Path to the Output ONNX Model.")
 parser.add_argument("--fp16", required=False, action="store_true", help="convert onnx model to fp16.")
+parser.add_argument("--dynq", required=False, action="store_true", help="convert onnx model to dynq.")
 parser.add_argument("--ignore_op_types", required=False, default="", help="Ignore op types.")
 parser.add_argument("--ignore_op_names", required=False, default="", help="Ignore op names.")
 
@@ -22,11 +23,20 @@ if __name__ == "__main__":
         exit(1)
 
     if args.config is None:
-        precesion_level = 4 if args.fp16 else 3
+        precesion_level = 100
+
+        if args.fp16:
+            precesion_level = 4
+        elif args.dynq:
+            precesion_level = 3
+
         if precesion_level == 3:
             logger.info("No config provided, using default config, dynamic quantization...")
         elif precesion_level == 4:
             logger.info("No config provided, using default config, convert onnx model to fp16...")
+        elif precesion_level >= 100:
+            logger.info("No config provided, using default config, only simplify onnx model...")
+
         args.config = {
             "quantization_parameters": {
                 "precision_level": precesion_level,

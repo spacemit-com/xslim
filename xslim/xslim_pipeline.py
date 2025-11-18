@@ -143,7 +143,16 @@ def quantize_onnx_model(
         logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
 
-    if config_setting.quantization_parameters.precision_level.value >= 4:
+    if isinstance(model_path, onnx.ModelProto):
+        ori_onnx_model = model_path
+    elif isinstance(model_path, str):
+        ori_onnx_model = onnx.load(model_path)
+    else:
+        raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
+
+    if config_setting.quantization_parameters.precision_level.value >= 100:
+        quant_onnx_model = format_onnx_model(ori_onnx_model, not config_setting.model_parameters.skip_onnxsim)
+    elif config_setting.quantization_parameters.precision_level.value >= 4:
         if len(config_setting.quantization_parameters.ignore_op_types) > 0:
             logger.info(f"Ignoring op types: {config_setting.quantization_parameters.ignore_op_types}")
         if len(config_setting.quantization_parameters.ignore_op_names) > 0:
@@ -230,6 +239,8 @@ def quantize_onnx_model(
 
         quant_onnx_model = merge_onnx_model(quant_onnx_model, truncate_left_graph, truncate_vars)
 
+    quant_onnx_model.metadata_props.extend(ori_onnx_model.metadata_props)
+    quant_onnx_model.ir_version = max(9, ori_onnx_model.ir_version)
     onnx.save(quant_onnx_model, os.path.join(working_dir, "{}.onnx".format(output_prefix)))
 
     logger.info("quantization eplased time {:.2f} s".format(time.time() - time_start))

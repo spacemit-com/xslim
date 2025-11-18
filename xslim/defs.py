@@ -27,7 +27,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
-        self.version = "2.0.5"
+        self.version = "2.0.6"
 
 
 PASSIVE_OPERATIONS = {
@@ -88,6 +88,7 @@ class PrecisionLevel(Enum):
     LEVEL_2 = 2
     LEVEL_3 = 3
     LEVEL_4 = 4
+    LEVEL_None = 100
 
 
 XQUANT_CONFIG = XQUANT_GLOBAL_CONFIGURATION()

@@ -236,4 +236,5 @@ def dynamic_quantize_onnx_model(
     xslim_version = quantized_model.metadata_props.add()
     xslim_version.key = "xslim_version"
     xslim_version.value = XQUANT_CONFIG.version
+
     return quantized_model
