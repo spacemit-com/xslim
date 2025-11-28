@@ -3,7 +3,7 @@ import onnxslim
 from .dynamic_q_matmul import *
 from .gelu import *
 from .layernorm import *
-
+# from .swish import *
 
 def optimize_onnx_model(onnx_model):
     onnx_model = onnxslim.slim(onnx_model)
