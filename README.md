@@ -24,3 +24,6 @@ xslim.quantize_onnx_model(demo_json_path)
 ~~~ bash
 python -m xslim --config ./demo_json.json
 ~~~
+
+* 量化参数配置
+> 可参考[xslim详细说明](https://github.com/spacemit-com/docs-ai/blob/main/zh/compute_stack/ai_compute_stack/xslim.md)
