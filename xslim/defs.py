@@ -9,18 +9,21 @@ from .logger import (xslim_debug, xslim_error, xslim_info, xslim_trace,
 
 
 def _get_version():
+    # Prefer the version from the local source tree (VERSION_NUMBER) when available.
+    try:
+        version_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'VERSION_NUMBER'
+        )
+        with open(version_file, encoding='utf-8') as f:
+            return f.read().strip()
+    except (FileNotFoundError, OSError):
+        pass
+    # Fall back to the installed package metadata when VERSION_NUMBER is not present.
     try:
         from importlib.metadata import version, PackageNotFoundError
         return version('xslim')
     except (ImportError, PackageNotFoundError):
-        pass
-    try:
-        version_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'VERSION_NUMBER')
-        with open(version_file, encoding='utf-8') as f:
-            return f.read().strip()
-    except (FileNotFoundError, OSError):
         return "unknown"
 
 
