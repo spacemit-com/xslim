@@ -15,21 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.12"
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
-        pip install -e .
+        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        pip install onnx-graphsurgeon --no-deps
+        grep -v nvidia-pyindex requirements.txt | grep -v onnx-graphsurgeon | grep -v '^torch' | pip install -r /dev/stdin
+        pip install --no-deps -e .
     - name: Run unit tests
       run: |
         python -m unittest discover -s tests -p "test_*.py" -v
