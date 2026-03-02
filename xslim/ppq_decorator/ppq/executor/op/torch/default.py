@@ -2683,6 +2683,8 @@ def DepthToSpace_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBa
     if mode == "DCR":
         output = F.pixel_shuffle(input_data, blocksize)
     else:  # mode == 'CRD'
+        # CRD (Channel-Row-Depth): reshape to [b, c/bs^2, bs, bs, h, w],
+        # then permute to interleave spatial dims: [b, c/bs^2, h, bs, w, bs]
         b, c, h, w = input_data.shape
         tmp = input_data.reshape(b, c // (blocksize * blocksize), blocksize, blocksize, h, w)
         tmp = tmp.permute(0, 1, 4, 2, 5, 3)
