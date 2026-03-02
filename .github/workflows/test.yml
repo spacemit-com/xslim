@@ -26,7 +26,7 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
         pip install onnx-graphsurgeon --no-deps
-        grep -v nvidia-pyindex requirements.txt | grep -v onnx-graphsurgeon | grep -v '^torch' | pip install -r /dev/stdin
+        grep -vE 'nvidia-pyindex|onnx-graphsurgeon|^torch' requirements.txt | pip install -r /dev/stdin
         pip install --no-deps -e .
     - name: Run unit tests
       run: |
