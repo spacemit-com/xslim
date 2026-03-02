@@ -34,8 +34,8 @@ jobs:
       run: |
         ls -lh dist/
         # Ensure both sdist and wheel were created
-        test -f dist/*.tar.gz
-        test -f dist/*.whl
+        ls dist/*.tar.gz
+        ls dist/*.whl
     - name: Test install wheel
       run: |
         pip install dist/*.whl --no-deps
