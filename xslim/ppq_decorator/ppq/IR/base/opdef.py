@@ -870,6 +870,7 @@ DEFAULT_SOCKET_TABLE = {
     "Gelu": DEFAULT_SOCKET_CREATOR,
     "Gemm": DEFAULT_SOCKET_CREATOR,
     "grid_sampler": GridSampler_Socket,
+    "GridSample": GridSampler_Socket,
     "GlobalAveragePool": DEFAULT_SOCKET_CREATOR,
     "GlobalMaxPool": DEFAULT_SOCKET_CREATOR,
     "Greater": Logical_Socket,

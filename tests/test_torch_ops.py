@@ -426,5 +426,76 @@ class TestTorchExecutorGraph(unittest.TestCase):
         torch.testing.assert_close(results[0], expected)
 
 
+class TestGridSampleOp(unittest.TestCase):
+    """Test GridSample operator forward function."""
+
+    def test_grid_sample_default(self):
+        op = make_op("gs", "GridSample", num_inputs=2)
+        x = torch.randn(1, 1, 4, 4)
+        grid = torch.randn(1, 3, 3, 2).clamp(-1, 1)
+        result = DEFAULT_BACKEND_TABLE["GridSample"](op, [x, grid], CTX)
+        expected = torch.nn.functional.grid_sample(
+            x, grid, mode="bilinear", padding_mode="zeros", align_corners=False
+        )
+        torch.testing.assert_close(result, expected)
+
+    def test_grid_sample_nearest(self):
+        op = make_op("gs_n", "GridSample", attributes={"mode": "nearest"}, num_inputs=2)
+        x = torch.randn(1, 1, 4, 4)
+        grid = torch.randn(1, 3, 3, 2).clamp(-1, 1)
+        result = DEFAULT_BACKEND_TABLE["GridSample"](op, [x, grid], CTX)
+        expected = torch.nn.functional.grid_sample(
+            x, grid, mode="nearest", padding_mode="zeros", align_corners=False
+        )
+        torch.testing.assert_close(result, expected)
+
+    def test_grid_sample_align_corners(self):
+        op = make_op(
+            "gs_ac", "GridSample",
+            attributes={"align_corners": 1, "padding_mode": "border"},
+            num_inputs=2,
+        )
+        x = torch.randn(1, 1, 4, 4)
+        grid = torch.randn(1, 3, 3, 2).clamp(-1, 1)
+        result = DEFAULT_BACKEND_TABLE["GridSample"](op, [x, grid], CTX)
+        expected = torch.nn.functional.grid_sample(
+            x, grid, mode="bilinear", padding_mode="border", align_corners=True
+        )
+        torch.testing.assert_close(result, expected)
+
+
+class TestDepthToSpaceOp(unittest.TestCase):
+    """Test DepthToSpace operator forward function."""
+
+    def test_depth_to_space_dcr(self):
+        op = make_op("d2s", "DepthToSpace", attributes={"blocksize": 2, "mode": "DCR"})
+        x = torch.randn(1, 8, 2, 3)
+        result = DEFAULT_BACKEND_TABLE["DepthToSpace"](op, [x], CTX)
+        expected = torch.nn.functional.pixel_shuffle(x, 2)
+        torch.testing.assert_close(result, expected)
+        self.assertEqual(result.shape, (1, 2, 4, 6))
+
+    def test_depth_to_space_crd(self):
+        op = make_op("d2s_crd", "DepthToSpace", attributes={"blocksize": 2, "mode": "CRD"})
+        x = torch.randn(1, 8, 2, 3)
+        result = DEFAULT_BACKEND_TABLE["DepthToSpace"](op, [x], CTX)
+        self.assertEqual(result.shape, (1, 2, 4, 6))
+        # Verify CRD mode manually
+        b, c, h, w = x.shape
+        blocksize = 2
+        tmp = x.reshape(b, c // (blocksize * blocksize), blocksize, blocksize, h, w)
+        tmp = tmp.permute(0, 1, 4, 2, 5, 3)
+        expected = tmp.reshape(b, c // (blocksize * blocksize), h * blocksize, w * blocksize)
+        torch.testing.assert_close(result, expected)
+
+    def test_depth_to_space_default_mode(self):
+        op = make_op("d2s_def", "DepthToSpace", attributes={"blocksize": 2})
+        x = torch.randn(1, 4, 3, 3)
+        result = DEFAULT_BACKEND_TABLE["DepthToSpace"](op, [x], CTX)
+        expected = torch.nn.functional.pixel_shuffle(x, 2)
+        torch.testing.assert_close(result, expected)
+        self.assertEqual(result.shape, (1, 1, 6, 6))
+
+
 if __name__ == "__main__":
     unittest.main()

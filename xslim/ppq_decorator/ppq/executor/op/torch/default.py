@@ -2678,13 +2678,17 @@ def DepthToSpace_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBa
     values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
     # SubpixelUp in caffe
     input_data = values[0]
-    upsample = op.attributes.get("blocksize", 1)
+    blocksize = op.attributes.get("blocksize", 1)
     mode = op.attributes.get("mode", "DCR")
     if mode == "DCR":
-        output = F.pixel_shuffle(input_data, upsample)
+        output = F.pixel_shuffle(input_data, blocksize)
     else:  # mode == 'CRD'
-        # ??? i do kown why following is correct.
-        output = F.pixel_shuffle(input_data, upsample)
+        # CRD (Channel-Row-Depth): reshape to [b, c/bs^2, bs, bs, h, w],
+        # then permute to interleave spatial dims: [b, c/bs^2, h, bs, w, bs]
+        b, c, h, w = input_data.shape
+        tmp = input_data.reshape(b, c // (blocksize * blocksize), blocksize, blocksize, h, w)
+        tmp = tmp.permute(0, 1, 4, 2, 5, 3)
+        output = tmp.reshape(b, c // (blocksize * blocksize), h * blocksize, w * blocksize)
     return output
 
 
@@ -2870,6 +2874,25 @@ def GridSampler_forward(
     # domain is mmcv
     value, grid = values
     output = F.grid_sample(value, grid, align_corners=False)
+    return output
+
+
+def GridSample_forward(
+    op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs
+) -> torch.Tensor:
+    """ONNX GridSample operator.
+
+    Given an input and a flow-field grid, computes the output using input
+    values and pixel locations from grid. Supports ONNX attributes:
+    align_corners, mode, and padding_mode.
+    """
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=2)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    value, grid = values
+    align_corners = bool(op.attributes.get("align_corners", 0))
+    mode = op.attributes.get("mode", "bilinear")
+    padding_mode = op.attributes.get("padding_mode", "zeros")
+    output = F.grid_sample(value, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
     return output
 
 
@@ -4045,6 +4068,7 @@ DEFAULT_BACKEND_TABLE = {
     "Gelu": Gelu_forward,
     "Gemm": Gemm_forward,
     "grid_sampler": GridSampler_forward,
+    "GridSample": GridSample_forward,
     "GlobalAveragePool": AveragePool_forward,
     "GlobalMaxPool": MaxPool2d_forward,
     "Greater": Greater_forward,
