@@ -1,7 +1,4 @@
-import os
-
-from setuptools import Command, find_packages, setup
-from xslim.defs import XQUANT_CONFIG
+from setuptools import find_packages, setup
 
 
 def readme():

@@ -1,4 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# This workflow will build and test the Python package without uploading to PyPI
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
 name: Python package
@@ -24,11 +24,25 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
+    - name: Install build tools
       run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple; fi
-    - name: Build whl
+        python -m pip install --upgrade pip setuptools wheel build
+    - name: Build sdist and wheel
       run: |
-        # stop the build if there are Python syntax errors or undefined names
-        python setup.py bdist_wheel
+        python -m build
+    - name: Verify distributions
+      run: |
+        ls -lh dist/
+        # Ensure both sdist and wheel were created
+        ls dist/*.tar.gz
+        ls dist/*.whl
+    - name: Test install wheel
+      run: |
+        pip install dist/*.whl --no-deps
+        # Verify the package is installed and metadata is accessible
+        pip show xslim
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-python${{ matrix.python-version }}
+        path: dist/
