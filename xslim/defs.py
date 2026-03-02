@@ -1,10 +1,27 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 import logging
+import os
 from enum import Enum
 
 from .logger import (xslim_debug, xslim_error, xslim_info, xslim_trace,
                      xslim_warning)
+
+
+def _get_version():
+    try:
+        from importlib.metadata import version, PackageNotFoundError
+        return version('xslim')
+    except (ImportError, PackageNotFoundError):
+        pass
+    try:
+        version_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'VERSION_NUMBER')
+        with open(version_file, encoding='utf-8') as f:
+            return f.read().strip()
+    except (FileNotFoundError, OSError):
+        return "unknown"
 
 
 class XQUANT_GLOBAL_CONFIGURATION:
@@ -27,7 +44,7 @@ class XQUANT_GLOBAL_CONFIGURATION:
 
         self.analyse_steps = 16
 
-        self.version = "2.0.7"
+        self.version = _get_version()
 
 
 PASSIVE_OPERATIONS = {
