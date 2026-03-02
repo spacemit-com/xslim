@@ -1,3 +1,4 @@
+include VERSION_NUMBER
 include requirements.txt
 include samples/demo.py
 include samples/demo.sh
