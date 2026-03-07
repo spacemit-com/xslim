@@ -45,7 +45,7 @@ Controls how calibration data is loaded and how quantization ranges are computed
 
 | Field | Type | Default | Options | Description |
 |---|---|---|---|---|
-| `calibration_step` | `int` | `500` | 10–1000 | Maximum number of calibration samples |
+| `calibration_step` | `int` | `500` | 10–1000 | Maximum number of calibration steps (dataloader iterations/batches); effective sample count ≈ `calibration_step × batch_size` |
 | `calibration_device` | `string` | `cuda` | `cuda`, `cpu` | Inference device for calibration; auto-detected, falls back to `cpu` |
 | `calibration_type` | `string` | `default` | `default`, `kl`, `minmax`, `percentile`, `mse` | Observer algorithm for computing activation ranges |
 | `input_parametres` | `list` | **required** | — | Per-input settings, one entry per model input (see below) |
