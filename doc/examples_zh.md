@@ -2,7 +2,7 @@
 
 中文 | [English](examples.md)
 
-本页提供了最常见 XSlim 量化场景的分步示例。所有示例均假设您已安装 XSlim（`pip install xslim`）并已准备好 ONNX 模型。
+常见 XSlim 量化场景的分步示例。所有示例均假设您已安装 XSlim（`pip install xslim`）并已准备好 ONNX 模型。
 
 可运行版本的示例请参阅 [samples](../samples/) 目录。
 
@@ -23,9 +23,9 @@
     "calibration_parameters": {
         "input_parametres": [
             {
-                "mean_value": [123.675, 116.28, 103.53],
-                "std_value": [58.395, 57.12, 57.375],
-                "color_format": "rgb",
+                "mean_value": [103.94, 116.78, 123.68],
+                "std_value": [57.0, 57.0, 57.0],
+                "color_format": "bgr",
                 "preprocess_file": "PT_IMAGENET",
                 "data_list_path": "./calib_data/img_list.txt"
             }
@@ -67,9 +67,9 @@ xslim.quantize_onnx_model("resnet18.json")
     "calibration_parameters": {
         "input_parametres": [
             {
-                "mean_value": [123.675, 116.28, 103.53],
-                "std_value": [58.395, 57.12, 57.375],
-                "color_format": "rgb",
+                "mean_value": [103.94, 116.78, 123.68],
+                "std_value": [57.0, 57.0, 57.0],
+                "color_format": "bgr",
                 "preprocess_file": "PT_IMAGENET",
                 "data_list_path": "./calib_data/img_list.txt"
             }
@@ -90,7 +90,7 @@ xslim.quantize_onnx_model("resnet18.json")
 **要点：**
 - 从 Tensor `input` 到 `input.12` 的子图使用 `precision_level: 2`（部分 INT8，最高精度）。
 - 模型其余部分使用默认的 `precision_level: 0`（全 INT8）。
-- 可使用 Netron 等工具查看模型中的 Tensor 名称。
+- 可使用 [Netron](https://netron.app) 查看模型中的 Tensor 名称。
 
 ---
 
@@ -162,7 +162,7 @@ xslim.quantize_onnx_model("resnet18.json")
 **或通过命令行直接运行（无需配置文件）：**
 
 ```bash
-python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_v3_small_fp16.onnx --fp16
+python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_fp16.onnx --fp16
 ```
 
 ---
@@ -188,7 +188,7 @@ python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_v3_small_f
 **或通过命令行直接运行（无需配置文件）：**
 
 ```bash
-python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_v3_small_dyn.onnx --dynq
+python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_dynq.onnx --dynq
 ```
 
 ---
@@ -206,17 +206,25 @@ import cv2
 import numpy as np
 
 def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Tensor:
+    """
+    Args:
+        path_list: 一个校准 batch 的文件路径列表。
+        input_parametr: calibration_parameters.input_parametres 中对应的条目。
+    Returns:
+        形状为 [batch, C, H, W] 的批量 torch.Tensor。
+    """
     batch_list = []
     mean_value = input_parametr["mean_value"]
     std_value = input_parametr["std_value"]
     input_shape = input_parametr["input_shape"]
     for file_path in path_list:
         img = cv2.imread(file_path)
-        img = cv2.resize(img, (input_shape[-1], input_shape[-2]))
+        img = cv2.resize(img, (input_shape[-1], input_shape[-2]), interpolation=cv2.INTER_AREA)
         img = img.astype(np.float32)
         img = (img - mean_value) / std_value
         img = np.transpose(img, (2, 0, 1))
-        img = torch.unsqueeze(torch.from_numpy(img), 0)
+        img = torch.from_numpy(img)
+        img = torch.unsqueeze(img, 0)
         batch_list.append(img)
     return torch.cat(batch_list, dim=0)
 ```
@@ -232,8 +240,8 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
     "calibration_parameters": {
         "input_parametres": [
             {
-                "mean_value": [123.675, 116.28, 103.53],
-                "std_value": [58.395, 57.12, 57.375],
+                "mean_value": [103.94, 116.78, 123.68],
+                "std_value": [57.0, 57.0, 57.0],
                 "color_format": "bgr",
                 "preprocess_file": "./preprocess.py:preprocess_impl",
                 "data_list_path": "./calib_data/img_list.txt"
@@ -245,17 +253,19 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
 
 **要点：**
 - `preprocess_file` 遵循 `"path/to/script.py:function_name"` 格式。
-- 函数接收文件路径列表和完整的 `input_parametres` 条目（dict 类型）作为参数。
-- 函数必须返回批量化的 `torch.Tensor`。
+- 函数接收文件路径列表和完整的 `input_parametres` 条目（dict 类型）。
+- 函数必须返回形状为 `[batch, C, H, W]` 的批量 `torch.Tensor`。
+- 对于多输入模型，若各输入的预处理逻辑相近，可直接复用同一函数。
 
 ---
 
-## 7. 使用 Python API
+## 7. Python API
 
-上述所有示例均可通过 Python API 代替命令行运行。
+上述所有场景均可通过 Python API 代替命令行驱动。
 
 ```python
 import xslim
+import onnx
 
 # 通过 JSON 配置文件
 xslim.quantize_onnx_model("resnet18.json")
@@ -268,9 +278,9 @@ config = {
     },
     "calibration_parameters": {
         "input_parametres": [{
-            "mean_value": [123.675, 116.28, 103.53],
-            "std_value": [58.395, 57.12, 57.375],
-            "color_format": "rgb",
+            "mean_value": [103.94, 116.78, 123.68],
+            "std_value": [57.0, 57.0, 57.0],
+            "color_format": "bgr",
             "preprocess_file": "PT_IMAGENET",
             "data_list_path": "./calib_data/img_list.txt"
         }]
@@ -278,8 +288,12 @@ config = {
 }
 xslim.quantize_onnx_model(config)
 
-# 在调用时覆盖模型路径
+# 在调用时覆盖模型路径（字符串路径）
 xslim.quantize_onnx_model("resnet18.json", "input.onnx", "output.onnx")
+
+# 传入已加载的 onnx.ModelProto；函数返回量化后的 ModelProto
+onnx_model = onnx.load("models/resnet18.onnx")
+quantized_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 ```
 
 ---

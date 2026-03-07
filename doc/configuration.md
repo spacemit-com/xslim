@@ -2,7 +2,7 @@
 
 [中文版](configuration_zh.md) | English
 
-This page documents every field in the XSlim JSON configuration file. All fields are optional unless marked **required**.
+XSlim is configured through a JSON file with three top-level sections. All fields are **optional** unless marked otherwise.
 
 ## Top-level Structure
 
@@ -18,14 +18,14 @@ This page documents every field in the XSlim JSON configuration file. All fields
 
 ## `model_parameters`
 
-Controls input/output paths and pre-processing of the ONNX model.
+Controls input/output paths and model pre-processing.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `onnx_model` | `string` | — | Path to the input ONNX model file |
-| `output_prefix` | `string` | Model filename (output ends with `.q.onnx`) | Prefix for the output file name |
-| `working_dir` | `string` | Directory of `onnx_model` | Directory where the output model and intermediate files are written |
-| `skip_onnxsim` | `bool` | `false` | Set to `true` to skip ONNX simplification before quantization |
+| `output_prefix` | `string` | Model filename stem (output appends `.q.onnx`) | Prefix for the output file name |
+| `working_dir` | `string` | Directory containing `onnx_model` | Directory for the output model and intermediate files |
+| `skip_onnxsim` | `bool` | `false` | Set `true` to skip ONNX model simplification before quantization |
 
 ### Example
 
@@ -33,8 +33,7 @@ Controls input/output paths and pre-processing of the ONNX model.
 "model_parameters": {
     "onnx_model": "models/resnet18.onnx",
     "output_prefix": "resnet18_int8",
-    "working_dir": "./output",
-    "skip_onnxsim": false
+    "working_dir": "./output"
 }
 ```
 
@@ -42,40 +41,42 @@ Controls input/output paths and pre-processing of the ONNX model.
 
 ## `calibration_parameters`
 
-Controls how calibration data is loaded and used to compute quantization ranges.
+Controls how calibration data is loaded and how quantization ranges are computed.
 
 | Field | Type | Default | Options | Description |
 |---|---|---|---|---|
-| `calibration_step` | `int` | `100` | — | Maximum number of calibration samples. Recommended range: 100–1000 |
-| `calibration_device` | `string` | `cuda` | `cuda`, `cpu` | Device for calibration inference. Auto-detected; falls back to `cpu` if no GPU is available |
-| `calibration_type` | `string` | `default` | `default`, `kl`, `minmax`, `percentile`, `mse` | Observer algorithm used to compute activation ranges |
-| `input_parametres` | `list` | — | — | Per-input calibration settings. One entry per model input (see below) |
+| `calibration_step` | `int` | `500` | 10–1000 | Maximum number of calibration samples |
+| `calibration_device` | `string` | `cuda` | `cuda`, `cpu` | Inference device for calibration; auto-detected, falls back to `cpu` |
+| `calibration_type` | `string` | `default` | `default`, `kl`, `minmax`, `percentile`, `mse` | Observer algorithm for computing activation ranges |
+| `input_parametres` | `list` | **required** | — | Per-input settings, one entry per model input (see below) |
 
 ### Calibration Type Details
 
 | Value | Description |
 |---|---|
-| `default` | Uses the chip-recommended algorithm (usually `kl` or `percentile`) |
+| `default` | Chip-recommended algorithm (typically `kl` or `percentile`) |
 | `kl` | KL-divergence minimization |
 | `minmax` | Uses the observed minimum and maximum values |
-| `percentile` | Clips the range at `max_percentile` to reduce outlier influence |
+| `percentile` | Clips activations at `max_percentile` to suppress outliers |
 | `mse` | Minimizes mean squared error between original and quantized activations |
+
+> **Tip:** Start with `default`. If accuracy is insufficient, try `percentile` or `minmax`.
 
 ### `input_parametres` (per input)
 
-Each entry in the list corresponds to one model input, in the same order as the ONNX model's inputs.
+Each list entry corresponds to one model input **in the same order as the ONNX model's input list**.
 
 | Field | Type | Default | Options | Description |
 |---|---|---|---|---|
-| `input_name` | `string` | Read from ONNX model | — | Name of the input tensor |
-| `input_shape` | `list[int]` | Read from ONNX model | — | Shape of the input. Symbolic batch dimensions default to `1` |
-| `dtype` | `string` | Read from ONNX model | `float32`, `int8`, `uint8`, `int16` | Data type expected by the model input |
-| `file_type` | `string` | `img` | `img`, `npy`, `raw` | Format of the calibration files |
+| `input_name` | `string` | Read from model | — | Input tensor name |
+| `input_shape` | `list[int]` | Read from model | — | Input shape; symbolic batch dimension defaults to `1` |
+| `dtype` | `string` | Read from model | `float32` | Input data type (currently only `float32` is supported) |
+| `file_type` | `string` | `img` | `img`, `npy`, `raw` | Calibration file format (see below) |
 | `color_format` | `string` | `bgr` | `rgb`, `bgr` | Color channel order for image inputs |
 | `mean_value` | `list[float]` | `null` | — | Per-channel mean subtracted during normalization |
-| `std_value` | `list[float]` | `null` | — | Per-channel standard deviation used to scale during normalization |
+| `std_value` | `list[float]` | `null` | — | Per-channel standard deviation used to divide during normalization |
 | `preprocess_file` | `string` | `null` | `PT_IMAGENET`, `IMAGENET`, or a custom path | Preprocessing function (see [Custom Preprocessing](#custom-preprocessing)) |
-| `data_list_path` | `string` | **required** | — | Path to a text file listing calibration data files, one per line |
+| `data_list_path` | `string` | **required** | — | Path to a text file listing calibration data files, one path per line |
 
 #### `file_type` Details
 
@@ -83,19 +84,19 @@ Each entry in the list corresponds to one model input, in the same order as the 
 |---|---|
 | `img` | Standard image file (JPEG, PNG, BMP, etc.) read with OpenCV |
 | `npy` | NumPy `.npy` file containing a single array |
-| `raw` | Raw binary file read directly as bytes |
+| `raw` | Raw binary file; must contain `float32` data matching `input_shape` |
 
 ### Calibration Data List File
 
-`data_list_path` points to a plain-text file with one calibration file path per line. Paths may be absolute or relative to the directory containing the list file.
+`data_list_path` points to a plain-text file with **one file path per line**. Paths may be absolute or relative to the directory containing the list file.
 
 ```text
-data/calib/image_001.JPEG
-data/calib/image_002.JPEG
-data/calib/image_003.JPEG
+data/calib/ILSVRC2012_val_00002138.JPEG
+data/calib/ILSVRC2012_val_00000994.JPEG
+data/calib/ILSVRC2012_val_00014467.JPEG
 ```
 
-For multi-input models, each `input_parametres` entry has its own list file. The file at position *N* across all lists forms one calibration batch, so the lists must have the same length and consistent ordering.
+For multi-input models, each `input_parametres` entry has its own list file. Files at the same line number across all lists form one calibration batch — the lists must therefore have equal length and consistent ordering.
 
 ### Custom Preprocessing
 
@@ -114,11 +115,11 @@ import torch
 def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Tensor:
     """
     Args:
-        path_list: List of file paths forming one calibration batch.
+        path_list: List of file paths for one calibration batch.
         input_parametr: The corresponding entry from calibration_parameters.input_parametres.
 
     Returns:
-        A batched torch.Tensor of shape [batch, ...].
+        A batched torch.Tensor of shape [batch, C, H, W].
     """
     ...
 ```
@@ -138,29 +139,32 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
     input_shape = input_parametr["input_shape"]
     for file_path in path_list:
         img = cv2.imread(file_path)
-        img = cv2.resize(img, (input_shape[-1], input_shape[-2]))
+        img = cv2.resize(img, (input_shape[-1], input_shape[-2]), interpolation=cv2.INTER_AREA)
         img = img.astype(np.float32)
         img = (img - mean_value) / std_value
         img = np.transpose(img, (2, 0, 1))
-        img = torch.unsqueeze(torch.from_numpy(img), 0)
+        img = torch.from_numpy(img)
+        img = torch.unsqueeze(img, 0)
         batch_list.append(img)
     return torch.cat(batch_list, dim=0)
 ```
+
+For multi-input models where preprocessing is similar across inputs, the same function can be reused for each entry.
 
 ---
 
 ## `quantization_parameters`
 
-Controls the quantization strategy and precision.
+Controls the quantization strategy and precision. All fields in this section are optional.
 
 | Field | Type | Default | Options | Description |
 |---|---|---|---|---|
 | `precision_level` | `int` | `0` | `0`–`4` | Global precision level (see below) |
 | `finetune_level` | `int` | `1` | `0`–`3` | Aggressiveness of calibration parameter tuning (see below) |
 | `analysis_enable` | `bool` | `true` | — | Run post-quantization accuracy analysis |
-| `max_percentile` | `float` | `0.9999` | ≥ `0.99` | Percentile clipping threshold when `calibration_type` is `percentile` |
+| `max_percentile` | `float` | `0.9999` | ≥ `0.99` | Percentile clipping threshold (applies when `calibration_type` is `percentile`) |
 | `custom_setting` | `list` | `null` | — | Per-subgraph precision overrides (see below) |
-| `truncate_var_names` | `list[string]` | `[]` | — | Tensor names used to split the graph into separate subgraphs |
+| `truncate_var_names` | `list[string]` | `[]` | — | Tensor names used to split the graph into two parts (see below) |
 | `ignore_op_types` | `list[string]` | `[]` | — | ONNX operator types to exclude from quantization |
 | `ignore_op_names` | `list[string]` | `[]` | — | Specific operator names to exclude from quantization |
 
@@ -168,10 +172,10 @@ Controls the quantization strategy and precision.
 
 | Level | Description |
 |---|---|
-| `0` | Full INT8 quantization (default). Best compression, may impact accuracy |
-| `1` | Partial INT8 – sensitive layers kept at higher precision. Suitable for general Transformer models |
-| `2` | Partial INT8 with the highest preserved precision. Use for accuracy-sensitive models |
-| `3` | Dynamic quantization – weights are quantized, activations are quantized at runtime |
+| `0` | Full INT8 quantization (default). Maximum compression; quantization tuning stays within INT8 |
+| `1` | Partial INT8 – some sensitive operators are kept at higher precision. Suitable for general Transformer models |
+| `2` | Partial INT8 with the most operators kept at higher precision. Best for accuracy-sensitive models |
+| `3` | Dynamic quantization – weights are statically quantized; activations are quantized at runtime |
 | `4` | FP16 conversion – all floating-point ops are cast to FP16 (no calibration data required) |
 
 ### Fine-tune Levels
@@ -185,35 +189,38 @@ Controls the quantization strategy and precision.
 
 ### `custom_setting`
 
-A list of per-subgraph precision overrides. Each entry selects a subgraph by its boundary tensors and applies a local `precision_level`.
+A list of per-subgraph overrides. Each entry selects a contiguous subgraph by its boundary tensors and applies local quantization settings. All tensors between the boundary input operators and the boundary output operators (inclusive) are covered by the override.
 
 | Field | Type | Description |
 |---|---|---|
-| `input_names` | `list[string]` | Tensor names that mark the start of the subgraph |
-| `output_names` | `list[string]` | Tensor names that mark the end of the subgraph |
-| `precision_level` | `int` | Precision level to apply to this subgraph (same values as the global `precision_level`) |
+| `input_names` | `list[string]` | Input tensor names that mark the entry edge of the subgraph (constants may be omitted) |
+| `output_names` | `list[string]` | Output tensor names that mark the exit edge of the subgraph |
+| `precision_level` | `int` | Precision level to apply to this subgraph |
+| `calibration_type` | `string` | Calibration algorithm for this subgraph (same values as the global `calibration_type`) |
+| `max_percentile` | `float` | Percentile threshold for this subgraph (same semantics as the global `max_percentile`) |
 
 ```json
 "custom_setting": [
     {
         "input_names": ["input"],
         "output_names": ["input.12"],
-        "precision_level": 2
+        "precision_level": 2,
+        "calibration_type": "default"
     }
 ]
 ```
 
 ### `truncate_var_names`
 
-A list of tensor names where the graph is cut. Each tensor becomes both an output of the preceding subgraph and an input of the following subgraph. This is useful when the beginning or end of the model should be handled differently.
+Specifies a list of tensor names at which the computation graph is **split into exactly two parts**. The split tensors become output tensors of the first subgraph and input tensors of the second. The tool validates the binary split and raises an error if the result is invalid.
 
 ```json
-"truncate_var_names": ["features.0.0.weight", "classifier.1.weight"]
+"truncate_var_names": ["/Concat_5_output_0", "/Transpose_6_output_0"]
 ```
 
 ### `ignore_op_types` and `ignore_op_names`
 
-Operators that match any entry in `ignore_op_types` (by ONNX op type) or `ignore_op_names` (by node name) are excluded from quantization and kept at their original precision.
+Operators matching any entry in `ignore_op_types` (by ONNX op type) or `ignore_op_names` (by node name) are excluded from quantization and kept at their original precision.
 
 ```json
 "ignore_op_types": ["LayerNormalization", "Softmax"],
@@ -233,12 +240,12 @@ Operators that match any entry in `ignore_op_types` (by ONNX op type) or `ignore
     "calibration_parameters": {
         "calibration_step": 200,
         "calibration_device": "cuda",
-        "calibration_type": "kl",
+        "calibration_type": "default",
         "input_parametres": [
             {
-                "mean_value": [123.675, 116.28, 103.53],
-                "std_value": [58.395, 57.12, 57.375],
-                "color_format": "rgb",
+                "mean_value": [103.94, 116.78, 123.68],
+                "std_value": [57.0, 57.0, 57.0],
+                "color_format": "bgr",
                 "preprocess_file": "PT_IMAGENET",
                 "data_list_path": "./calib_data/img_list.txt"
             }
@@ -248,7 +255,6 @@ Operators that match any entry in `ignore_op_types` (by ONNX op type) or `ignore
         "precision_level": 1,
         "finetune_level": 2,
         "analysis_enable": true,
-        "max_percentile": 0.9999,
         "ignore_op_types": ["Softmax"],
         "custom_setting": [
             {
