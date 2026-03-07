@@ -70,7 +70,7 @@ Each list entry corresponds to one model input **in the same order as the ONNX m
 |---|---|---|---|---|
 | `input_name` | `string` | Read from model | — | Input tensor name |
 | `input_shape` | `list[int]` | Read from model | — | Input shape; symbolic batch dimension defaults to `1` |
-| `dtype` | `string` | Read from model | `float32` | Input data type (currently only `float32` is supported) |
+| `dtype` | `string` | Read from model | Any ONNX tensor dtype | Input data type; by default read from the ONNX model (non-float types such as `int64` are supported; `img`/`raw` loaders interpret data as `float32`) |
 | `file_type` | `string` | `img` | `img`, `npy`, `raw` | Calibration file format (see below) |
 | `color_format` | `string` | `bgr` | `rgb`, `bgr` | Color channel order for image inputs |
 | `mean_value` | `list[float]` | `null` | — | Per-channel mean subtracted during normalization |
