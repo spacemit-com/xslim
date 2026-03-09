@@ -112,7 +112,7 @@ def convert_to_fp16_onnx_model(
     try:
         model_fp16 = onnx.shape_inference.infer_shapes(model_fp16, data_prop=True)
     except Exception as e:
-        logger.warning("shape_inference error with {}, skiped".format(e))
+        logger.warning("shape_inference error with {}, skipped".format(e))
 
     osg_graph = osg.import_onnx(model_fp16)
     osg_graph = legalize_fp16_graph(osg_graph)
