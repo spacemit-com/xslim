@@ -13,6 +13,6 @@ def optimize_onnx_model(onnx_model):
     try:
         onnx_model = onnx.shape_inference.infer_shapes(onnx_model, data_prop=True)
     except Exception as e:
-        logger.warning("onnxslim pre shape_inference error and skip. {}".format(e))
+        logger.warning(f"onnxslim pre shape_inference error and skip. {e}")
     onnx_model = onnxslim.slim(onnx_model)
     return onnx_model

@@ -44,8 +44,12 @@ class TestOnnxSlimPass(unittest.TestCase):
         y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])
         z = helper.make_tensor_value_info("z", TensorProto.FLOAT, [1])
         bias = helper.make_tensor("bias", TensorProto.FLOAT, [1], [1.0])
+        nodes = [
+            helper.make_node("Add", ["x", "bias"], ["z"], name="add"),
+            helper.make_node("Identity", ["z"], ["y"]),
+        ]
         graph = helper.make_graph(
-            [helper.make_node("Add", ["x", "bias"], ["z"], name="add"), helper.make_node("Identity", ["z"], ["y"])],
+            nodes,
             "add_graph",
             [x],
             [y],
