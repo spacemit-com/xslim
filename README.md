@@ -2,7 +2,7 @@
 
 [中文版](README_zh.md) | English
 
-[![Version](https://img.shields.io/badge/version-2.0.9-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![Version](https://img.shields.io/badge/version-2.0.10-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.6-blue.svg)](https://www.python.org/)
 
@@ -107,8 +107,8 @@ For a full list of changes, see the [Releases](https://github.com/spacemit-com/x
 
 | Version | Highlights |
 |---|---|
-| 2.0.9 | Current development version |
-| [2.0.8](https://github.com/spacemit-com/xslim/releases/tag/2.0.8) | Latest release |
+| 2.0.10 | Current development version |
+| [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | Latest release |
 | [2.0.7](https://github.com/spacemit-com/xslim/releases/tag/2.0.7) | Fix FP16 conversion bug on complex models |
 | [2.0.6](https://github.com/spacemit-com/xslim/releases/tag/2.0.6) | Fix metadata props deletion; default CLI behavior changed to model simplification (use `--dynq` for dynamic quantization) |
 

@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-[![版本](https://img.shields.io/badge/版本-2.0.9-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![版本](https://img.shields.io/badge/版本-2.0.10-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.6-blue.svg)](https://www.python.org/)
 
@@ -107,8 +107,8 @@ python -m xslim -i input.onnx -o output.onnx
 
 | 版本 | 主要更新 |
 |---|---|
-| 2.0.9 | 当前开发版本 |
-| [2.0.8](https://github.com/spacemit-com/xslim/releases/tag/2.0.8) | 最新发布版本 |
+| 2.0.10 | 当前开发版本 |
+| [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | 最新发布版本 |
 | [2.0.7](https://github.com/spacemit-com/xslim/releases/tag/2.0.7) | 修复复杂模型转换 FP16 的 bug |
 | [2.0.6](https://github.com/spacemit-com/xslim/releases/tag/2.0.6) | 修复 metadata props 被删除的问题；默认 CLI 行为调整为模型结构简化（需显式使用 `--dynq` 进行动态量化） |
 
