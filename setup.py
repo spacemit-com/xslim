@@ -9,7 +9,7 @@ def readme():
 
 def version():
     with open("VERSION_NUMBER", encoding="utf-8") as f:
-        content = f.read()
+        content = f.read().strip()
     return content
 
 
