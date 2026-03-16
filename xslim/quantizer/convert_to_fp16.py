@@ -9,38 +9,46 @@ from xslim.logger import logger
 import onnx_graphsurgeon as osg
 from ..onnx_graph_helper import format_onnx_model
 
-# Compatibility fallback blocked ops for onnxconverter-common releases without
-# DEFAULT_OP_BLOCK_LIST.
-LEGACY_DEFAULT_OP_BLOCK_LIST = {
-    "ArrayFeatureExtractor",
-    "Binarizer",
-    "CastMap",
-    "CategoryMapper",
-    "CumSum",
-    "DictVectorizer",
-    "FeatureVectorizer",
-    "Imputer",
-    "LabelEncoder",
-    "LinearClassifier",
-    "LinearRegressor",
-    "Max",
-    "Min",
-    "NonMaxSuppression",
-    "Normalizer",
-    "OneHotEncoder",
-    "RandomUniformLike",
-    "Range",
-    "Resize",
-    "RoiAlign",
-    "SVMClassifier",
-    "SVMRegressor",
-    "Scaler",
-    "TopK",
-    "TreeEnsembleClassifier",
-    "TreeEnsembleRegressor",
-    "Upsample",
-    "ZipMap",
-}
+    # Compatibility fallback blocked ops for onnxconverter-common releases without
+    # DEFAULT_OP_BLOCK_LIST.
+    # NOTE:
+    #   This list is intended to mirror `onnxconverter_common.float16.DEFAULT_OP_BLOCK_LIST`
+    #   from the onnx/onnxconverter-common project and is used only when that attribute
+    #   is not available (older onnxconverter-common versions).
+    #   Upstream source (for reference):
+    #   https://github.com/onnx/onnxconverter-common/blob/main/onnxconverter_common/float16.py
+    #   If you update this list, please compare against the upstream definition above and
+    #   keep the two in sync where appropriate.
+    LEGACY_DEFAULT_OP_BLOCK_LIST = {
+        "ArrayFeatureExtractor",
+        "Binarizer",
+        "CastMap",
+        "CategoryMapper",
+        "CumSum",
+        "DictVectorizer",
+        "FeatureVectorizer",
+        "Imputer",
+        "LabelEncoder",
+        "LinearClassifier",
+        "LinearRegressor",
+        "Max",
+        "Min",
+        "NonMaxSuppression",
+        "Normalizer",
+        "OneHotEncoder",
+        "RandomUniformLike",
+        "Range",
+        "Resize",
+        "RoiAlign",
+        "SVMClassifier",
+        "SVMRegressor",
+        "Scaler",
+        "TopK",
+        "TreeEnsembleClassifier",
+        "TreeEnsembleRegressor",
+        "Upsample",
+        "ZipMap",
+    }
 
 
 def get_default_fp16_block_list():
