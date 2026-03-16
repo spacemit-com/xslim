@@ -9,6 +9,8 @@ from xslim.logger import logger
 import onnx_graphsurgeon as osg
 from ..onnx_graph_helper import format_onnx_model
 from ..onnxslim_pass import infer_onnx_model
+from xslim.defs import XQUANT_CONFIG
+from datetime import datetime
 
 
 def legalize_fp16_graph(osg_graph: osg.Graph):
@@ -29,14 +31,14 @@ def legalize_fp16_graph(osg_graph: osg.Graph):
                         np.float16)
                 else:
                     raise RuntimeError(
-                        "Unsupported op {} with fp16 inputs".format(node.op))
+                        "Unsupported op {}[{}] with fp16 inputs".format(node.op, node.name))
             elif node.inputs[0].dtype != np.float16 and node.inputs[1].dtype == np.float16:
                 if isinstance(node.inputs[0], osg.Constant):
                     node.inputs[0].values = node.inputs[0].values.astype(
                         np.float16)
                 else:
                     raise RuntimeError(
-                        "Unsupported op {} with fp16 inputs".format(node.op))
+                        "Unsupported op {}[{}] with fp16 inputs".format(node.op, node.name))
         elif node.op in {"Range"}:
             remove_var = []
             add_var = []
@@ -119,5 +121,13 @@ def convert_to_fp16_onnx_model(
     model_fp16 = osg.export_onnx(osg_graph)
 
     model_fp16 = format_onnx_model(model_fp16)
+
+    model_fp16.producer_name = "xslim"
+    export_time = model_fp16.metadata_props.add()
+    export_time.key = "xslim_export_time"
+    export_time.value = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+    xslim_version = model_fp16.metadata_props.add()
+    xslim_version.key = "xslim_version"
+    xslim_version.value = XQUANT_CONFIG.version
 
     return model_fp16
