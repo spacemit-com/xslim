@@ -14,7 +14,7 @@ from onnxruntime.tools.onnx_model_utils import get_optimization_level, optimize_
 from xslim.defs import MIN_ONNX_OPSET_VERSION
 from xslim.logger import logger
 
-from .onnxslim_pass import optimize_onnx_model
+from .onnxslim_pass import optimize_onnx_model, infer_onnx_model
 
 
 def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
@@ -35,7 +35,8 @@ def ensure_default_onnx_opset(onnx_model: onnx.ModelProto, min_onnx_version: int
             break
 
     if ai_onnx_version is None:
-        logger.warning(f"Missing default ONNX opset import, defaulting to {min_onnx_version}.")
+        logger.warning(
+            f"Missing default ONNX opset import, defaulting to {min_onnx_version}.")
         opset = onnx_model.opset_import.add()
         opset.domain = ""
         opset.version = min_onnx_version
@@ -73,8 +74,10 @@ def format_onnx_model(
 
     ai_onnx_version = ensure_default_onnx_opset(onnx_model, min_onnx_version)
     if ai_onnx_version < min_onnx_version:
-        logger.warning("convert ai.onnx version {} to {}...".format(ai_onnx_version, min_onnx_version))
-        onnx_model = onnx.version_converter.convert_version(onnx_model, min_onnx_version)
+        logger.warning("convert ai.onnx version {} to {}...".format(
+            ai_onnx_version, min_onnx_version))
+        onnx_model = onnx.version_converter.convert_version(
+            onnx_model, min_onnx_version)
 
     if sim_en:
         logger.info("simplify onnx model...")
@@ -95,7 +98,7 @@ def format_onnx_model(
     #     logger.warning("simplify onnx model with onnxruntime error and skip. {}".format(e))
 
     try:
-        onnx_model = onnx.shape_inference.infer_shapes(onnx_model, data_prop=True)
+        onnx_model = infer_onnx_model(onnx_model)
     except Exception as e:
         logger.warning("shape_inference error with {}, skiped".format(e))
 
@@ -130,7 +133,8 @@ def merge_onnx_model(
 def truncate_onnx_model(onnx_model: onnx.ModelProto, truncate_var_names: Optional[Sequence[str]] = None):
     if isinstance(truncate_var_names, Sequence) and len(truncate_var_names) > 0:
         if len(set(truncate_var_names)) != len(truncate_var_names):
-            raise RuntimeError("The incoming truncate_var_names contains duplicate tensor names")
+            raise RuntimeError(
+                "The incoming truncate_var_names contains duplicate tensor names")
         truncate_vars = []
         osg_graph = osg.import_onnx(onnx_model)
         tensors = osg_graph.tensors()
@@ -140,7 +144,8 @@ def truncate_onnx_model(onnx_model: onnx.ModelProto, truncate_var_names: Optiona
 
         graph_valid_truncate_var_names = set([t.name for t in truncate_vars])
 
-        invalid_var_names = set(truncate_var_names) ^ set(graph_valid_truncate_var_names)
+        invalid_var_names = set(truncate_var_names) ^ set(
+            graph_valid_truncate_var_names)
         if len(invalid_var_names) > 0:
             raise RuntimeError(
                 "The incoming truncate_var_names contains non-existent tensor names {}".format(
@@ -232,7 +237,8 @@ def truncate_onnx_model(onnx_model: onnx.ModelProto, truncate_var_names: Optiona
             elif node.name in invalid_node_names:
                 invalid_nodes.append(node)
             else:
-                raise RuntimeError("unexpected error for node {}".format(node.name))
+                raise RuntimeError(
+                    "unexpected error for node {}".format(node.name))
 
         truncate_graph = osg.Graph(
             nodes=valid_nodes,
