@@ -8,6 +8,7 @@ from onnxconverter_common import float16 as convert_float_to_float16
 from xslim.logger import logger
 import onnx_graphsurgeon as osg
 from ..onnx_graph_helper import format_onnx_model
+from ..onnxslim_pass import infer_onnx_model
 
 
 def legalize_fp16_graph(osg_graph: osg.Graph):
@@ -27,13 +28,15 @@ def legalize_fp16_graph(osg_graph: osg.Graph):
                     node.inputs[1].values = node.inputs[1].values.astype(
                         np.float16)
                 else:
-                    raise RuntimeError("Unsupported op {} with fp16 inputs".format(node.op))
+                    raise RuntimeError(
+                        "Unsupported op {} with fp16 inputs".format(node.op))
             elif node.inputs[0].dtype != np.float16 and node.inputs[1].dtype == np.float16:
                 if isinstance(node.inputs[0], osg.Constant):
                     node.inputs[0].values = node.inputs[0].values.astype(
                         np.float16)
                 else:
-                    raise RuntimeError("Unsupported op {} with fp16 inputs".format(node.op))
+                    raise RuntimeError(
+                        "Unsupported op {} with fp16 inputs".format(node.op))
         elif node.op in {"Range"}:
             remove_var = []
             add_var = []
@@ -109,10 +112,7 @@ def convert_to_fp16_onnx_model(
         logger.info(f"FP16 Convert Failed!: {e}")
         raise
 
-    try:
-        model_fp16 = onnx.shape_inference.infer_shapes(model_fp16, data_prop=True)
-    except Exception as e:
-        logger.warning("shape_inference error with {}, skipped".format(e))
+    model_fp16 = format_onnx_model(model_fp16)
 
     osg_graph = osg.import_onnx(model_fp16)
     osg_graph = legalize_fp16_graph(osg_graph)
