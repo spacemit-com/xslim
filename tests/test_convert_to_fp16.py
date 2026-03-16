@@ -48,7 +48,7 @@ class TestConvertToFp16(unittest.TestCase):
                 ["norm"],
                 name="layernorm",
                 axis=-1,
-                epsilon=1e-12,
+                epsilon=1e-5,
             ),
             helper.make_node("Softmax", ["norm"], ["y"], name="softmax", axis=-1),
         ]
