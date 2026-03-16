@@ -28,10 +28,14 @@ def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
 
 
 def ensure_default_onnx_opset(onnx_model: onnx.ModelProto, min_onnx_version: int = MIN_ONNX_OPSET_VERSION) -> int:
-    opset_dict = get_onnx_opset(onnx_model)
-    ai_onnx_version = opset_dict.get("ai.onnx")
+    ai_onnx_version = None
+    for opset in onnx_model.opset_import:
+        if opset.domain in {"", "ai.onnx"}:
+            ai_onnx_version = opset.version
+            break
+
     if ai_onnx_version is None:
-        logger.warning("Missing ai.onnx opset import, defaulting to {}.".format(min_onnx_version))
+        logger.warning(f"Missing default ONNX opset import, defaulting to {min_onnx_version}.")
         opset = onnx_model.opset_import.add()
         opset.domain = ""
         opset.version = min_onnx_version
