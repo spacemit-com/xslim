@@ -11,20 +11,22 @@ from onnxruntime.quantization.quant_utils import quantize_data as ort_quantize_d
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from xslim.quantizer.dynamic_quantizer import dynamic_weight_only_quantize
+from xslim.quantizer.dynamic_quantizer import dynamic_quantize_onnx_model, dynamic_weight_only_quantize
 
 
 class TestDynamicQuantizer(unittest.TestCase):
     """Validate dynamic weight-only quantization edge cases."""
 
     @staticmethod
-    def _build_matmul_model(weight_value):
+    def _build_matmul_model(weight_value, opset_imports=None):
         x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, weight_value.shape[0]])
         y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, weight_value.shape[1]])
         weight = numpy_helper.from_array(weight_value.astype(np.float32), name="weight")
         node = helper.make_node("MatMul", ["x", "weight"], ["y"], name="matmul")
         graph = helper.make_graph([node], "matmul_graph", [x], [y], [weight])
-        return helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+        if opset_imports is None:
+            opset_imports = [helper.make_opsetid("", 17)]
+        return helper.make_model(graph, opset_imports=opset_imports)
 
     def test_dynamic_weight_only_quantize_preserves_matmul_channel_order(self):
         weight_value = np.array([[0.1, 10.2], [0.3, 20.4], [0.5, 30.6]], dtype=np.float32)
@@ -54,6 +56,17 @@ class TestDynamicQuantizer(unittest.TestCase):
         np.testing.assert_array_equal(scales, np.array(expected_scales, dtype=np.float32))
         np.testing.assert_array_equal(zero_points, np.array(expected_zero_points, dtype=np.int8))
         np.testing.assert_array_equal(quantized_weight, expected_quantized_weight)
+
+    def test_dynamic_quantize_adds_missing_default_onnx_opset_import(self):
+        weight_value = np.array([[0.1, 10.2], [0.3, 20.4], [0.5, 30.6]], dtype=np.float32)
+        model = self._build_matmul_model(weight_value, opset_imports=[helper.make_opsetid("custom.domain", 1)])
+
+        quantized_model = dynamic_quantize_onnx_model(model, [], [], sim_en=False)
+
+        opset_versions = {opset.domain: opset.version for opset in quantized_model.opset_import}
+        self.assertIn("", opset_versions)
+        self.assertGreaterEqual(opset_versions[""], 17)
+        onnx.checker.check_model(quantized_model)
 
 
 if __name__ == "__main__":
