@@ -74,6 +74,7 @@ class TestOnnxSlimPass(unittest.TestCase):
 
         with mock.patch.object(onnxslim_pass_module.onnxslim, "slim", side_effect=_capture_and_return):
             optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+            optimized_model = onnxslim_pass_module.infer_onnx_model(optimized_model)
 
         self.assertIs(optimized_model, captured["model"])
         self.assertGreater(len(captured["model"].graph.value_info), 0)
