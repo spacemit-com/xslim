@@ -26,10 +26,14 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, ignore_op_nam
 
     def make_dq_node(weight, scale, zp, axis=0):
         dq_node_index = len(new_nodes)
-        weight_tensor = osg.Constant("insert_dq_node_weight_tensor_{}".format(dq_node_index), weight)
-        scale_tensor = osg.Constant("insert_dq_node_scale_tensor_{}".format(dq_node_index), scale)
-        zp_tensor = osg.Constant("insert_dq_node_zp_tensor_{}".format(dq_node_index), zp)
-        out_tensor = osg.Variable("insert_dq_node_out_tensor_{}".format(dq_node_index), np.float32)
+        weight_tensor = osg.Constant(
+            "insert_dq_node_weight_tensor_{}".format(dq_node_index), weight)
+        scale_tensor = osg.Constant(
+            "insert_dq_node_scale_tensor_{}".format(dq_node_index), scale)
+        zp_tensor = osg.Constant(
+            "insert_dq_node_zp_tensor_{}".format(dq_node_index), zp)
+        out_tensor = osg.Variable(
+            "insert_dq_node_out_tensor_{}".format(dq_node_index), np.float32)
         attrs = {}
         attrs["axis"] = axis
         new_node = osg.Node(
@@ -45,30 +49,36 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, ignore_op_nam
         dyn_q_node_index = len(new_nodes)
         dyn_quantize_node = osg.Node(
             "DynamicQuantizeLinear",
-            "insert_dyn_q_node_{}_{}_{}".format(input_idx, node.name, dyn_q_node_index),
+            "insert_dyn_q_node_{}_{}_{}".format(
+                input_idx, node.name, dyn_q_node_index),
             inputs=[node.inputs[input_idx]],
             outputs=[],
         )
 
         dyn_quantize_node.outputs.append(
-            osg.Variable("insert_dyn_q_node_out_{}".format(dyn_quantize_node.name), np.uint8)
+            osg.Variable("insert_dyn_q_node_out_{}".format(
+                dyn_quantize_node.name), np.uint8)
         )
         dyn_quantize_node.outputs.append(
-            osg.Variable("insert_dyn_q_node_out_scale_{}".format(dyn_quantize_node.name), np.float32)
+            osg.Variable("insert_dyn_q_node_out_scale_{}".format(
+                dyn_quantize_node.name), np.float32)
         )
         dyn_quantize_node.outputs.append(
-            osg.Variable("insert_dyn_q_node_out_zp_{}".format(dyn_quantize_node.name), np.uint8)
+            osg.Variable("insert_dyn_q_node_out_zp_{}".format(
+                dyn_quantize_node.name), np.uint8)
         )
 
         dyn_dequantize_node = osg.Node(
             "DequantizeLinear",
-            "insert_dyn_dq_node_{}_{}_{}".format(input_idx, node.name, dyn_q_node_index),
+            "insert_dyn_dq_node_{}_{}_{}".format(
+                input_idx, node.name, dyn_q_node_index),
             attrs={"axis": 0},
             inputs=dyn_quantize_node.outputs,
             outputs=[],
         )
         dyn_dequantize_node.outputs.append(
-            osg.Variable("dyn_deq_node_out_{}".format(dyn_dequantize_node.name), np.float32)
+            osg.Variable("dyn_deq_node_out_{}".format(
+                dyn_dequantize_node.name), np.float32)
         )
         return dyn_quantize_node, dyn_dequantize_node
 
@@ -111,9 +121,11 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, ignore_op_nam
 
         def eval_error(weight_value, weight_q_value, weight_value_scale, weight_value_zp):
             requant_weight_value = (
-                weight_q_value.astype(np.float32) - weight_value_zp.reshape(-1, 1)
+                weight_q_value.astype(np.float32) -
+                weight_value_zp.reshape(-1, 1)
             ) * weight_value_scale.reshape(-1, 1)
-            error = np.sum(np.abs(weight_value - requant_weight_value)) / weight_value.size
+            error = np.sum(
+                np.abs(weight_value - requant_weight_value)) / weight_value.size
             cosine = cosine_error(weight_value, requant_weight_value)
             # print(f"node: [{node.op}]({node.name}), error: {error}, cosine: {cosine}")
 
@@ -139,29 +151,40 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, ignore_op_nam
 
                 if node.op == "Conv" or (node.op == "Gemm" and node.attrs.get("transB", 0) == 1):
                     weight_value = weight_value.reshape(weight_shape[0], -1)
-                    weight_value_scale, weight_value_zp, quant_weight_value = get_scale_zp(weight_value)
+                    weight_value_scale, weight_value_zp, quant_weight_value = get_scale_zp(
+                        weight_value)
                     # eval_error(weight_value, quant_weight_value, weight_value_scale, weight_value_zp)
-                    quant_weight_value = quant_weight_value.reshape(weight_shape)
+                    quant_weight_value = quant_weight_value.reshape(
+                        weight_shape)
                 elif node.op == "MatMul" or (node.op == "Gemm" and node.attrs.get("transB", 0) == 0):
                     axis = 1
                     permute_weight_value = np.transpose(weight_value, (1, 0))
-                    permute_weight_value = permute_weight_value.reshape(permute_weight_value.shape[0], -1)
-                    weight_value_scale, weight_value_zp, permute_quant_weight_value = get_scale_zp(permute_weight_value)
+                    permute_weight_value = permute_weight_value.reshape(
+                        permute_weight_value.shape[0], -1)
+                    weight_value_scale, weight_value_zp, permute_quant_weight_value = get_scale_zp(
+                        permute_weight_value)
                     # eval_error(permute_weight_value, permute_quant_weight_value, weight_value_scale, weight_value_zp)
-                    quant_weight_value = np.transpose(permute_quant_weight_value, (1, 0)).reshape(weight_shape)
+                    quant_weight_value = np.transpose(
+                        permute_quant_weight_value, (1, 0)).reshape(weight_shape)
                 elif node.op == "ConvTranspose" and node.attrs.get("group", 1) == 1:
                     axis = 1
                     group = node.attrs.get("group", 1)
-                    weight_value = weight_value.reshape(group, weight_shape[0] // group, weight_shape[1], -1)
-                    permute_weight_value = np.transpose(weight_value, (0, 2, 1, 3))
-                    permute_weight_value = permute_weight_value.reshape(group * weight_shape[1], -1)
+                    weight_value = weight_value.reshape(
+                        group, weight_shape[0] // group, weight_shape[1], -1)
+                    permute_weight_value = np.transpose(
+                        weight_value, (0, 2, 1, 3))
+                    permute_weight_value = permute_weight_value.reshape(
+                        group * weight_shape[1], -1)
 
-                    weight_value_scale, weight_value_zp, permute_quant_weight_value = get_scale_zp(permute_weight_value)
+                    weight_value_scale, weight_value_zp, permute_quant_weight_value = get_scale_zp(
+                        permute_weight_value)
                     permute_quant_weight_value = permute_quant_weight_value.reshape(
                         (group, weight_shape[1], weight_shape[0] // group, -1)
                     )
-                    quant_weight_value = np.transpose(permute_quant_weight_value, (0, 2, 1, 3))
-                    quant_weight_value = quant_weight_value.reshape(weight_shape)
+                    quant_weight_value = np.transpose(
+                        permute_quant_weight_value, (0, 2, 1, 3))
+                    quant_weight_value = quant_weight_value.reshape(
+                        weight_shape)
                 else:
                     continue
 
@@ -195,7 +218,8 @@ def dynamic_quantize_onnx_model(
     elif isinstance(file_or_model, str):
         onnx_model = onnx.load(file_or_model)
     else:
-        raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
+        raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(
+            type(file_or_model)))
 
     onnx_model = format_onnx_model(onnx_model, sim_en)
 
@@ -207,7 +231,8 @@ def dynamic_quantize_onnx_model(
 
     nodes_to_exclude = ignore_op_names_list
 
-    extra_options = {"WeightSymmetric": True, "MatMulConstBOnly": True}
+    extra_options = {"WeightSymmetric": True, "MatMulConstBOnly": True,
+                     "DefaultTensorType": onnx.TensorProto.FLOAT}
     quantizer = ONNXQuantizer(
         onnx_model,
         True,  # per channel
@@ -226,7 +251,8 @@ def dynamic_quantize_onnx_model(
     logger.info("quantize onnx model dynamic...")
     quantizer.quantize_model()
     quantized_model = quantizer.model.model
-    quantized_model = dynamic_weight_only_quantize(quantized_model, ignore_op_types_list, ignore_op_names_list)
+    quantized_model = dynamic_weight_only_quantize(
+        quantized_model, ignore_op_types_list, ignore_op_names_list)
     quantized_model = format_onnx_model(quantized_model, True)
 
     quantized_model.producer_name = "xslim"

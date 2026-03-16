@@ -86,17 +86,6 @@ def format_onnx_model(
     except Exception as e:
         logger.warning("simplify onnx model error and skip. {}".format(e))
 
-    # try:
-    #     logger.info("symplify onnx model with onnxruntime...")
-    #     with TemporaryDirectory() as tempdir:
-    #         src_path = os.path.join(tempdir, "onnx_model_src.onnx")
-    #         dst_path = os.path.join(tempdir, "onnx_model_dst.onnx")
-    #         onnx.save(onnx_model, src_path)
-    #         optimize_model(pathlib.Path(src_path), pathlib.Path(dst_path), get_optimization_level("basic"))
-    #         onnx_model = onnx.load(dst_path)
-    # except Exception as e:
-    #     logger.warning("simplify onnx model with onnxruntime error and skip. {}".format(e))
-
     try:
         onnx_model = infer_onnx_model(onnx_model)
     except Exception as e:
