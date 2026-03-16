@@ -27,7 +27,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .cache/test-models
-        key: ${{ runner.os }}-py312-onnx-e2e-models-${{ hashFiles('tests/test_quantize_pipeline.py') }}
+        key: ${{ runner.os }}-py312-onnx-e2e-models-${{ hashFiles('requirements.txt') }}-${{ hashFiles('tests/test_quantize_pipeline.py') }}
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
