@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2025 SpacemiT. All rights reserved.
-from typing import Sequence, Set, Tuple, Union
+from typing import Sequence, Union
 
 import onnx
 import numpy as np
@@ -70,39 +70,23 @@ def convert_to_fp16_onnx_model(
 
     logger.info("convert onnx model to fp16.")
 
-    default_ignore_op_types = {"ArrayFeatureExtractor",
-                               "Binarizer",
-                               "CastMap",
-                               "CategoryMapper",
-                               "DictVectorizer",
-                               "FeatureVectorizer",
-                               "Imputer",
-                               "LabelEncoder",
-                               "LinearClassifier",
-                               "LinearRegressor",
-                               "Normalizer",
-                               "OneHotEncoder",
-                               "RandomUniformLike",
-                               "RandomNormalLike",
-                               "SVMClassifier",
-                               "SVMRegressor",
-                               "Scaler",
-                               "TreeEnsembleClassifier",
-                               "TreeEnsembleRegressor",
-                               "ZipMap",
-                               "NonMaxSuppression",
-                               "TopK",
-                               "RoiAlign",
-                               "Range",
-                               "CumSum"}
+    default_ignore_op_types = set(getattr(convert_float_to_float16, "DEFAULT_OP_BLOCK_LIST", [])) | {
+        "RandomNormalLike",
+        "Softmax",
+        "LayerNormalization",
+        "SimplifiedLayerNormalization",
+        "SkipLayerNormalization",
+        "Attention",
+        "MultiHeadAttention",
+        "ReduceMean",
+    }
 
     try:
         model_fp16 = convert_float_to_float16.convert_float_to_float16(
             model_opt,
             keep_io_types=True,
             disable_shape_infer=False,
-            op_block_list=list(
-                default_ignore_op_types or set(ignore_op_types_list)),
+            op_block_list=sorted(default_ignore_op_types.union(ignore_op_types_list)),
             node_block_list=ignore_node_names_list,
         )
     except Exception as e:
