@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from xslim.quantizer import convert_to_fp16 as convert_to_fp16_module
 
+MAX_TRANSFORMER_FP16_ERROR = 1e-3
+
 
 class TestConvertToFp16(unittest.TestCase):
     """Test dtype preservation around FP16 conversion legalization."""
@@ -129,7 +131,7 @@ class TestConvertToFp16(unittest.TestCase):
         fp32_output = fp32_session.run(None, inputs)[0]
         fp16_output = fp16_session.run(None, inputs)[0]
 
-        self.assertLess(np.max(np.abs(fp32_output - fp16_output)), 1e-3)
+        self.assertLess(np.max(np.abs(fp32_output - fp16_output)), MAX_TRANSFORMER_FP16_ERROR)
 
 
 if __name__ == "__main__":

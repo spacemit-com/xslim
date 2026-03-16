@@ -9,6 +9,37 @@ from xslim.logger import logger
 import onnx_graphsurgeon as osg
 from ..onnx_graph_helper import format_onnx_model
 
+LEGACY_DEFAULT_OP_BLOCK_LIST = {
+    "ArrayFeatureExtractor",
+    "Binarizer",
+    "CastMap",
+    "CategoryMapper",
+    "CumSum",
+    "DictVectorizer",
+    "FeatureVectorizer",
+    "Imputer",
+    "LabelEncoder",
+    "LinearClassifier",
+    "LinearRegressor",
+    "Max",
+    "Min",
+    "NonMaxSuppression",
+    "Normalizer",
+    "OneHotEncoder",
+    "RandomUniformLike",
+    "Range",
+    "Resize",
+    "RoiAlign",
+    "SVMClassifier",
+    "SVMRegressor",
+    "Scaler",
+    "TopK",
+    "TreeEnsembleClassifier",
+    "TreeEnsembleRegressor",
+    "Upsample",
+    "ZipMap",
+}
+
 
 def legalize_fp16_graph(osg_graph: osg.Graph):
     for node in osg_graph.nodes:
@@ -70,7 +101,7 @@ def convert_to_fp16_onnx_model(
 
     logger.info("convert onnx model to fp16.")
 
-    default_ignore_op_types = set(getattr(convert_float_to_float16, "DEFAULT_OP_BLOCK_LIST", [])) | {
+    default_ignore_op_types = set(getattr(convert_float_to_float16, "DEFAULT_OP_BLOCK_LIST", LEGACY_DEFAULT_OP_BLOCK_LIST)) | {
         "RandomNormalLike",
         "Softmax",
         "LayerNormalization",
