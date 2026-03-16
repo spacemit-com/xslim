@@ -108,16 +108,7 @@ def convert_to_fp16_onnx_model(
 
     logger.info("convert onnx model to fp16.")
 
-    default_ignore_op_types = get_default_fp16_block_list() | {
-        "RandomNormalLike",
-        "Softmax",
-        "LayerNormalization",
-        "SimplifiedLayerNormalization",
-        "SkipLayerNormalization",
-        "Attention",
-        "MultiHeadAttention",
-        "ReduceMean",
-    }
+    default_ignore_op_types = get_default_fp16_block_list()
 
     try:
         model_fp16 = convert_float_to_float16.convert_float_to_float16(
