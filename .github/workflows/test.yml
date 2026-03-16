@@ -21,6 +21,13 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
+        cache: "pip"
+        cache-dependency-path: requirements.txt
+    - name: Cache exported ONNX test models
+      uses: actions/cache@v4
+      with:
+        path: .cache/test-models
+        key: ${{ runner.os }}-py312-onnx-e2e-models-${{ hashFiles('requirements.txt') }}-${{ hashFiles('tests/test_quantize_pipeline.py') }}
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
@@ -28,6 +35,8 @@ jobs:
         pip install onnx-graphsurgeon --no-deps
         grep -vE 'nvidia-pyindex|onnx-graphsurgeon|^torch' requirements.txt | pip install -r /dev/stdin
         pip install --no-deps -e .
-    - name: Run unit tests
+    - name: Run unit and end-to-end tests
+      env:
+        XSLIM_TEST_MODEL_CACHE: .cache/test-models
       run: |
         python -m unittest discover -s tests -p "test_*.py" -v
