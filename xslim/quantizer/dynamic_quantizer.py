@@ -145,7 +145,7 @@ def dynamic_weight_only_quantize(onnx_model, ignore_op_types_list, ignore_op_nam
                 elif node.op == "MatMul" or (node.op == "Gemm" and node.attrs.get("transB", 0) == 0):
                     axis = 1
                     permute_weight_value = np.transpose(weight_value, (1, 0))
-                    permute_weight_value = weight_value.reshape(permute_weight_value.shape[0], -1)
+                    permute_weight_value = permute_weight_value.reshape(permute_weight_value.shape[0], -1)
                     weight_value_scale, weight_value_zp, permute_quant_weight_value = get_scale_zp(permute_weight_value)
                     # eval_error(permute_weight_value, permute_quant_weight_value, weight_value_scale, weight_value_zp)
                     quant_weight_value = np.transpose(permute_quant_weight_value, (1, 0)).reshape(weight_shape)

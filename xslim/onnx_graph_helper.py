@@ -27,6 +27,22 @@ def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
     return opset_dict
 
 
+def ensure_default_onnx_opset(onnx_model: onnx.ModelProto, min_onnx_version: int = MIN_ONNX_OPSET_VERSION) -> int:
+    ai_onnx_version = None
+    for opset in onnx_model.opset_import:
+        if opset.domain in {"", "ai.onnx"}:
+            ai_onnx_version = opset.version
+            break
+
+    if ai_onnx_version is None:
+        logger.warning(f"Missing default ONNX opset import, defaulting to {min_onnx_version}.")
+        opset = onnx_model.opset_import.add()
+        opset.domain = ""
+        opset.version = min_onnx_version
+        ai_onnx_version = min_onnx_version
+    return ai_onnx_version
+
+
 def format_onnx_model(
     onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: int = MIN_ONNX_OPSET_VERSION
 ) -> onnx.ModelProto:
@@ -55,8 +71,7 @@ def format_onnx_model(
             node.name = f"{node.op_type}_{empty_name_count}"
             empty_name_count += 1
 
-    opset_dict = get_onnx_opset(onnx_model)
-    ai_onnx_version = opset_dict.get("ai.onnx", min_onnx_version)
+    ai_onnx_version = ensure_default_onnx_opset(onnx_model, min_onnx_version)
     if ai_onnx_version < min_onnx_version:
         logger.warning("convert ai.onnx version {} to {}...".format(ai_onnx_version, min_onnx_version))
         onnx_model = onnx.version_converter.convert_version(onnx_model, min_onnx_version)
