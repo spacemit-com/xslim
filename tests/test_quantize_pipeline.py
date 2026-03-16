@@ -1,6 +1,7 @@
 """End-to-end regression tests for the public quantization pipeline."""
 
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ class TestQuantizePipeline(unittest.TestCase):
     """Validate model-level FP16 and dynamic quantization flows."""
 
     input_shape = (1, 3, 64, 64)
+    model_cache_dir = os.environ.get("XSLIM_TEST_MODEL_CACHE")
 
     @classmethod
     def _export_torchvision_model(cls, model, path):
@@ -36,6 +38,26 @@ class TestQuantizePipeline(unittest.TestCase):
                 opset_version=17,
                 dynamo=False,
             )
+
+    @classmethod
+    def _get_model_path(cls, model_name):
+        if cls.model_cache_dir:
+            os.makedirs(cls.model_cache_dir, exist_ok=True)
+            return os.path.join(cls.model_cache_dir, "{}.onnx".format(model_name))
+        return None
+
+    @classmethod
+    def _prepare_model(cls, model_name, model):
+        cached_model_path = cls._get_model_path(model_name)
+        if cached_model_path is not None:
+            if not os.path.exists(cached_model_path):
+                cls._export_torchvision_model(model, cached_model_path)
+            return cached_model_path
+
+        tempdir = tempfile.mkdtemp()
+        model_path = os.path.join(tempdir, "{}.onnx".format(model_name))
+        cls._export_torchvision_model(model, model_path)
+        return model_path
 
     @classmethod
     def _build_config(cls, model_path, precision_level):
@@ -61,10 +83,11 @@ class TestQuantizePipeline(unittest.TestCase):
 
     def test_dynamic_quantize_pipeline_supports_external_data_resnet18(self):
         with tempfile.TemporaryDirectory() as tempdir:
+            source_model_path = self._prepare_model("resnet18", torchvision.models.resnet18(weights=None))
             model_path = os.path.join(tempdir, "resnet18_external.onnx")
             output_path = os.path.join(tempdir, "resnet18_external.dynq.onnx")
 
-            self._export_torchvision_model(torchvision.models.resnet18(weights=None), model_path)
+            shutil.copyfile(source_model_path, model_path)
 
             model_with_external_data = onnx.load(model_path)
             convert_model_to_external_data(
@@ -95,10 +118,11 @@ class TestQuantizePipeline(unittest.TestCase):
 
     def test_fp16_pipeline_converts_mobilenet_v2_end_to_end(self):
         with tempfile.TemporaryDirectory() as tempdir:
+            source_model_path = self._prepare_model("mobilenet_v2", torchvision.models.mobilenet_v2(weights=None))
             model_path = os.path.join(tempdir, "mobilenetv2.onnx")
             output_path = os.path.join(tempdir, "mobilenetv2.fp16.onnx")
 
-            self._export_torchvision_model(torchvision.models.mobilenet_v2(weights=None), model_path)
+            shutil.copyfile(source_model_path, model_path)
 
             fp16_model = xslim.quantize_onnx_model(
                 self._build_config(model_path, precision_level=4), output_path=output_path
