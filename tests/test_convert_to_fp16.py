@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from xslim.quantizer import convert_to_fp16 as convert_to_fp16_module
 
+# Tight enough to catch numerically unstable FP16 conversions while allowing
+# expected rounding from the protected mixed-precision path.
 MAX_TRANSFORMER_FP16_ERROR = 1e-3
 
 
@@ -124,6 +126,8 @@ class TestConvertToFp16(unittest.TestCase):
 
         inputs = {
             "x": np.array(
+                # Large baselines with small deltas amplify LayerNorm/Softmax
+                # precision loss if these ops are converted to raw FP16.
                 [[1000.0, 1000.1, 999.9, 1000.05, 1000.02, 999.98, 1000.03, 999.97]],
                 dtype=np.float32,
             )

@@ -9,6 +9,8 @@ from xslim.logger import logger
 import onnx_graphsurgeon as osg
 from ..onnx_graph_helper import format_onnx_model
 
+# Compatibility fallback blocked ops for onnxconverter-common releases without
+# DEFAULT_OP_BLOCK_LIST.
 LEGACY_DEFAULT_OP_BLOCK_LIST = {
     "ArrayFeatureExtractor",
     "Binarizer",
@@ -39,6 +41,11 @@ LEGACY_DEFAULT_OP_BLOCK_LIST = {
     "Upsample",
     "ZipMap",
 }
+
+
+def get_default_fp16_block_list():
+    """Return the upstream FP16 blocked-op list or the legacy compatibility fallback."""
+    return set(getattr(convert_float_to_float16, "DEFAULT_OP_BLOCK_LIST", LEGACY_DEFAULT_OP_BLOCK_LIST))
 
 
 def legalize_fp16_graph(osg_graph: osg.Graph):
@@ -101,7 +108,7 @@ def convert_to_fp16_onnx_model(
 
     logger.info("convert onnx model to fp16.")
 
-    default_ignore_op_types = set(getattr(convert_float_to_float16, "DEFAULT_OP_BLOCK_LIST", LEGACY_DEFAULT_OP_BLOCK_LIST)) | {
+    default_ignore_op_types = get_default_fp16_block_list() | {
         "RandomNormalLike",
         "Softmax",
         "LayerNormalization",
