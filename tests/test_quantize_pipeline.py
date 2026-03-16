@@ -23,6 +23,7 @@ class TestQuantizePipeline(unittest.TestCase):
 
     input_shape = (1, 3, 64, 64)
     model_cache_dir = os.environ.get("XSLIM_TEST_MODEL_CACHE")
+    _tempdirs = []
 
     @classmethod
     def _export_torchvision_model(cls, model, path):
@@ -55,9 +56,16 @@ class TestQuantizePipeline(unittest.TestCase):
             return cached_model_path
 
         tempdir = tempfile.mkdtemp()
+        cls._tempdirs.append(tempdir)
         model_path = os.path.join(tempdir, "{}.onnx".format(model_name))
         cls._export_torchvision_model(model, model_path)
         return model_path
+
+    @classmethod
+    def tearDownClass(cls):
+        """Remove any temporary directories created during tests."""
+        for tempdir in getattr(cls, "_tempdirs", []):
+            shutil.rmtree(tempdir, ignore_errors=True)
 
     @classmethod
     def _build_config(cls, model_path, precision_level):
