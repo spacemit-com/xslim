@@ -115,7 +115,7 @@ def convert_to_fp16_onnx_model(
             model_opt,
             keep_io_types=True,
             disable_shape_infer=False,
-            op_block_list=sorted(default_ignore_op_types.union(ignore_op_types_list)),
+            op_block_list=sorted(default_ignore_op_types.union(ignore_op_types_list or [])),
             node_block_list=ignore_node_names_list,
         )
     except Exception as e:
