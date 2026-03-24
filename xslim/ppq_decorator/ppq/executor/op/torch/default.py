@@ -6,19 +6,17 @@ from typing import List
 import torch
 import torch.nn.functional as F
 from torch import _VF
+
 from xslim.logger import logger
 
-from ....core import (
-    GRU_FLATTEN_WEIGHT_ATTRIB,
-    LSTM_FLATTEN_WEIGHT_ATTRIB,
-    DataType,
-    TargetPlatform,
-    convert_any_to_python_primary_type,
-)
+from ....core import (GRU_FLATTEN_WEIGHT_ATTRIB, LSTM_FLATTEN_WEIGHT_ATTRIB,
+                      DataType, TargetPlatform,
+                      convert_any_to_python_primary_type)
 from ....IR import Operation
 from ....utils import process_attribute
 from .base import *
-from .xslim_qfunction import quantize_blockwise, quantize_channel_blockwise, quantize_groupwise, quantize_tensorwise
+from .xslim_qfunction import (quantize_blockwise, quantize_channel_blockwise,
+                              quantize_groupwise, quantize_tensorwise)
 
 # Reference:
 # onnx op: https://github.com/onnx/onnx/blob/master/docs/Operators.md
@@ -754,6 +752,13 @@ def And_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendCont
     values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
     a, b = values
     return a & b
+
+
+def Or_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs) -> torch.Tensor:
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=2)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    a, b = values
+    return a | b
 
 
 def Eltwise_forward(
@@ -2271,6 +2276,13 @@ def BatchMatMul_forward(
     return output
 
 
+def Einsum_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    equation = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="equation", compulsive=True)
+    return torch.einsum(equation, *values)
+
+
 def Softmax_forward(
     op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs
 ) -> torch.Tensor:
@@ -2558,6 +2570,10 @@ def Pad_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendCont
             pads = pads[:-4]
         output = F.pad(value, pads, mode)
     elif mode == "edge":
+        if value.ndim == 4:
+            pads = pads[:4]
+        else:
+            raise ValueError(f"Unsupported input dimension {value.ndim} in Pad op with edge mode")
         output = F.pad(value, pads, "replicate")
     else:
         raise TypeError(f"Unsupported mode {mode} in Pad op")
@@ -3885,6 +3901,26 @@ def Elu_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendCont
     return F.elu(x, alpha=alpha)
 
 
+def Selu_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs) -> torch.Tensor:
+    """
+    Selu takes one input data (Tensor) and produces one output data (Tensor)
+    where the function f(x) = gamma * (alpha * exp(x) - alpha) for x <= 0,
+    f(x) = gamma * x for x > 0, is applied to the tensor elementwise.
+
+    Attributes
+        alpha : float (default is 1.6732631921768188)
+            Coefficient of the negative factor.
+
+        gamma : float (default is 1.0507010221481323)
+            Coefficient of the positive factor.
+    """
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    [x] = values
+    alpha = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="alpha", default=1.6732631921768188)
+    gamma = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="gamma", default=1.0507010221481323)
+    return gamma * F.elu(x, alpha=alpha)
+
+
 def Erf_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs) -> torch.Tensor:
     """
     Elu takes one input data (Tensor) and produces one output data (Tensor)
@@ -4058,6 +4094,7 @@ DEFAULT_BACKEND_TABLE = {
     "ConvTranspose": ConvTranspose_forward,
     "Cos": Cos_forward,
     "Div": Eltwise_forward,
+    "Einsum": Einsum_forward,
     "Equal": Equal_forward,
     "Exp": UnaryEltwise_forward,
     "Expand": Expand_forward,
@@ -4082,11 +4119,13 @@ DEFAULT_BACKEND_TABLE = {
     "Max": Eltwise_forward,
     "MaxPool": MaxPool2d_forward,
     "Min": Eltwise_forward,
+    "Mod": Mod_forward,
     "Mul": Mul_forward,
     "MultiHeadAttention": MultiHeadAttention_forward,
     "NonMaxSuppression": _NMS_forward,
     "NonZero": NonZero_forward,
     "Not": Not_forward,
+    "Or": Or_forward,
     "Pad": Pad_forward,
     "PPQBiasFusedMatMul": PPQBiasFusedMatMul_forward,
     "PRelu": PRelu_forward,
@@ -4140,6 +4179,7 @@ DEFAULT_BACKEND_TABLE = {
     "OneHot": Onehot_forward,
     "Reciprocal": Reciprocal_forward,
     "LSTM": LSTM_forward,
+    "Selu": Selu_forward,
     "Sum": Sum_forward,
     "Elu": Elu_forward,
     "Erf": Erf_forward,
