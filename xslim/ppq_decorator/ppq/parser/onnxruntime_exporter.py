@@ -6,17 +6,15 @@ import onnx
 import onnx.helper
 import torch
 from onnx import helper
-from xslim.defs import GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION, PASSIVE_OPERATIONS, XQUANT_CONFIG
 
-from ..core import (
-    ONNX_DOMAIN,
-    QuantizationProperty,
-    QuantizationStates,
-    QuantizationVisibility,
-    TensorQuantizationConfig,
-    convert_any_to_torch_tensor,
-)
-from ..IR import BaseGraph, Operation, QuantableOperation, QuantableVariable, Variable
+from xslim.defs import (GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION,
+                        PASSIVE_OPERATIONS, XQUANT_CONFIG)
+
+from ..core import (ONNX_DOMAIN, QuantizationProperty, QuantizationStates,
+                    QuantizationVisibility, TensorQuantizationConfig,
+                    convert_any_to_torch_tensor)
+from ..IR import (BaseGraph, Operation, QuantableOperation, QuantableVariable,
+                  Variable)
 from ..quantization.qfunction.linear import PPQLinearQuant_toInt
 from ..utils.round import ppq_tensor_round
 from .onnx_exporter import OP_CONVERTERS, OnnxExporter, OperationExporter
@@ -458,6 +456,9 @@ class ONNXRUNTIMExporter(OnnxExporter):
         # collect quantable vars, where we need to insert quant and dequant op
         for config, var in [_ for _ in op.config_with_variable]:
             inserting, inserting_var = op, var
+            if inserting.type in {"Pad"}:
+                pass
+
             if QDQHelper.TQC_Exportable_Check(TQC=config, bounded_var=var) or (
                 inserting.type in PASSIVE_OPERATIONS and len(var.dest_ops) > 1
             ):
@@ -467,6 +468,8 @@ class ONNXRUNTIMExporter(OnnxExporter):
             else:
                 continue
             if config.scale is None:
+                continue
+            if var.name == "":
                 continue
 
             if var.is_parameter:

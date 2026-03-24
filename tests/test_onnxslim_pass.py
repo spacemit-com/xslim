@@ -19,7 +19,9 @@ def _load_onnxslim_pass_module():
     package.__path__ = [repo_root]
     sys.modules["xslim"] = package
 
-    logger_spec = importlib.util.spec_from_file_location("xslim.logger", os.path.join(repo_root, "logger.py"))
+    logger_spec = importlib.util.spec_from_file_location(
+        "xslim.logger", os.path.join(repo_root, "logger.py")
+    )
     logger_module = importlib.util.module_from_spec(logger_spec)
     sys.modules["xslim.logger"] = logger_module
     logger_spec.loader.exec_module(logger_module)
@@ -56,13 +58,53 @@ class TestOnnxSlimPass(unittest.TestCase):
             [bias],
             value_info=[z],
         )
-        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
+    def _build_pad_pool_model(pool_op_type, pad_value=None):
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 1, 4, 4])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 1, 4, 4])
+        pads = helper.make_tensor(
+            "pads", TensorProto.INT64, [8], [0, 0, 1, 1, 0, 0, 1, 1]
+        )
+
+        initializers = [pads]
+        pad_inputs = ["x", "pads"]
+        if pad_value is not None:
+            pad_value_tensor = helper.make_tensor(
+                "pad_value", TensorProto.FLOAT, [], [pad_value]
+            )
+            initializers.append(pad_value_tensor)
+            pad_inputs.append("pad_value")
+
+        nodes = [
+            helper.make_node("Pad", pad_inputs, ["padded"], name="pad"),
+            helper.make_node(
+                pool_op_type,
+                ["padded"],
+                ["y"],
+                name="pool",
+                kernel_shape=[3, 3],
+                strides=[1, 1],
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes, "pad_pool_graph", [x], [y], initializers
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
         return onnx.shape_inference.infer_shapes(model)
 
     def test_optimize_onnx_model_restores_shape_info_before_slim(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_add_model()
-        model = convert_float_to_float16.convert_float_to_float16(model, keep_io_types=True, disable_shape_infer=False)
+        model = convert_float_to_float16.convert_float_to_float16(
+            model, keep_io_types=True, disable_shape_infer=False
+        )
         model.graph.ClearField("value_info")
         self.assertEqual(len(model.graph.value_info), 0)
 
@@ -72,15 +114,85 @@ class TestOnnxSlimPass(unittest.TestCase):
             captured["model"] = model_arg
             return model_arg
 
-        with mock.patch.object(onnxslim_pass_module.onnxslim, "slim", side_effect=_capture_and_return):
+        with mock.patch.object(
+            onnxslim_pass_module.onnxslim,
+            "slim",
+            side_effect=_capture_and_return,
+        ):
             optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
-            optimized_model = onnxslim_pass_module.infer_onnx_model(optimized_model)
+            optimized_model = onnxslim_pass_module.infer_onnx_model(
+                optimized_model
+            )
 
         self.assertIs(optimized_model, captured["model"])
         self.assertGreater(len(captured["model"].graph.value_info), 0)
         self.assertIn(
             TensorProto.FLOAT16,
-            {value_info.type.tensor_type.elem_type for value_info in captured["model"].graph.value_info},
+            {
+                value_info.type.tensor_type.elem_type
+                for value_info in captured["model"].graph.value_info
+            },
+        )
+
+    def test_optimize_onnx_model_fuses_pad_average_pool(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_pad_pool_model("AveragePool")
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["AveragePool"],
+        )
+
+        pool_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in pool_node.attribute
+        }
+        self.assertEqual(list(attrs["pads"]), [1, 1, 1, 1])
+        self.assertEqual(attrs["count_include_pad"], 1)
+
+    def test_optimize_onnx_model_fuses_pad_max_pool_with_neg_inf_padding(
+        self,
+    ):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_pad_pool_model("MaxPool", pad_value=float("-inf"))
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node], ["MaxPool"]
+        )
+
+        pool_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in pool_node.attribute
+        }
+        self.assertEqual(list(attrs["pads"]), [1, 1, 1, 1])
+
+    def test_optimize_onnx_model_keeps_zero_pad_before_max_pool(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_pad_pool_model("MaxPool")
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["Pad", "MaxPool"],
         )
 
 

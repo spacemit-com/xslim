@@ -6,6 +6,7 @@ from xslim.logger import logger
 from .dynamic_q_matmul import *
 from .gelu import *
 from .layernorm import *
+from .padpool import *
 from .batchnorm import *
 # from .swish import *
 
