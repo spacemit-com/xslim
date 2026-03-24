@@ -9,12 +9,13 @@ from typing import Dict, List, Optional, Sequence, Union
 
 import onnx
 import onnx_graphsurgeon as osg
-from onnxruntime.tools.onnx_model_utils import get_optimization_level, optimize_model
+from onnxruntime.tools.onnx_model_utils import (get_optimization_level,
+                                                optimize_model)
 
 from xslim.defs import MIN_ONNX_OPSET_VERSION
 from xslim.logger import logger
 
-from .onnxslim_pass import optimize_onnx_model, infer_onnx_model
+from .onnxslim_pass import infer_onnx_model, optimize_onnx_model
 
 
 def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
@@ -107,7 +108,7 @@ def merge_onnx_model(
 
         new_osg_graph = osg.Graph(
             nodes=osg_graph.nodes + truncate_left_graph.nodes,
-            inputs=osg_graph.inputs,
+            inputs=truncate_left_graph.inputs,
             outputs=truncate_left_graph.outputs,
             name=copy.copy(osg_graph.name),
             doc_string=copy.copy(osg_graph.doc_string),
@@ -241,7 +242,7 @@ def truncate_onnx_model(onnx_model: onnx.ModelProto, truncate_var_names: Optiona
 
         truncate_left_graph = osg.Graph(
             nodes=invalid_nodes,
-            inputs=[],
+            inputs=osg_graph.inputs,
             outputs=osg_graph.outputs,
             name=copy.copy(osg_graph.name),
             doc_string=copy.copy(osg_graph.doc_string),
