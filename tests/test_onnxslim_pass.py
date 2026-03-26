@@ -37,6 +37,42 @@ def _load_onnxslim_pass_module():
     return onnxslim_pass_module
 
 
+def _load_onnx_graph_helper_module():
+    repo_root = os.path.join(os.path.dirname(__file__), "..", "xslim")
+
+    package = types.ModuleType("xslim")
+    package.__path__ = [repo_root]
+    sys.modules["xslim"] = package
+
+    logger_spec = importlib.util.spec_from_file_location(
+        "xslim.logger", os.path.join(repo_root, "logger.py")
+    )
+    logger_module = importlib.util.module_from_spec(logger_spec)
+    sys.modules["xslim.logger"] = logger_module
+    logger_spec.loader.exec_module(logger_module)
+
+    defs_spec = importlib.util.spec_from_file_location(
+        "xslim.defs", os.path.join(repo_root, "defs.py")
+    )
+    defs_module = importlib.util.module_from_spec(defs_spec)
+    sys.modules["xslim.defs"] = defs_module
+    defs_spec.loader.exec_module(defs_module)
+
+    onnxslim_pass_module = _load_onnxslim_pass_module()
+    sys.modules["xslim.onnxslim_pass"] = onnxslim_pass_module
+
+    onnx_graph_helper_spec = importlib.util.spec_from_file_location(
+        "xslim.onnx_graph_helper",
+        os.path.join(repo_root, "onnx_graph_helper.py"),
+    )
+    onnx_graph_helper_module = importlib.util.module_from_spec(
+        onnx_graph_helper_spec
+    )
+    sys.modules["xslim.onnx_graph_helper"] = onnx_graph_helper_module
+    onnx_graph_helper_spec.loader.exec_module(onnx_graph_helper_module)
+    return onnx_graph_helper_module
+
+
 class TestOnnxSlimPass(unittest.TestCase):
     """Test compatibility behavior in the onnxslim wrapper."""
 
@@ -98,6 +134,36 @@ class TestOnnxSlimPass(unittest.TestCase):
             graph, opset_imports=[helper.make_opsetid("", 13)]
         )
         return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
+    def _build_conv_model_without_kernel_shape(op_type):
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 3, 8, 8])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4, 6, 6])
+
+        if op_type == "Conv":
+            weight_shape = [4, 3, 3, 3]
+        else:
+            weight_shape = [3, 4, 3, 3]
+
+        weight_count = (
+            weight_shape[0]
+            * weight_shape[1]
+            * weight_shape[2]
+            * weight_shape[3]
+        )
+        weight_values = [0.1] * int(weight_count)
+        weight = helper.make_tensor(
+            "w", TensorProto.FLOAT, weight_shape, weight_values
+        )
+        node = helper.make_node(
+            op_type, ["x", "w"], ["y"], name=f"{op_type.lower()}_node"
+        )
+        graph = helper.make_graph(
+            [node], f"{op_type.lower()}_graph", [x], [y], [weight]
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
 
     def test_optimize_onnx_model_restores_shape_info_before_slim(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
@@ -194,6 +260,54 @@ class TestOnnxSlimPass(unittest.TestCase):
             [node.op_type for node in optimized_model.graph.node],
             ["Pad", "MaxPool"],
         )
+
+    def test_format_onnx_model_fills_missing_conv_kernel_shape(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        model = self._build_conv_model_without_kernel_shape("Conv")
+
+        with mock.patch.object(
+            onnx_graph_helper_module,
+            "optimize_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ), mock.patch.object(
+            onnx_graph_helper_module,
+            "infer_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ):
+            formatted_model = onnx_graph_helper_module.format_onnx_model(
+                model, sim_en=False
+            )
+
+        conv_node = formatted_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in conv_node.attribute
+        }
+        self.assertEqual(list(attrs["kernel_shape"]), [3, 3])
+
+    def test_format_onnx_model_fills_missing_convtranspose_kernel_shape(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        model = self._build_conv_model_without_kernel_shape("ConvTranspose")
+
+        with mock.patch.object(
+            onnx_graph_helper_module,
+            "optimize_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ), mock.patch.object(
+            onnx_graph_helper_module,
+            "infer_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ):
+            formatted_model = onnx_graph_helper_module.format_onnx_model(
+                model, sim_en=False
+            )
+
+        conv_transpose_node = formatted_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in conv_transpose_node.attribute
+        }
+        self.assertEqual(list(attrs["kernel_shape"]), [3, 3])
 
 
 if __name__ == "__main__":

@@ -45,6 +45,63 @@ def ensure_default_onnx_opset(onnx_model: onnx.ModelProto, min_onnx_version: int
     return ai_onnx_version
 
 
+def _normalize_kernel_shape_attrs(
+    onnx_model: onnx.ModelProto,
+) -> onnx.ModelProto:
+    osg_graph = osg.import_onnx(onnx_model)
+    updated = False
+
+    for node in osg_graph.nodes:
+        if node.op not in {"Conv", "ConvTranspose"}:
+            continue
+        if "kernel_shape" in node.attrs:
+            continue
+        if len(node.inputs) < 2:
+            continue
+
+        weight_var = node.inputs[1]
+        weight_shape = None
+        if isinstance(weight_var, osg.Constant):
+            weight_values = getattr(weight_var, "values", None)
+            if weight_values is not None and hasattr(weight_values, "shape"):
+                weight_shape = list(weight_values.shape)
+
+        if weight_shape is None:
+            inferred_shape = getattr(weight_var, "shape", None)
+            if inferred_shape is not None:
+                weight_shape = list(inferred_shape)
+
+        if weight_shape is None or len(weight_shape) < 3:
+            logger.warning(
+                (
+                    "skip filling kernel_shape for %s because "
+                    "weight shape is unavailable"
+                ),
+                node.name or node.op,
+            )
+            continue
+
+        kernel_shape = weight_shape[2:]
+        if any(dim is None or isinstance(dim, str) for dim in kernel_shape):
+            logger.warning(
+                (
+                    "skip filling kernel_shape for %s because "
+                    "weight shape %s is not static"
+                ),
+                node.name or node.op,
+                weight_shape,
+            )
+            continue
+
+        node.attrs["kernel_shape"] = [int(dim) for dim in kernel_shape]
+        updated = True
+
+    if not updated:
+        return onnx_model
+
+    return osg.export_onnx(osg_graph)
+
+
 def format_onnx_model(
     onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: int = MIN_ONNX_OPSET_VERSION
 ) -> onnx.ModelProto:
@@ -72,6 +129,8 @@ def format_onnx_model(
         if node.name == "":
             node.name = f"{node.op_type}_{empty_name_count}"
             empty_name_count += 1
+
+    onnx_model = _normalize_kernel_shape_attrs(onnx_model)
 
     ai_onnx_version = ensure_default_onnx_opset(onnx_model, min_onnx_version)
     if ai_onnx_version < min_onnx_version:
