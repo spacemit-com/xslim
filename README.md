@@ -108,7 +108,10 @@ For a full list of changes, see the [Releases](https://github.com/spacemit-com/x
 | Version | Highlights |
 |---|---|
 | 2.0.12 | Current development version |
-| [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | Latest release |
+| [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | Latest release; fix Pad/missing-input handling, add Or/Einsum/Selu support, normalize Conv/ConvTranspose kernel shapes, raise minimum Python to 3.9 |
+| [2.0.10](https://github.com/spacemit-com/xslim/releases/tag/2.0.10) | Align release metadata, improve CI/test coverage, normalize missing default ONNX opset before dynamic quantization, and refine shape inference handling |
+| [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | Add documentation, preserve tensor dtype metadata during FP16 conversion, and restore compatibility with onnxslim 0.1.87 |
+| [2.0.8](https://github.com/spacemit-com/xslim/releases/tag/2.0.8) | Improve packaging/CI, add torch executor operator coverage, add PyPI publish workflow, and centralize version metadata |
 | [2.0.7](https://github.com/spacemit-com/xslim/releases/tag/2.0.7) | Fix FP16 conversion bug on complex models |
 | [2.0.6](https://github.com/spacemit-com/xslim/releases/tag/2.0.6) | Fix metadata props deletion; default CLI behavior changed to model simplification (use `--dynq` for dynamic quantization) |
 

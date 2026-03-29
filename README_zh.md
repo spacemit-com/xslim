@@ -108,7 +108,10 @@ python -m xslim -i input.onnx -o output.onnx
 | 版本 | 主要更新 |
 |---|---|
 | 2.0.12 | 当前开发版本 |
-| [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | 最新发布版本 |
+| [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | 最新发布版本；修复 Pad / 缺失输入处理问题，新增 Or / Einsum / Selu 支持，补齐 Conv / ConvTranspose 的 kernel shape 规范化，并将最低 Python 版本提升到 3.9 |
+| [2.0.10](https://github.com/spacemit-com/xslim/releases/tag/2.0.10) | 对齐发布元数据，增强 CI / 测试覆盖，补齐动态量化前缺失的默认 ONNX opset，并改进 shape inference 处理 |
+| [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | 补充文档，保留 FP16 转换期间的 tensor dtype 元数据，并恢复与 onnxslim 0.1.87 的兼容性 |
+| [2.0.8](https://github.com/spacemit-com/xslim/releases/tag/2.0.8) | 完善打包 / CI，增加 torch executor 算子覆盖，新增 PyPI 发布工作流，并统一版本元数据来源 |
 | [2.0.7](https://github.com/spacemit-com/xslim/releases/tag/2.0.7) | 修复复杂模型转换 FP16 的 bug |
 | [2.0.6](https://github.com/spacemit-com/xslim/releases/tag/2.0.6) | 修复 metadata props 被删除的问题；默认 CLI 行为调整为模型结构简化（需显式使用 `--dynq` 进行动态量化） |
 
