@@ -2,9 +2,9 @@
 
 中文 | [English](README.md)
 
-[![版本](https://img.shields.io/badge/版本-2.0.10-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![版本](https://img.shields.io/badge/版本-2.0.11-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-%3E%3D3.6-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 
 **XSlim** 是 [SpacemiT](https://www.spacemit.com) 推出的离线（Post-Training）量化工具，集成了已经调整好的适配芯片的量化策略，使用 JSON 配置文件调用统一接口实现 ONNX 模型量化。
 
@@ -107,7 +107,7 @@ python -m xslim -i input.onnx -o output.onnx
 
 | 版本 | 主要更新 |
 |---|---|
-| 2.0.10 | 当前开发版本 |
+| 2.0.11 | 当前开发版本 |
 | [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | 最新发布版本 |
 | [2.0.7](https://github.com/spacemit-com/xslim/releases/tag/2.0.7) | 修复复杂模型转换 FP16 的 bug |
 | [2.0.6](https://github.com/spacemit-com/xslim/releases/tag/2.0.6) | 修复 metadata props 被删除的问题；默认 CLI 行为调整为模型结构简化（需显式使用 `--dynq` 进行动态量化） |

@@ -27,7 +27,7 @@ setup(
     long_description=readme(),
     long_description_content_type="text/markdown",
     install_requires=open("requirements.txt").readlines(),
-    python_requires=">=3.6",
+    python_requires=">=3.9",
     name="xslim",
     packages=find_packages(),
     classifiers=[
@@ -35,6 +35,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.9",
     ],
     license=license(),
     include_package_data=True,
