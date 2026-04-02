@@ -8,6 +8,8 @@ version: 0.1.0
 
 Use this skill to diagnose and improve accuracy after XSlim quantization. Focus on reusable tuning workflow, parameter selection, and report interpretation. Keep the main reasoning in this file and load reference files only when a task needs deeper detail.
 
+When the user asks to bootstrap work from an ONNX file, prefer the bundled script `scripts/bootstrap_xslim_project.py` instead of manually drafting the config and demo files. Use the script to inspect model inputs, choose a starter quantization profile, and scaffold a runnable demo project.
+
 ## Overview
 
 XSlim accuracy tuning usually follows the same sequence:
@@ -26,6 +28,8 @@ Treat this as a narrowing workflow. Start from global causes that affect the who
 Use this skill when working on any XSlim task involving:
 
 - accuracy drop after quantization
+- reading a user's ONNX file and generating a starter XSlim project
+- automatic generation of quantization configs or demo scaffolding
 - strategy selection between static INT8, dynamic quantization, and FP16
 - `precision_level` / `finetune_level` tuning
 - preprocessing mismatch checks
@@ -38,6 +42,21 @@ Do not use this skill for generic ONNX graph editing, packaging changes, or unre
 ## Core Workflow
 
 Follow this sequence unless the user already narrowed the problem to a later step.
+
+### 0. Bootstrap repetitive setup work with the bundled script
+
+If the user needs a starting project rather than a diagnosis only, run:
+
+`scripts/bootstrap_xslim_project.py`
+
+Use it to:
+
+- inspect the ONNX model inputs
+- infer a starter task profile (image-style vs token/npy-style)
+- generate a quantization config
+- scaffold `demo.py`, `demo.sh`, `README.md`, and calibration list placeholders
+
+Load `references/scripted-automation.md` when the task is about auto-generating configs, project scaffolding, or reducing repeated manual setup.
 
 ### 1. Confirm the quantization strategy
 
@@ -151,6 +170,7 @@ For implementation tasks, keep repository edits aligned with existing XSlim docs
 
 Load these files only when needed:
 
+- **`references/scripted-automation.md`** - how to use the bundled bootstrap script and what it generates
 - **`references/strategy-selection.md`** - strategy comparison and recommended model-to-strategy mapping
 - **`references/preprocessing-and-calibration.md`** - preprocessing checklist, calibration sample guidance, common mistakes
 - **`references/precision-and-finetune.md`** - `precision_level` / `finetune_level` tuning order and recommended combinations
