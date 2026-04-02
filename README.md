@@ -96,6 +96,7 @@ python -m xslim -i input.onnx -o output.onnx
 
 - [Configuration Reference](doc/configuration.md) – Full description of all JSON configuration options
 - [Examples](doc/examples.md) – Step-by-step guides for INT8, FP16, dynamic quantization, custom preprocessing, and more
+- [Accuracy Tuning Guide](doc/accuracy_tuning.md) – How to diagnose and improve quantization accuracy
 
 ## Samples
 

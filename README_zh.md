@@ -96,6 +96,7 @@ python -m xslim -i input.onnx -o output.onnx
 
 - [配置参考](doc/configuration_zh.md) — 所有 JSON 配置选项的完整说明
 - [使用示例](doc/examples_zh.md) — INT8、FP16、动态量化、自定义预处理等场景的分步指南
+- [精度调优指南](doc/accuracy_tuning_zh.md) — 如何诊断并提升量化后的模型精度
 
 ## 示例
 
