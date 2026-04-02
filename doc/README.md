@@ -8,6 +8,7 @@ Welcome to the XSlim documentation. This directory contains detailed guides for 
 
 - [Configuration Reference](configuration.md) – Full description of all JSON configuration fields
 - [Examples](examples.md) – Step-by-step examples for common quantization scenarios
+- [Accuracy Tuning Guide](accuracy_tuning.md) – How to tune quantization accuracy for static INT8, dynamic quantization, and FP16, including Graphwise Analysis interpretation
 
 ## Overview
 

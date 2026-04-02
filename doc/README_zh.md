@@ -8,6 +8,7 @@
 
 - [配置参考](configuration_zh.md) — 所有 JSON 配置字段的完整说明
 - [使用示例](examples_zh.md) — 常见量化场景的分步示例
+- [量化精度调优指南](accuracy_tuning_zh.md) — 静态量化、动态量化与 FP16 的精度调优方法，含 Graphwise Analysis 解读
 
 ## 概述
 
