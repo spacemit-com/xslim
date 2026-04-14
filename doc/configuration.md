@@ -48,7 +48,7 @@ Controls how calibration data is loaded and how quantization ranges are computed
 | `calibration_step` | `int` | `500` | 10–1000 | Maximum number of calibration steps (dataloader iterations/batches); effective sample count ≈ `calibration_step × batch_size` |
 | `calibration_device` | `string` | `cuda` | `cuda`, `cpu` | Inference device for calibration; auto-detected, falls back to `cpu` |
 | `calibration_type` | `string` | `default` | `default`, `kl`, `minmax`, `percentile`, `mse` | Observer algorithm for computing activation ranges |
-| `input_parametres` | `list` | **required** | — | Per-input settings, one entry per model input (see below) |
+| `input_parameters` | `list` | **required** | — | Per-input settings, one entry per model input (see below) |
 
 ### Calibration Type Details
 
@@ -62,7 +62,7 @@ Controls how calibration data is loaded and how quantization ranges are computed
 
 > **Tip:** Start with `default`. If accuracy is insufficient, try `percentile` or `minmax`.
 
-### `input_parametres` (per input)
+### `input_parameters` (per input)
 
 Each list entry corresponds to one model input **in the same order as the ONNX model's input list**.
 
@@ -96,7 +96,7 @@ data/calib/ILSVRC2012_val_00000994.JPEG
 data/calib/ILSVRC2012_val_00014467.JPEG
 ```
 
-For multi-input models, each `input_parametres` entry has its own list file. Files at the same line number across all lists form one calibration batch — the lists must therefore have equal length and consistent ordering.
+For multi-input models, each `input_parameters` entry has its own list file. Files at the same line number across all lists form one calibration batch — the lists must therefore have equal length and consistent ordering.
 
 ### Custom Preprocessing
 
@@ -116,7 +116,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
     """
     Args:
         path_list: List of file paths for one calibration batch.
-        input_parametr: The corresponding entry from calibration_parameters.input_parametres.
+        input_parametr: The corresponding entry from calibration_parameters.input_parameters.
 
     Returns:
         A batched torch.Tensor of shape [batch, C, H, W].
@@ -241,7 +241,7 @@ Operators matching any entry in `ignore_op_types` (by ONNX op type) or `ignore_o
         "calibration_step": 200,
         "calibration_device": "cuda",
         "calibration_type": "default",
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],

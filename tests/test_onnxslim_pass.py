@@ -165,7 +165,53 @@ class TestOnnxSlimPass(unittest.TestCase):
             graph, opset_imports=[helper.make_opsetid("", 13)]
         )
 
-    def test_optimize_onnx_model_restores_shape_info_before_slim(self):
+    @staticmethod
+    def _build_model_with_duplicate_node_names():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4])
+        z = helper.make_tensor_value_info("z", TensorProto.FLOAT, [1, 4])
+        y0 = helper.make_tensor_value_info("y0", TensorProto.FLOAT, [2, 2])
+        y1 = helper.make_tensor_value_info("y1", TensorProto.FLOAT, [2, 2])
+        shape = helper.make_tensor("shape", TensorProto.INT64, [2], [2, 2])
+        nodes = [
+            helper.make_node(
+                "Reshape", ["x", "shape"], ["y0"], name="Reshape_49"
+            ),
+            helper.make_node(
+                "Reshape", ["z", "shape"], ["y1"], name="Reshape_49"
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes, "duplicate_node_names_graph", [x, z], [y0, y1], [shape]
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+
+    @staticmethod
+    def _build_conv_model_with_bad_spatial_attrs():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 3, 8])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4, 6])
+        weight = helper.make_tensor(
+            "w", TensorProto.FLOAT, [4, 3, 3], [0.1] * (4 * 3 * 3)
+        )
+        node = helper.make_node(
+            "Conv",
+            ["x", "w"],
+            ["y"],
+            name="conv_bad_attrs",
+            kernel_shape=[3],
+            strides=[1, 1],
+            dilations=[1, 1],
+            pads=[0, 0, 0, 0],
+        )
+        graph = helper.make_graph(
+            [node], "conv_bad_attrs_graph", [x], [y], [weight]
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+
+    def test_infer_onnx_model_restores_shape_info_for_float16_model(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_add_model()
         model = convert_float_to_float16.convert_float_to_float16(
@@ -174,30 +220,31 @@ class TestOnnxSlimPass(unittest.TestCase):
         model.graph.ClearField("value_info")
         self.assertEqual(len(model.graph.value_info), 0)
 
-        captured = {}
+        optimized_model = onnxslim_pass_module.infer_onnx_model(model)
 
-        def _capture_and_return(model_arg):
-            captured["model"] = model_arg
-            return model_arg
-
-        with mock.patch.object(
-            onnxslim_pass_module.onnxslim,
-            "slim",
-            side_effect=_capture_and_return,
-        ):
-            optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
-            optimized_model = onnxslim_pass_module.infer_onnx_model(
-                optimized_model
-            )
-
-        self.assertIs(optimized_model, captured["model"])
-        self.assertGreater(len(captured["model"].graph.value_info), 0)
+        self.assertGreater(len(optimized_model.graph.value_info), 0)
         self.assertIn(
             TensorProto.FLOAT16,
             {
                 value_info.type.tensor_type.elem_type
-                for value_info in captured["model"].graph.value_info
+                for value_info in optimized_model.graph.value_info
             },
+        )
+
+    def test_optimize_onnx_model_skips_fusion_gemm(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_add_model()
+
+        with mock.patch.object(
+            onnxslim_pass_module.onnxslim,
+            "slim",
+            return_value=model,
+        ) as slim_mock:
+            optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+
+        self.assertIs(optimized_model, model)
+        slim_mock.assert_called_once_with(
+            model, skip_fusion_patterns=["FusionGemm"]
         )
 
     def test_optimize_onnx_model_fuses_pad_average_pool(self):
@@ -308,6 +355,57 @@ class TestOnnxSlimPass(unittest.TestCase):
             for attr in conv_transpose_node.attribute
         }
         self.assertEqual(list(attrs["kernel_shape"]), [3, 3])
+
+    def test_format_onnx_model_renames_duplicated_node_names(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        model = self._build_model_with_duplicate_node_names()
+
+        with mock.patch.object(
+            onnx_graph_helper_module,
+            "optimize_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ), mock.patch.object(
+            onnx_graph_helper_module,
+            "infer_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ):
+            formatted_model = onnx_graph_helper_module.format_onnx_model(
+                model, sim_en=False
+            )
+
+        node_names = [node.name for node in formatted_model.graph.node]
+        onnx.checker.check_model(formatted_model)
+        self.assertEqual(node_names[0], "Reshape_49")
+        self.assertEqual(len(node_names), len(set(node_names)))
+        self.assertRegex(node_names[1], r"^Reshape_49_\d+$")
+
+    def test_format_onnx_model_normalizes_conv_spatial_attrs(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        model = self._build_conv_model_with_bad_spatial_attrs()
+
+        with mock.patch.object(
+            onnx_graph_helper_module,
+            "optimize_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ), mock.patch.object(
+            onnx_graph_helper_module,
+            "infer_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ):
+            formatted_model = onnx_graph_helper_module.format_onnx_model(
+                model, sim_en=False
+            )
+
+        conv_node = formatted_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in conv_node.attribute
+        }
+        onnx.checker.check_model(formatted_model)
+        self.assertEqual(list(attrs["kernel_shape"]), [3])
+        self.assertEqual(list(attrs["strides"]), [1])
+        self.assertEqual(list(attrs["dilations"]), [1])
+        self.assertEqual(list(attrs["pads"]), [0, 0])
 
 
 if __name__ == "__main__":

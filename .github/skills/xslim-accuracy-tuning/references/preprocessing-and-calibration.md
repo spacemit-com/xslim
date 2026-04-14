@@ -80,7 +80,7 @@ Remember: effective sample count is approximately `calibration_step × batch_siz
 XSlim uses the key:
 
 ```json
-"input_parametres"
+"input_parameters"
 ```
 
 Keep that spelling when writing or editing examples.

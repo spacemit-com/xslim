@@ -135,8 +135,9 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 import torch
-import xslim
 from tqdm import tqdm
+
+import xslim
 from xslim import xslim_info
 
 parser = argparse.ArgumentParser()
@@ -270,7 +271,7 @@ if __name__ == "__main__":
                 "calibration_step": 500,
                 "calibration_device": "cuda",
                 "calibration_type": "default",
-                "input_parametres": [
+                "input_parameters": [
                     {
                         "input_shape": input_shape,
                         "file_type": "img",

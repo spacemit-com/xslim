@@ -386,7 +386,7 @@ YOLO 模型通常还有一个额外的专项问题需要检查：很多检测头
     "calibration_parameters": {
         "calibration_step": 500,
         "calibration_type": "percentile",
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],

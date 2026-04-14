@@ -386,7 +386,7 @@ The following configuration combines multiple methods for a CNN model with high 
     "calibration_parameters": {
         "calibration_step": 500,
         "calibration_type": "percentile",
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],

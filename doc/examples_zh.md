@@ -21,7 +21,7 @@
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],
@@ -65,7 +65,7 @@ xslim.quantize_onnx_model("resnet18.json")
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],
@@ -107,7 +107,7 @@ xslim.quantize_onnx_model("resnet18.json")
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "file_type": "npy",
                 "data_list_path": "quant_dataset/unique_ids_raw_output.txt"
@@ -134,7 +134,7 @@ xslim.quantize_onnx_model("resnet18.json")
 ```
 
 **要点：**
-- 每个 `input_parametres` 条目按 ONNX 模型输入顺序对应一个模型输入。
+- 每个 `input_parameters` 条目按 ONNX 模型输入顺序对应一个模型输入。
 - `file_type: "npy"` 从 `.npy` 文件加载校准数据。
 - `precision_level: 2` 保留更多层的高精度，推荐用于 Transformer 模型。
 - `finetune_level: 2` 启用逐块量化参数校准。
@@ -209,7 +209,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
     """
     Args:
         path_list: 一个校准 batch 的文件路径列表。
-        input_parametr: calibration_parameters.input_parametres 中对应的条目。
+        input_parametr: calibration_parameters.input_parameters 中对应的条目。
     Returns:
         形状为 [batch, C, H, W] 的批量 torch.Tensor。
     """
@@ -238,7 +238,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],
@@ -253,7 +253,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
 
 **要点：**
 - `preprocess_file` 遵循 `"path/to/script.py:function_name"` 格式。
-- 函数接收文件路径列表和完整的 `input_parametres` 条目（dict 类型）。
+- 函数接收文件路径列表和完整的 `input_parameters` 条目（dict 类型）。
 - 函数必须返回形状为 `[batch, C, H, W]` 的批量 `torch.Tensor`。
 - 对于多输入模型，若各输入的预处理逻辑相近，可直接复用同一函数。
 
@@ -277,7 +277,7 @@ config = {
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [{
+        "input_parameters": [{
             "mean_value": [103.94, 116.78, 123.68],
             "std_value": [57.0, 57.0, 57.0],
             "color_format": "bgr",

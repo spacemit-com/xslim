@@ -11,6 +11,7 @@ import numpy as np
 import onnx
 import onnxslim
 import torch
+
 from xslim.logger import logger
 
 from . import CalibrationCollect, XSlimDataset
@@ -185,15 +186,15 @@ def quantize_onnx_model(
 
         ppq_ir = dispatch_graph(graph=ppq_ir, dispatcher="conservative")
 
-        config_setting.calibration_parameters.check_input_parametres(ppq_ir)
-        input_parametres = config_setting.calibration_parameters.input_parametres
+        config_setting.calibration_parameters.check_input_parameters(ppq_ir)
+        input_parameters = config_setting.calibration_parameters.input_parameters
 
         data_set = XSlimDataset(config_setting.calibration_parameters)
         calib_dataloader = torch.utils.data.DataLoader(data_set, batch_size=data_set.auto_batch_size)
         quantizer = XSlimQuantizer(ppq_ir)
         executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
 
-        collate_fn = CalibrationCollect(input_parametres, calibration_device)
+        collate_fn = CalibrationCollect(input_parameters, calibration_device)
 
         single_graph_input_name = None
         dummy_input = None

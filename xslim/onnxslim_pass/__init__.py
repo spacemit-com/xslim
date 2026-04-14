@@ -3,11 +3,12 @@ import onnxslim
 
 from xslim.logger import logger
 
+from .batchnorm import *
 from .dynamic_q_matmul import *
 from .gelu import *
 from .layernorm import *
 from .padpool import *
-from .batchnorm import *
+
 # from .swish import *
 
 
@@ -24,5 +25,5 @@ def infer_onnx_model(onnx_model):
 
 
 def optimize_onnx_model(onnx_model):
-    onnx_model = onnxslim.slim(onnx_model)
+    onnx_model = onnxslim.slim(onnx_model, skip_fusion_patterns=["FusionGemm"])
     return onnx_model

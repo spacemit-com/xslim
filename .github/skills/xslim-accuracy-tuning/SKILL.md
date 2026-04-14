@@ -80,7 +80,7 @@ Treat preprocessing mismatch as the first likely root cause when the accuracy dr
 - input dtype
 - preprocessing preset or custom preprocessing function
 
-Load `references/preprocessing-and-calibration.md` when the task needs concrete checks or examples for `input_parametres`.
+Load `references/preprocessing-and-calibration.md` when the task needs concrete checks or examples for `input_parameters`.
 
 ### 3. Validate calibration data quantity and quality
 
@@ -164,7 +164,7 @@ When using this skill in a user-facing task:
 4. Reference concrete XSlim parameters by name.
 5. Mention when deeper detail comes from a reference file.
 
-For implementation tasks, keep repository edits aligned with existing XSlim docs and config naming, including `input_parametres`.
+For implementation tasks, keep repository edits aligned with existing XSlim docs and config naming, including `input_parameters`.
 
 ## Additional Resources
 
