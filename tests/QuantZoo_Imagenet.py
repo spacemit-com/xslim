@@ -141,10 +141,11 @@ import numpy as np
 import torch
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
-import xslim
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Subset
 from tqdm import tqdm
+
+import xslim
 from xslim.calibration_helper import ImagenetPreprocess, PTImagenetPreprocess
 from xslim.logger import logger
 from xslim.ppq_decorator import BaseGraph, TorchExecutor, load_onnx_graph
@@ -397,7 +398,7 @@ if __name__ == "__main__":
                 "calibration_step": 500,
                 "calibration_device": "cuda",
                 "calibration_type": "default",
-                "input_parametres": [
+                "input_parameters": [
                     {
                         "input_name": "input_0",
                         "input_shape": [1, 3, 224, 224],
@@ -460,12 +461,12 @@ if __name__ == "__main__":
         demo_json["model_parameters"]["working_dir"] = output_dir
         demo_json["calibration_parameters"]["calibration_type"] = calibration_type
         demo_json["calibration_parameters"]["calibration_device"] = collect_device
-        demo_json["calibration_parameters"]["input_parametres"][0]["input_shape"] = input_shape
-        demo_json["calibration_parameters"]["input_parametres"][0]["mean_value"] = mean_value
-        demo_json["calibration_parameters"]["input_parametres"][0]["std_value"] = std_value
-        demo_json["calibration_parameters"]["input_parametres"][0]["color_format"] = color_format
-        demo_json["calibration_parameters"]["input_parametres"][0]["input_name"] = list(float_graph.inputs.keys())[0]
-        demo_json["calibration_parameters"]["input_parametres"][0]["preprocess_file"] = preprocess_file
+        demo_json["calibration_parameters"]["input_parameters"][0]["input_shape"] = input_shape
+        demo_json["calibration_parameters"]["input_parameters"][0]["mean_value"] = mean_value
+        demo_json["calibration_parameters"]["input_parameters"][0]["std_value"] = std_value
+        demo_json["calibration_parameters"]["input_parameters"][0]["color_format"] = color_format
+        demo_json["calibration_parameters"]["input_parameters"][0]["input_name"] = list(float_graph.inputs.keys())[0]
+        demo_json["calibration_parameters"]["input_parameters"][0]["preprocess_file"] = preprocess_file
 
         precision_level = config.get("precision_level", None)
         if isinstance(precision_level, int):

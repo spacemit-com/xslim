@@ -10,7 +10,6 @@ import stat
 from pathlib import Path
 from typing import Dict, List
 
-
 DTYPE_FALLBACK = {
     1: "float32",
     2: "uint8",
@@ -168,7 +167,7 @@ def build_config(model_path: Path, project_dir: Path, mode: str, inputs: List[Di
         "calibration_step": 200 if any(is_image_like(item) for item in inputs) else 100,
         "calibration_device": "cuda",
         "calibration_type": "default",
-        "input_parametres": [build_input_parameter(project_dir, input_info) for input_info in inputs],
+        "input_parameters": [build_input_parameter(project_dir, input_info) for input_info in inputs],
     }
     return config
 

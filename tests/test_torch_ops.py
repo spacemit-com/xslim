@@ -8,6 +8,7 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from xslim.optimizer.fusion import FlattenGemmFusionPass
 from xslim.ppq_decorator.ppq.core import DataType, TargetPlatform
 from xslim.ppq_decorator.ppq.IR import BaseGraph, Operation, Variable
 from xslim.ppq_decorator.ppq.IR.base.opdef import Opset
@@ -424,6 +425,87 @@ class TestTorchExecutorGraph(unittest.TestCase):
 
         expected = torch.relu(x) + torch.ones(1, 3)
         torch.testing.assert_close(results[0], expected)
+
+
+class TestFusionPasses(unittest.TestCase):
+    def _build_flatten_gemm_graph(self):
+        graph = BaseGraph(name="flatten_gemm_graph")
+
+        input_var = Variable(
+            name="input",
+            shape=[1, 3, 8],
+            dtype=DataType.FP32,
+        )
+        flatten_out = Variable(
+            name="flatten_out",
+            shape=[1, 24],
+            dtype=DataType.FP32,
+        )
+        weight_var = Variable(
+            name="weight",
+            value=torch.randn(4, 24),
+            is_parameter=True,
+            shape=[4, 24],
+            dtype=DataType.FP32,
+        )
+        gemm_out = Variable(
+            name="gemm_out",
+            shape=[1, 4],
+            dtype=DataType.FP32,
+        )
+
+        flatten_op = Operation(
+            name="flatten",
+            op_type="Flatten",
+            attributes={"axis": 1},
+            platform=TargetPlatform.UNSPECIFIED,
+        )
+        gemm_op = Operation(
+            name="gemm",
+            op_type="Gemm",
+            attributes={"alpha": 1, "transA": 0, "transB": 1},
+            platform=TargetPlatform.UNSPECIFIED,
+        )
+
+        input_var._dest_ops = [flatten_op]
+        flatten_op._input_vars = [input_var]
+        flatten_op._output_vars = [flatten_out]
+        flatten_out._source_op = flatten_op
+        flatten_out._dest_ops = [gemm_op]
+
+        weight_var._dest_ops = [gemm_op]
+        gemm_op._input_vars = [flatten_out, weight_var]
+        gemm_op._output_vars = [gemm_out]
+        gemm_out._source_op = gemm_op
+
+        graph._variables[input_var.name] = input_var
+        graph._variables[flatten_out.name] = flatten_out
+        graph._variables[weight_var.name] = weight_var
+        graph._variables[gemm_out.name] = gemm_out
+
+        graph._operations[flatten_op.name] = flatten_op
+        graph._operations[gemm_op.name] = gemm_op
+
+        graph._graph_inputs[input_var.name] = input_var
+        graph._graph_outputs[gemm_out.name] = gemm_out
+        return graph, flatten_op, gemm_op
+
+    def test_flatten_gemm_fusion_uses_spatial_rank_for_conv_attrs(self):
+        graph, flatten_op, gemm_op = self._build_flatten_gemm_graph()
+        input_var = graph.variables["input"]
+
+        FlattenGemmFusionPass().optimize(
+            graph=graph,
+            dataloader=[],
+            executor=None,
+        )
+
+        self.assertEqual(gemm_op.type, "Conv")
+        self.assertEqual(gemm_op.attributes["kernel_shape"], [8])
+        self.assertEqual(gemm_op.attributes["strides"], [1])
+        self.assertEqual(gemm_op.attributes["dilations"], [1])
+        self.assertEqual(gemm_op.inputs[0], input_var)
+        self.assertIn(gemm_op, input_var.dest_ops)
 
 
 class TestGridSampleOp(unittest.TestCase):

@@ -109,7 +109,7 @@ Use this when many layers show moderate error and no single hotspot dominates.
   "calibration_parameters": {
     "calibration_step": 500,
     "calibration_type": "percentile",
-    "input_parametres": [
+    "input_parameters": [
       {
         "mean_value": [103.94, 116.78, 123.68],
         "std_value": [57.0, 57.0, 57.0],

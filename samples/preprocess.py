@@ -1,7 +1,8 @@
-from typing import Any, Union, Dict, Sequence
-import torch
+from typing import Any, Dict, Sequence, Union
+
 import cv2
 import numpy as np
+import torch
 
 
 def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Tensor:
@@ -10,7 +11,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
 
     Args:
         path_list (Sequence[str]): 一个校准batch的文件列表
-        input_parametr (dict): 等同于配置中的calibration_parameters.input_parametres[idx]
+        input_parametr (dict): 等同于配置中的calibration_parameters.input_parameters[idx]
 
     Returns:
         torch.Tensor: 一个batch的校准数据

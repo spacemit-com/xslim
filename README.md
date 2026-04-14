@@ -58,7 +58,7 @@ config = {
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [{
+        "input_parameters": [{
             "mean_value": [123.675, 116.28, 103.53],
             "std_value": [58.395, 57.12, 57.375],
             "color_format": "rgb",

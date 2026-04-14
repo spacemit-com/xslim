@@ -21,7 +21,7 @@ The simplest way to quantize an image classification model to INT8.
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],
@@ -65,7 +65,7 @@ Use `custom_setting` to apply a different precision level to a specific subgraph
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],
@@ -107,7 +107,7 @@ For models with multiple non-image inputs (e.g., NLP models), set `file_type` to
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "file_type": "npy",
                 "data_list_path": "quant_dataset/unique_ids_raw_output.txt"
@@ -134,7 +134,7 @@ For models with multiple non-image inputs (e.g., NLP models), set `file_type` to
 ```
 
 **Key points:**
-- Each `input_parametres` entry corresponds to one model input in ONNX order.
+- Each `input_parameters` entry corresponds to one model input in ONNX order.
 - `file_type: "npy"` loads calibration data from `.npy` files.
 - `precision_level: 2` keeps more layers at higher precision — recommended for Transformer models.
 - `finetune_level: 2` enables block-wise calibration parameter tuning.
@@ -209,7 +209,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
     """
     Args:
         path_list: List of file paths for one calibration batch.
-        input_parametr: The corresponding entry from calibration_parameters.input_parametres.
+        input_parametr: The corresponding entry from calibration_parameters.input_parameters.
     Returns:
         A batched torch.Tensor of shape [batch, C, H, W].
     """
@@ -238,7 +238,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [103.94, 116.78, 123.68],
                 "std_value": [57.0, 57.0, 57.0],
@@ -253,7 +253,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
 
 **Key points:**
 - `preprocess_file` follows the format `"path/to/script.py:function_name"`.
-- The function receives a list of file paths and the full `input_parametres` entry as a dict.
+- The function receives a list of file paths and the full `input_parameters` entry as a dict.
 - It must return a batched `torch.Tensor` of shape `[batch, C, H, W]`.
 - For multi-input models with similar preprocessing, the same function can be reused across entries.
 
@@ -277,7 +277,7 @@ config = {
         "working_dir": "./output"
     },
     "calibration_parameters": {
-        "input_parametres": [{
+        "input_parameters": [{
             "mean_value": [103.94, 116.78, 123.68],
             "std_value": [57.0, 57.0, 57.0],
             "color_format": "bgr",

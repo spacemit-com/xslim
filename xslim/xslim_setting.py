@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Dict, Literal, Pattern, Sequence, Union
 
 import onnx
+
 from xslim.logger import logger
 
 from .defs import XQUANT_CONFIG, AutoFinetuneLevel, PrecisionLevel
@@ -22,7 +23,8 @@ class SettingSerialize:
             if key in self.__dict__:
                 if "builtin" in self.__dict__[key].__class__.__module__:
                     if isinstance(value, list) and hasattr(self, "from_list"):
-                        self.__dict__[key] = getattr(self, "from_list")(key, value, qsetting)
+                        self.__dict__[key] = getattr(
+                            self, "from_list")(key, value, qsetting)
                     else:
                         self.__dict__[key] = copy.deepcopy(value)
                 elif isinstance(self.__dict__[key], Enum):
@@ -57,15 +59,18 @@ class ModelParameterSetting(SettingSerialize):
                 self.working_dir = os.path.dirname(self.onnx_model)
             else:
                 self.working_dir = os.path.join(os.curdir, "temp")
-            logger.info("Not set working_dir, deatults to {}.".format(self.working_dir))
+            logger.info(
+                "Not set working_dir, deatults to {}.".format(self.working_dir))
 
         if self.output_prefix is None:
             if isinstance(self.onnx_model, str) and os.path.exists(self.onnx_model):
-                model_name = os.path.splitext(os.path.basename(self.onnx_model))[0]
+                model_name = os.path.splitext(
+                    os.path.basename(self.onnx_model))[0]
                 self.output_prefix = "{}.q".format(model_name)
             else:
                 self.output_prefix = "xslim.q"
-            logger.info("Not set output_prefix, deatults to {}.".format(self.output_prefix))
+            logger.info("Not set output_prefix, deatults to {}.".format(
+                self.output_prefix))
 
 
 class InputParameterSetting(SettingSerialize):
@@ -82,22 +87,27 @@ class InputParameterSetting(SettingSerialize):
 
     def check(self, qsetting):
         if self.preprocess_file is not None and not isinstance(self.preprocess_file, str):
-            raise TypeError("preprocess_file type error, {} .vs str".format(self.preprocess_file))
+            raise TypeError(
+                "preprocess_file type error, {} .vs str".format(self.preprocess_file))
 
         if self.data_list_path is not None and not isinstance(self.data_list_path, str):
-            raise TypeError("data_list_path type error, {} .vs str".format(self.data_list_path))
+            raise TypeError(
+                "data_list_path type error, {} .vs str".format(self.data_list_path))
 
         if isinstance(self.data_list_path, str) and not os.path.exists(self.data_list_path):
             raise FileExistsError(self.data_list_path)
 
         if self.mean_value is not None and not isinstance(self.mean_value, list):
-            raise TypeError("mean_value type error, {} .vs str".format(self.mean_value))
+            raise TypeError(
+                "mean_value type error, {} .vs str".format(self.mean_value))
 
         if self.std_value is not None and not isinstance(self.std_value, list):
-            raise TypeError("std_value type error, {} .vs str".format(self.std_value))
+            raise TypeError(
+                "std_value type error, {} .vs str".format(self.std_value))
 
         if self.file_type not in {"img", "npy", "raw"}:
-            raise NotImplementedError("file_type {} not implemented yet.".format(self.file_type))
+            raise NotImplementedError(
+                "file_type {} not implemented yet.".format(self.file_type))
 
 
 class CustomQuantizationParameterSetting(SettingSerialize):
@@ -144,48 +154,55 @@ class CalibrationParameterSetting(SettingSerialize):
         self.calibration_step: int = 500
         self.calibration_device: str = "cuda" if XQUANT_CONFIG.cuda_support else "cpu"
         self.calibration_type: str = "default"
-        self.input_parametres: Sequence[InputParameterSetting] = None
+        self.input_parameters: Sequence[InputParameterSetting] = None
 
     def from_list(self, value_name: str, obj_setting: Sequence, qsetting):
-        if value_name == "input_parametres":
-            input_parametres = []
+        if value_name == "input_parameters" or value_name == "input_parametres":
+            input_parameters = []
             for item_dict in obj_setting:
                 setting_item = InputParameterSetting()
                 setting_item.from_json(item_dict, qsetting)
-                input_parametres.append(setting_item)
-            return input_parametres
+                input_parameters.append(setting_item)
+            return input_parameters
         else:
             return obj_setting
 
     def check(self, qsetting):
         if self.calibration_device == "cuda" and not XQUANT_CONFIG.cuda_support:
-            logger.warning("Specifies that cuda is used but not detected. Turn to cpu.")
+            logger.warning(
+                "Specifies that cuda is used but not detected. Turn to cpu.")
             self.calibration_device = "cpu"
 
         if self.calibration_step > 1000 or self.calibration_step < 10:
-            logger.warning("Specifies that calibration_step is too large or too small, it should be in [10, 1000].")
+            logger.warning(
+                "Specifies that calibration_step is too large or too small, it should be in [10, 1000].")
 
-        assert len(self.input_parametres) > 0, "Calibration input_parametres setting not detected."
+        assert len(
+            self.input_parameters) > 0, "Calibration input_parameters setting not detected."
 
         if self.calibration_type not in {"default", "minmax", "percentile", "kl", "mse"}:
-            raise NotImplementedError("calibration_type {} not implemented yet.".format(self.calibration_type))
+            raise NotImplementedError(
+                "calibration_type {} not implemented yet.".format(self.calibration_type))
 
         if self.calibration_type != "default":
-            logger.info("set calibration_type {}.".format(self.calibration_type))
+            logger.info("set calibration_type {}.".format(
+                self.calibration_type))
 
-    def check_input_parametres(self, ppq_ir: BaseGraph):
-        assert len(self.input_parametres) == len(
+    def check_input_parameters(self, ppq_ir: BaseGraph):
+        assert len(self.input_parameters) == len(
             ppq_ir.inputs
-        ), "Calibration input_parametres size should <= model inputs size."
+        ), "Calibration input_parameters size should <= model inputs size."
 
         pb_input = ppq_ir._detail.get("pb_input", [])
-        for in_type, calib_parameter in zip(pb_input, self.input_parametres):
+        for in_type, calib_parameter in zip(pb_input, self.input_parameters):
             input_shape = [
-                i.dim_value if isinstance(i.dim_value, int) and i.dim_value > 0 else None
+                i.dim_value if isinstance(
+                    i.dim_value, int) and i.dim_value > 0 else None
                 for i in in_type.type.tensor_type.shape.dim
             ]
             if isinstance(in_type.type.tensor_type.elem_type, int):
-                input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[in_type.type.tensor_type.elem_type].name
+                input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[
+                    in_type.type.tensor_type.elem_type].name
             else:
                 input_dtype = None
             if input_dtype is not None:
@@ -193,7 +210,8 @@ class CalibrationParameterSetting(SettingSerialize):
             if calib_parameter.input_name is None:
                 calib_parameter.input_name = in_type.name
             if calib_parameter.input_shape is None and len(input_shape) > 0:
-                input_shape[0] = input_shape[0] if isinstance(input_shape[0], int) else 1
+                input_shape[0] = input_shape[0] if isinstance(
+                    input_shape[0], int) else 1
                 calib_parameter.input_shape = input_shape
 
 

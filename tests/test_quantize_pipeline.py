@@ -75,7 +75,7 @@ class TestQuantizePipeline(unittest.TestCase):
                 "skip_onnxsim": True,
             },
             "calibration_parameters": {
-                "input_parametres": [
+                "input_parameters": [
                     {
                         "input_name": "input",
                         "input_shape": list(cls.input_shape),

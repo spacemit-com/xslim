@@ -20,12 +20,12 @@ from .xslim_setting import CalibrationParameterSetting, InputParameterSetting
 class XSlimDataset(Dataset):
     def __init__(self, calibration_parameters: CalibrationParameterSetting):
         self.calibration_parameters = calibration_parameters
-        input_parametres = self.calibration_parameters.input_parametres
+        input_parameters = self.calibration_parameters.input_parameters
 
         self._data_list = []
         self._data_dict = OrderedDict()
         min_size = 100000
-        for input_item in input_parametres:
+        for input_item in input_parameters:
             data_list_path = input_item.data_list_path
             input_name = input_item.input_name
             if isinstance(data_list_path, str):
@@ -41,14 +41,14 @@ class XSlimDataset(Dataset):
             assert len(self._data_dict[input_name]), "Calibration input {} finds 0 items.".format(input_name)
 
             # 超过1个输入可以广播
-            if len(self._data_dict[input_name]) == 1 and len(input_parametres) > 1:
+            if len(self._data_dict[input_name]) == 1 and len(input_parameters) > 1:
                 pass
             else:
                 min_size = min(len(self._data_dict[input_name]), min_size)
 
         self.auto_batch_size = (
-            input_parametres[0].input_shape[0]
-            if len(input_parametres) == 1 and input_parametres[0].file_type == "img"
+            input_parameters[0].input_shape[0]
+            if len(input_parameters) == 1 and input_parameters[0].file_type == "img"
             else 1
         )
 
@@ -135,15 +135,15 @@ class ImagenetPreprocess:
 
 
 class CalibrationCollect:
-    def __init__(self, input_parametres: Sequence[InputParameterSetting], calibration_device: str = "cuda") -> None:
-        self.input_parametres = input_parametres
+    def __init__(self, input_parameters: Sequence[InputParameterSetting], calibration_device: str = "cuda") -> None:
+        self.input_parameters = input_parameters
         self.calibration_device = calibration_device
 
         self.input_info_dict: Dict[str, InputParameterSetting] = OrderedDict()
         self.imagenet_transforms: Dict[str, Callable] = OrderedDict()
         self.custom_transforms: Dict[str, Callable] = OrderedDict()
 
-        for input_info in self.input_parametres:
+        for input_info in self.input_parameters:
             self.input_info_dict[input_info.input_name] = input_info
 
             input_shape = input_info.input_shape

@@ -52,25 +52,70 @@ def _normalize_kernel_shape_attrs(
         osg_graph = osg.import_onnx(onnx_model)
         updated = False
 
+        def _get_tensor_shape(var: osg.Tensor):
+            shape = None
+            if isinstance(var, osg.Constant):
+                values = getattr(var, "values", None)
+                if values is not None and hasattr(values, "shape"):
+                    shape = list(values.shape)
+
+            if shape is None:
+                inferred_shape = getattr(var, "shape", None)
+                if inferred_shape is not None:
+                    shape = list(inferred_shape)
+
+            return shape
+
+        def _to_int_list(values):
+            try:
+                return [int(value) for value in values]
+            except (TypeError, ValueError):
+                return None
+
+        def _normalize_attr_list(
+            node: osg.Node,
+            attr_name: str,
+            expected_len: int,
+            default_values: List[int],
+            min_value: int,
+        ) -> bool:
+            current_values = node.attrs.get(attr_name)
+            if current_values is None:
+                return False
+
+            normalized_values = _to_int_list(current_values)
+            if (
+                normalized_values is None
+                or len(normalized_values) != expected_len
+                or any(value < min_value for value in normalized_values)
+            ):
+                node.attrs[attr_name] = default_values
+                logger.warning(
+                    (
+                        f"Normalizing {node.op} node {node.name or node.op} "
+                        f"attr {attr_name} from {current_values} "
+                        f"to {default_values}."
+                    )
+                )
+                return True
+
+            if (
+                not isinstance(current_values, list)
+                or current_values != normalized_values
+            ):
+                node.attrs[attr_name] = normalized_values
+                return True
+
+            return False
+
         for node in osg_graph.nodes:
             if node.op not in {"Conv", "ConvTranspose"}:
-                continue
-            if "kernel_shape" in node.attrs:
                 continue
             if len(node.inputs) < 2:
                 continue
 
             weight_var = node.inputs[1]
-            weight_shape = None
-            if isinstance(weight_var, osg.Constant):
-                weight_values = getattr(weight_var, "values", None)
-                if weight_values is not None and hasattr(weight_values, "shape"):
-                    weight_shape = list(weight_values.shape)
-
-            if weight_shape is None:
-                inferred_shape = getattr(weight_var, "shape", None)
-                if inferred_shape is not None:
-                    weight_shape = list(inferred_shape)
+            weight_shape = _get_tensor_shape(weight_var)
 
             if weight_shape is None or len(weight_shape) < 3:
                 logger.warning(
@@ -97,6 +142,83 @@ def _normalize_kernel_shape_attrs(
             node.attrs["kernel_shape"] = [int(dim) for dim in kernel_shape]
             updated = True
 
+            spatial_rank = len(kernel_shape)
+            updated = _normalize_attr_list(
+                node,
+                "strides",
+                spatial_rank,
+                [1] * spatial_rank,
+                1,
+            ) or updated
+            updated = _normalize_attr_list(
+                node,
+                "dilations",
+                spatial_rank,
+                [1] * spatial_rank,
+                1,
+            ) or updated
+            updated = _normalize_attr_list(
+                node,
+                "pads",
+                spatial_rank * 2,
+                [0] * (spatial_rank * 2),
+                0,
+            ) or updated
+
+            group = node.attrs.get("group")
+            if group is not None:
+                try:
+                    normalized_group = int(str(group))
+                except (TypeError, ValueError):
+                    normalized_group = 1
+
+                if normalized_group < 1:
+                    normalized_group = 1
+
+                if group != normalized_group:
+                    node.attrs["group"] = normalized_group
+                    logger.warning(
+                        (
+                            f"Normalizing {node.op} node "
+                            f"{node.name or node.op} attr group "
+                            f"from {group} to {normalized_group}."
+                        )
+                    )
+                    updated = True
+
+            if node.op == "ConvTranspose":
+                updated = _normalize_attr_list(
+                    node,
+                    "output_padding",
+                    spatial_rank,
+                    [0] * spatial_rank,
+                    0,
+                ) or updated
+
+                output_shape = node.attrs.get("output_shape")
+                if output_shape is not None:
+                    normalized_output_shape = _to_int_list(output_shape)
+                    if (
+                        normalized_output_shape is None
+                        or len(normalized_output_shape) != spatial_rank
+                        or any(value < 1 for value in normalized_output_shape)
+                    ):
+                        del node.attrs["output_shape"]
+                        logger.warning(
+                            (
+                                "Dropping invalid ConvTranspose "
+                                f"output_shape {output_shape} from "
+                                f"node {node.name or node.op}."
+                            )
+                        )
+                        updated = True
+                    elif (
+                        not isinstance(output_shape, list)
+                        or output_shape != normalized_output_shape
+                    ):
+                        node.attrs["output_shape"] = normalized_output_shape
+                        updated = True
+
         if not updated:
             return onnx_model
 
@@ -108,6 +230,35 @@ def _normalize_kernel_shape_attrs(
             exc,
         )
         return onnx_model
+
+
+def _deduplicate_node_names(onnx_model: onnx.ModelProto) -> onnx.ModelProto:
+    used_names = set()
+    next_suffix = {}
+
+    for index, node in enumerate(onnx_model.graph.node):
+        base_name = node.name or f"{node.op_type}_{index}"
+        new_name = base_name
+
+        if new_name in used_names:
+            suffix = next_suffix.get(base_name, 1)
+            while f"{base_name}_{suffix}" in used_names:
+                suffix += 1
+            new_name = f"{base_name}_{suffix}"
+            next_suffix[base_name] = suffix + 1
+            logger.warning(
+                f"Renaming duplicated op name {base_name} to {new_name}."
+            )
+        else:
+            next_suffix.setdefault(base_name, 1)
+
+        if node.name != new_name:
+            node.name = new_name
+        used_names.add(new_name)
+
+    return onnx_model
+
+
 def format_onnx_model(
     onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: int = MIN_ONNX_OPSET_VERSION
 ) -> onnx.ModelProto:
@@ -130,12 +281,7 @@ def format_onnx_model(
         except:
             pass
 
-    empty_name_count = 0
-    for node in onnx_model.graph.node:
-        if node.name == "":
-            node.name = f"{node.op_type}_{empty_name_count}"
-            empty_name_count += 1
-
+    onnx_model = _deduplicate_node_names(onnx_model)
     onnx_model = _normalize_kernel_shape_attrs(onnx_model)
 
     ai_onnx_version = ensure_default_onnx_opset(onnx_model, min_onnx_version)
@@ -157,6 +303,7 @@ def format_onnx_model(
     except Exception as e:
         logger.warning("shape_inference error with {}, skiped".format(e))
 
+    onnx_model = _deduplicate_node_names(onnx_model)
     return onnx_model
 
 

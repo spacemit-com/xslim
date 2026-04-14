@@ -4,7 +4,7 @@
         "working_dir": "./temp"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "mean_value": [
                     123.675,

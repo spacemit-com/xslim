@@ -4,7 +4,7 @@
         "working_dir": "./temp"
     },
     "calibration_parameters": {
-        "input_parametres": [
+        "input_parameters": [
             {
                 "file_type": "npy",
                 "data_list_path": "quant_dataset/unique_ids_raw_output.txt"

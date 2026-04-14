@@ -58,11 +58,20 @@ class FlattenGemmFusionPass(QuantizationOptimizationPass):
             if not isinstance(flatten_op.inputs[0].shape, Sequence):
                 continue
 
-            weight_new_shape = [*w.shape, *flatten_op.inputs[0].shape[2:]]
+            spatial_shape = list(flatten_op.inputs[0].shape[2:])
+            if len(spatial_shape) == 0:
+                continue
+
+            weight_new_shape = [*w.shape, *spatial_shape]
             weight_new_shape[1] = -1
             w = w.reshape(weight_new_shape)
             gemm_op.inputs[1].value = w
-            conv_attributes = {"dilations": [1, 1], "kernel_shape": weight_new_shape[2:], "strides": [1, 1], "group": 1}
+            conv_attributes = {
+                "dilations": [1] * len(spatial_shape),
+                "kernel_shape": weight_new_shape[2:],
+                "strides": [1] * len(spatial_shape),
+                "group": 1,
+            }
             gemm_op.type = "Conv"
             gemm_op.attributes.clear()
             for k, v in conv_attributes.items():
