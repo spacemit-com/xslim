@@ -211,7 +211,7 @@ class TestOnnxSlimPass(unittest.TestCase):
             graph, opset_imports=[helper.make_opsetid("", 13)]
         )
 
-    def test_optimize_onnx_model_restores_shape_info_before_slim(self):
+    def test_infer_onnx_model_restores_shape_info_for_float16_model(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_add_model()
         model = convert_float_to_float16.convert_float_to_float16(
@@ -220,30 +220,31 @@ class TestOnnxSlimPass(unittest.TestCase):
         model.graph.ClearField("value_info")
         self.assertEqual(len(model.graph.value_info), 0)
 
-        captured = {}
+        optimized_model = onnxslim_pass_module.infer_onnx_model(model)
 
-        def _capture_and_return(model_arg):
-            captured["model"] = model_arg
-            return model_arg
-
-        with mock.patch.object(
-            onnxslim_pass_module.onnxslim,
-            "slim",
-            side_effect=_capture_and_return,
-        ):
-            optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
-            optimized_model = onnxslim_pass_module.infer_onnx_model(
-                optimized_model
-            )
-
-        self.assertIs(optimized_model, captured["model"])
-        self.assertGreater(len(captured["model"].graph.value_info), 0)
+        self.assertGreater(len(optimized_model.graph.value_info), 0)
         self.assertIn(
             TensorProto.FLOAT16,
             {
                 value_info.type.tensor_type.elem_type
-                for value_info in captured["model"].graph.value_info
+                for value_info in optimized_model.graph.value_info
             },
+        )
+
+    def test_optimize_onnx_model_skips_fusion_gemm(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_add_model()
+
+        with mock.patch.object(
+            onnxslim_pass_module.onnxslim,
+            "slim",
+            return_value=model,
+        ) as slim_mock:
+            optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+
+        self.assertIs(optimized_model, model)
+        slim_mock.assert_called_once_with(
+            model, skip_fusion_patterns=["FusionGemm"]
         )
 
     def test_optimize_onnx_model_fuses_pad_average_pool(self):
