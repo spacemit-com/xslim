@@ -3,20 +3,15 @@
 from typing import Callable, Dict, Iterable, List, Sequence, Set, Tuple, Union
 
 import torch
+
 from xslim.logger import logger
 
-from ..defs import BIAS_CORRECTION_INTERST_TYPE, PASSIVE_OPERATIONS, XQUANT_CONFIG
-from ..ppq_decorator import (
-    BaseGraph,
-    BaseGraphExecutor,
-    Operation,
-    QuantableOperation,
-    QuantizationOptimizationPass,
-    QuantizationStates,
-    SearchableGraph,
-    TargetPlatform,
-    Variable,
-)
+from ..defs import (BIAS_CORRECTION_INTERST_TYPE, PASSIVE_OPERATIONS,
+                    XQUANT_CONFIG)
+from ..ppq_decorator import (BaseGraph, BaseGraphExecutor, Operation,
+                             QuantableOperation, QuantizationOptimizationPass,
+                             QuantizationStates, SearchableGraph,
+                             TargetPlatform, Variable)
 
 
 class FlattenGemmFusionPass(QuantizationOptimizationPass):

@@ -1,7 +1,7 @@
 """Lightweight unit tests for torch executor operator execution."""
 
-import sys
 import os
+import sys
 import unittest
 
 import torch
@@ -10,10 +10,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from xslim.optimizer.fusion import FlattenGemmFusionPass
 from xslim.ppq_decorator.ppq.core import DataType, TargetPlatform
+from xslim.ppq_decorator.ppq.executor.op import (DEFAULT_BACKEND_TABLE,
+                                                 TorchBackendContext)
+from xslim.ppq_decorator.ppq.executor.torch import TorchExecutor
 from xslim.ppq_decorator.ppq.IR import BaseGraph, Operation, Variable
 from xslim.ppq_decorator.ppq.IR.base.opdef import Opset
-from xslim.ppq_decorator.ppq.executor.op import TorchBackendContext, DEFAULT_BACKEND_TABLE
-from xslim.ppq_decorator.ppq.executor.torch import TorchExecutor
 
 
 def make_op(name, op_type, attributes=None, num_inputs=1, num_outputs=1):
