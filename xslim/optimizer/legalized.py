@@ -247,7 +247,7 @@ class GraphLegalized:
                 (opset["domain"], opset["version"])
                 for opset in self._graph._detail["pb_opset_import"]
             }
-            for domain, version in sorted(added_custom_domains):
+            for domain, version in added_custom_domains:
                 if (domain, version) not in existing_imports:
                     self._graph._detail["pb_opset_import"].append(
                         {"domain": domain, "version": version}

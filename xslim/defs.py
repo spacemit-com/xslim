@@ -100,14 +100,9 @@ def is_ai_onnx_operator_supported(
     op_type: str, opset_version: int = MIN_ONNX_OPSET_VERSION
 ) -> bool:
     try:
-        normalized_opset_version = int(opset_version)
-    except (TypeError, ValueError):
-        normalized_opset_version = MIN_ONNX_OPSET_VERSION
-
-    try:
         onnx.defs.get_schema(
             op_type,
-            max_inclusive_version=normalized_opset_version,
+            max_inclusive_version=opset_version,
             domain="",
         )
         return True

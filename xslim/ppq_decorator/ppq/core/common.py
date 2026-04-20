@@ -7,7 +7,6 @@ import onnx
 # You can modify following codes for your own purpose.
 
 MAX_RECURSION_DEPTH = 5000
-sys.setrecursionlimit(MAX_RECURSION_DEPTH)
 
 # Observer 中，最小 scale 限制，所有小于该值的 scale 将被该值覆盖
 OBSERVER_MIN_SCALE = 1e-8
@@ -118,3 +117,5 @@ BIAS_CORRECTION_INTERST_TYPE = {'Conv', 'Gemm', 'ConvTranspose'}
 
 # 导出 qdq 节点时是否需要导出状态已经是 overlap 的节点
 EXPORT_OVERLAPPED_CONFIG = False
+
+sys.setrecursionlimit(MAX_RECURSION_DEPTH)
