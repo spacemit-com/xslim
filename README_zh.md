@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-[![版本](https://img.shields.io/badge/版本-2.0.12-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![版本](https://img.shields.io/badge/版本-2.0.13-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 
@@ -108,8 +108,9 @@ python -m xslim -i input.onnx -o output.onnx
 
 | 版本 | 主要更新 |
 |---|---|
-| 2.0.12 | 当前开发版本 |
-| [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | 最新发布版本；修复 Pad / 缺失输入处理问题，新增 Or / Einsum / Selu 支持，补齐 Conv / ConvTranspose 的 kernel shape 规范化，并将最低 Python 版本提升到 3.9 |
+| 2.0.13 | 当前开发版本 |
+| [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | 最新发布版本；补全 README 更新日志与发布元数据，新增精度调优文档及 README 链接，引入 xslim-accuracy-tuning GitHub skill，补充 YOLO 截断后处理指导，并统一 input parameters 命名 |
+| [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | 修复 Pad / 缺失输入处理问题，新增 Or / Einsum / Selu 支持，补齐 Conv / ConvTranspose 的 kernel shape 规范化，并将最低 Python 版本提升到 3.9 |
 | [2.0.10](https://github.com/spacemit-com/xslim/releases/tag/2.0.10) | 对齐发布元数据，增强 CI / 测试覆盖，补齐动态量化前缺失的默认 ONNX opset，并改进 shape inference 处理 |
 | [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | 补充文档，保留 FP16 转换期间的 tensor dtype 元数据，并恢复与 onnxslim 0.1.87 的兼容性 |
 | [2.0.8](https://github.com/spacemit-com/xslim/releases/tag/2.0.8) | 完善打包 / CI，增加 torch executor 算子覆盖，新增 PyPI 发布工作流，并统一版本元数据来源 |

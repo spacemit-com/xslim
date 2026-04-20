@@ -2,7 +2,7 @@
 
 [中文版](README_zh.md) | English
 
-[![Version](https://img.shields.io/badge/version-2.0.12-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![Version](https://img.shields.io/badge/version-2.0.13-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 
@@ -108,8 +108,9 @@ For a full list of changes, see the [Releases](https://github.com/spacemit-com/x
 
 | Version | Highlights |
 |---|---|
-| 2.0.12 | Current development version |
-| [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | Latest release; fix Pad/missing-input handling, add Or/Einsum/Selu support, normalize Conv/ConvTranspose kernel shapes, raise minimum Python to 3.9 |
+| 2.0.13 | Current development version |
+| [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | Latest release; complete README changelog/release metadata, add accuracy-tuning docs and README links, introduce the xslim-accuracy-tuning GitHub skill, add YOLO truncation guidance, and rename input parameters for consistency |
+| [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | Fix Pad/missing-input handling, add Or/Einsum/Selu support, normalize Conv/ConvTranspose kernel shapes, and raise minimum Python to 3.9 |
 | [2.0.10](https://github.com/spacemit-com/xslim/releases/tag/2.0.10) | Align release metadata, improve CI/test coverage, normalize missing default ONNX opset before dynamic quantization, and refine shape inference handling |
 | [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | Add documentation, preserve tensor dtype metadata during FP16 conversion, and restore compatibility with onnxslim 0.1.87 |
 | [2.0.8](https://github.com/spacemit-com/xslim/releases/tag/2.0.8) | Improve packaging/CI, add torch executor operator coverage, add PyPI publish workflow, and centralize version metadata |
