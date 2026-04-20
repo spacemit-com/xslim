@@ -1,10 +1,10 @@
-# PPQ 全局配置，你可以自由修改下列属性以达成特定目的。
-# PPQ System configuration
-# You can modify following codes for your own purpose.
-
 import sys
 
 import onnx
+
+# PPQ 全局配置，你可以自由修改下列属性以达成特定目的。
+# PPQ System configuration
+# You can modify following codes for your own purpose.
 
 MAX_RECURSION_DEPTH = 5000
 sys.setrecursionlimit(MAX_RECURSION_DEPTH)
