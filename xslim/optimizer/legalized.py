@@ -231,7 +231,7 @@ class GraphLegalized:
             self._graph.remove_variable(out_var)
 
     def format_ms_domain(self):
-        added_custom_domains = set()
+        custom_domain_opsets = set()
         for op in self._graph.operations.values():
             if op.type in {"Gelu"}:
                 target_domain = resolve_operator_domain(
@@ -241,13 +241,13 @@ class GraphLegalized:
                     op.attributes.pop("domain", None)
                     continue
                 op.attributes["domain"] = target_domain
-                added_custom_domains.add((target_domain, 1))
-        if added_custom_domains:
+                custom_domain_opsets.add((target_domain, 1))
+        if custom_domain_opsets:
             existing_imports = {
                 (opset["domain"], opset["version"])
                 for opset in self._graph._detail["pb_opset_import"]
             }
-            for domain, version in added_custom_domains:
+            for domain, version in custom_domain_opsets:
                 if (domain, version) not in existing_imports:
                     self._graph._detail["pb_opset_import"].append(
                         {"domain": domain, "version": version}

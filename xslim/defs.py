@@ -99,6 +99,7 @@ MIN_ONNX_OPSET_VERSION = 24
 def is_ai_onnx_operator_supported(
     op_type: str, opset_version: int = MIN_ONNX_OPSET_VERSION
 ) -> bool:
+    """Return whether ai.onnx defines the operator at or before the target opset."""
     try:
         onnx.defs.get_schema(
             op_type,
@@ -115,6 +116,7 @@ def resolve_operator_domain(
     opset_version: int = MIN_ONNX_OPSET_VERSION,
     fallback_domain: str = "com.microsoft",
 ) -> Optional[str]:
+    """Return None for standard ai.onnx operators, else the required custom domain."""
     if is_ai_onnx_operator_supported(op_type, opset_version):
         return None
     return fallback_domain

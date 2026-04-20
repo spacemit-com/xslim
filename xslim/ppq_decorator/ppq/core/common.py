@@ -80,6 +80,7 @@ OPTIM_ADVOPT_USING_SCEHDULER = True
 # ONNX 导出图的时候，opset的版本，这玩意改了可能就要起飞了
 ONNX_EXPORT_OPSET = 24
 # ONNX 导出图的时候，onnx version，这玩意改了可能就要起飞了
+# Keep IR version aligned with the minimum requirement for the exported default opset.
 ONNX_VERSION = onnx.helper.find_min_ir_version_for(
     [onnx.helper.make_opsetid("", ONNX_EXPORT_OPSET)]
 )
