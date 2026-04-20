@@ -4,6 +4,7 @@ from typing import Union
 import numpy as np
 import onnx
 import torch
+from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
 from onnx import helper, numpy_helper
 from ..core import (
     GRAPH_OPSET_ATTRIB,
@@ -43,15 +44,21 @@ class InterpExporter(OperationExporter):
 
 class OOSExporter(OperationExporter):
     def export(self, op: Operation, graph: BaseGraph, **kwargs) -> Operation:
-        # MMCV operation must have a domain attribute.
-        op.attributes["domain"] = "com.microsoft"
+        target_domain = resolve_operator_domain(op.type, MIN_ONNX_OPSET_VERSION)
+        if target_domain is None:
+            op.attributes.pop("domain", None)
+        else:
+            op.attributes["domain"] = target_domain
         return op
 
 
 class AttentionExporter(OperationExporter):
     def export(self, op: Operation, graph: BaseGraph, **kwargs) -> Operation:
-        # MMCV operation must have a domain attribute.
-        op.attributes["domain"] = "com.microsoft"
+        target_domain = resolve_operator_domain(op.type, MIN_ONNX_OPSET_VERSION)
+        if target_domain is None:
+            op.attributes.pop("domain", None)
+        else:
+            op.attributes["domain"] = target_domain
         return op
 
 

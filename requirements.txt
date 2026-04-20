@@ -5,7 +5,7 @@ torchvision
 tqdm
 pandas
 opencv-python
-onnx>=1.16.0,<1.17.0
+onnx>=1.21.0,<1.22.0
 tabulate
 onnxruntime>=1.24.0,<=1.24.3
 nvidia-pyindex

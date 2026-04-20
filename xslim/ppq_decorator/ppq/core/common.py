@@ -2,8 +2,11 @@
 # PPQ System configuration
 # You can modify following codes for your own purpose.
 
-MAX_RECURSION_DEPTH = 5000
 import sys
+
+import onnx
+
+MAX_RECURSION_DEPTH = 5000
 sys.setrecursionlimit(MAX_RECURSION_DEPTH)
 
 # Observer 中，最小 scale 限制，所有小于该值的 scale 将被该值覆盖
@@ -76,14 +79,16 @@ OPTIM_ADVOPT_RLOSS_MULTIPLIER = 1
 OPTIM_ADVOPT_USING_SCEHDULER = True
 
 # ONNX 导出图的时候，opset的版本，这玩意改了可能就要起飞了
-ONNX_EXPORT_OPSET = 11
+ONNX_EXPORT_OPSET = 24
 # ONNX 导出图的时候，onnx version，这玩意改了可能就要起飞了
-ONNX_VERSION = 6
+ONNX_VERSION = onnx.helper.find_min_ir_version_for(
+    [onnx.helper.make_opsetid("", ONNX_EXPORT_OPSET)]
+)
 
 ONNX_DOMAIN = 'ai.onnx'
 CAFFE_DOMAIN = 'ppq.caffe'
 DEFAULT_OPSET_DOMAIN  = 'ai.onnx'
-DEFAULT_OPSET_VERSION = 11
+DEFAULT_OPSET_VERSION = ONNX_EXPORT_OPSET
 STRICT_OPSET_CHECKING = False
 
 # LSTM 算子的权重缓存属性

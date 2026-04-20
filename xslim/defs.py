@@ -3,6 +3,9 @@
 import logging
 import os
 from enum import Enum
+from typing import Optional
+
+import onnx
 
 from .logger import (xslim_debug, xslim_error, xslim_info, xslim_trace,
                      xslim_warning)
@@ -90,7 +93,36 @@ OBSERVER_PERCENTILE = 0.9999
 
 OBSERVER_SIGMOID_MAX_VALUE = 10
 
-MIN_ONNX_OPSET_VERSION = 17
+MIN_ONNX_OPSET_VERSION = 24
+
+
+def is_ai_onnx_operator_supported(
+    op_type: str, opset_version: int = MIN_ONNX_OPSET_VERSION
+) -> bool:
+    try:
+        normalized_opset_version = int(opset_version)
+    except (TypeError, ValueError):
+        normalized_opset_version = MIN_ONNX_OPSET_VERSION
+
+    try:
+        onnx.defs.get_schema(
+            op_type,
+            max_inclusive_version=normalized_opset_version,
+            domain="",
+        )
+        return True
+    except onnx.defs.SchemaError:
+        return False
+
+
+def resolve_operator_domain(
+    op_type: str,
+    opset_version: int = MIN_ONNX_OPSET_VERSION,
+    fallback_domain: str = "com.microsoft",
+) -> Optional[str]:
+    if is_ai_onnx_operator_supported(op_type, opset_version):
+        return None
+    return fallback_domain
 
 GLOBAL_FUNCTIONS_MAPPING = "GLOBAL_FUNCTIONS_MAPPING"
 

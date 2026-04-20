@@ -5,7 +5,8 @@ from typing import Any, Callable, Dict, Iterable, List, Set, Tuple, Union
 import numpy as np
 import onnx
 import torch
-from xslim.defs import GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION
+from xslim.defs import (GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION,
+                        resolve_operator_domain)
 from xslim.logger import logger
 
 from ..ppq_decorator import (
@@ -230,13 +231,27 @@ class GraphLegalized:
             self._graph.remove_variable(out_var)
 
     def format_ms_domain(self):
-        has_ms_domain = False
+        added_custom_domains = set()
         for op in self._graph.operations.values():
             if op.type in {"Gelu"}:
-                op.attributes["domain"] = "com.microsoft"
-                has_ms_domain = True
-        if has_ms_domain:
-            self._graph._detail["pb_opset_import"].append({"domain": "com.microsoft", "version": 1})
+                target_domain = resolve_operator_domain(
+                    op.type, MIN_ONNX_OPSET_VERSION
+                )
+                if target_domain is None:
+                    op.attributes.pop("domain", None)
+                    continue
+                op.attributes["domain"] = target_domain
+                added_custom_domains.add((target_domain, 1))
+        if added_custom_domains:
+            existing_imports = {
+                (opset.get("domain", ""), opset.get("version"))
+                for opset in self._graph._detail["pb_opset_import"]
+            }
+            for domain, version in sorted(added_custom_domains):
+                if (domain, version) not in existing_imports:
+                    self._graph._detail["pb_opset_import"].append(
+                        {"domain": domain, "version": version}
+                    )
 
     def fuse_mul_add(self):
         search_engine = SearchableGraph(graph=self._graph)

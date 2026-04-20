@@ -3,6 +3,8 @@ import onnxslim.third_party.onnx_graphsurgeon as osg
 from onnxslim.core.pattern import Pattern, PatternMatcher
 from onnxslim.core.pattern.registry import register_fusion_pattern
 
+from xslim.defs import resolve_operator_domain
+
 
 class GeluPatternMatcher(PatternMatcher):
     def __init__(self, priority):
@@ -25,7 +27,7 @@ class GeluPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionGelu'."""
         return "FusionGelu"
 
-    def rewrite(self, opset=11):
+    def rewrite(self, opset=24):
         """Rewrite the computation graph pattern to fuse GELU operations."""
         input_variable = self.div_0.inputs[0]
         mul_node = self.mul_0
@@ -47,7 +49,7 @@ class GeluPatternMatcher(PatternMatcher):
                     "op": "Gelu",
                     "inputs": [input_variable],
                     "outputs": [output_variable],
-                    "domain": "com.microsoft",
+                    "domain": resolve_operator_domain("Gelu", opset),
                     "name": self.mul_1.name,
                 }
             }
