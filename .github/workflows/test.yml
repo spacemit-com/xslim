@@ -31,10 +31,9 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
-        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-        pip install onnx-graphsurgeon --no-deps
-        grep -vE 'nvidia-pyindex|onnx-graphsurgeon|^torch' requirements.txt | pip install -r /dev/stdin
-        pip install --no-deps -e .
+        pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        grep -vE '^torch' requirements.txt | pip install --upgrade --upgrade-strategy eager -r /dev/stdin --index-url https://pypi.org/simple
+        pip install --upgrade --no-deps -e .
     - name: Run unit and end-to-end tests
       env:
         XSLIM_TEST_MODEL_CACHE: .cache/test-models

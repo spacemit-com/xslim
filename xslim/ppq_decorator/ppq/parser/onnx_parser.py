@@ -1,7 +1,7 @@
 from typing import Any, Dict, Iterable, List, Union
 
 import onnx
-from onnx import helper, mapping, numpy_helper
+from onnx import helper, numpy_helper
 from xslim.defs import GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION
 
 from ..core import DEFAULT_OPSET_DOMAIN, GRAPH_OPSET_ATTRIB, NetworkFramework, is_file_exist
@@ -108,7 +108,7 @@ class OnnxParser(GraphBuilder):
                     value = numpy_helper.to_array(value).copy()
                 if op.type == "Cast":
                     # The attribute of 'Cast' node is data type (represented in int), need to convert to numpy data type
-                    value = mapping.TENSOR_TYPE_TO_NP_TYPE[value]
+                    value = helper.tensor_dtype_to_np_dtype(value)
                 op.attributes[key] = value
 
         graph_initializers = []

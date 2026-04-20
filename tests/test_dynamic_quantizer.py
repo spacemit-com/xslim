@@ -65,7 +65,7 @@ class TestDynamicQuantizer(unittest.TestCase):
 
         opset_versions = {opset.domain: opset.version for opset in quantized_model.opset_import}
         self.assertIn("", opset_versions)
-        self.assertGreaterEqual(opset_versions[""], 17)
+        self.assertGreaterEqual(opset_versions[""], 24)
         onnx.checker.check_model(quantized_model)
 
 

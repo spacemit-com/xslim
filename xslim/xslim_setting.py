@@ -201,8 +201,9 @@ class CalibrationParameterSetting(SettingSerialize):
                 for i in in_type.type.tensor_type.shape.dim
             ]
             if isinstance(in_type.type.tensor_type.elem_type, int):
-                input_dtype = onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[
-                    in_type.type.tensor_type.elem_type].name
+                input_dtype = onnx.helper.tensor_dtype_to_np_dtype(
+                    in_type.type.tensor_type.elem_type
+                ).name
             else:
                 input_dtype = None
             if input_dtype is not None:

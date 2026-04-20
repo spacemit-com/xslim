@@ -3,6 +3,8 @@ import onnxslim.third_party.onnx_graphsurgeon as osg
 from onnxslim.core.pattern import Pattern, PatternMatcher
 from onnxslim.core.pattern.registry import register_fusion_pattern
 
+from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
+
 
 class DynamicQuantizeMatMulIntegerPatternMatcher(PatternMatcher):
     def __init__(self, priority):
@@ -25,7 +27,7 @@ class DynamicQuantizeMatMulIntegerPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMulInteger'."""
         return "FusionDynamicQuantizeMatMulInteger"
 
-    def rewrite(self, opset=11):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         lhs_dyn_quant_0 = self.lhs_dyn_quant_0
         matmul_0 = self.matmul_0
         mul_0 = self.mul_0
@@ -49,7 +51,7 @@ class DynamicQuantizeMatMulIntegerPatternMatcher(PatternMatcher):
                     "op": "DynamicQuantizeMatMul",
                     "inputs": [input_variable, weight_variable, weight_scale_variable, weight_zp_variable],
                     "outputs": [output_variable],
-                    "domain": "com.microsoft",
+                    "domain": resolve_operator_domain("DynamicQuantizeMatMul", opset),
                     "name": matmul_0.name
                 }
             }
@@ -75,7 +77,7 @@ class DynamicQuantizeMatMulPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMul'."""
         return "FusionDynamicQuantizeMatMul"
 
-    def rewrite(self, opset=11):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         lhs_dyn_quant_0 = self.lhs_dyn_quant_0
         rhs_dq_0 = self.rhs_dq_0
         matmul_0 = self.matmul_0
@@ -99,7 +101,7 @@ class DynamicQuantizeMatMulPatternMatcher(PatternMatcher):
                     "op": "DynamicQuantizeMatMul",
                     "inputs": [input_variable, weight_variable, weight_scale_variable, weight_zp_variable],
                     "outputs": [output_variable],
-                    "domain": "com.microsoft",
+                    "domain": resolve_operator_domain("DynamicQuantizeMatMul", opset),
                     "name": matmul_0.name
                 }
             }
@@ -123,7 +125,7 @@ class DynamicQuantizeMatMulBiasRHSPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMulBiasRHS'."""
         return "FusionDynamicQuantizeMatMulBiasRHS"
 
-    def rewrite(self, opset=11):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         dyn_matmul_0 = self.dyn_matmul_0
         bias_add_0 = self.bias_add_0
 
@@ -151,7 +153,7 @@ class DynamicQuantizeMatMulBiasRHSPatternMatcher(PatternMatcher):
                     "op": "DynamicQuantizeMatMul",
                     "inputs": [input_variable, weight_variable, weight_scale_variable, weight_zp_variable, bias_variable],
                     "outputs": [output_variable],
-                    "domain": "com.microsoft",
+                    "domain": resolve_operator_domain("DynamicQuantizeMatMul", opset),
                     "name": dyn_matmul_0.name
                 }
             }
@@ -175,7 +177,7 @@ class DynamicQuantizeMatMulBiasLHSPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMulBiasLHS'."""
         return "FusionDynamicQuantizeMatMulBiasLHS"
 
-    def rewrite(self, opset=11):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         dyn_matmul_0 = self.dyn_matmul_0
         bias_add_0 = self.bias_add_0
 
@@ -203,7 +205,7 @@ class DynamicQuantizeMatMulBiasLHSPatternMatcher(PatternMatcher):
                     "op": "DynamicQuantizeMatMul",
                     "inputs": [input_variable, weight_variable, weight_scale_variable, weight_zp_variable, bias_variable],
                     "outputs": [output_variable],
-                    "domain": "com.microsoft",
+                    "domain": resolve_operator_domain("DynamicQuantizeMatMul", opset),
                     "name": dyn_matmul_0.name
                 }
             }
