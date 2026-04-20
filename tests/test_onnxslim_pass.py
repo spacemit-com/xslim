@@ -211,6 +211,75 @@ class TestOnnxSlimPass(unittest.TestCase):
             graph, opset_imports=[helper.make_opsetid("", 13)]
         )
 
+    @staticmethod
+    def _build_layernorm_pattern_model_with_axes_input():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 2, 4])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 2, 4])
+
+        axes = helper.make_tensor("axes", TensorProto.INT64, [1], [2])
+        exponent = helper.make_tensor("exponent", TensorProto.FLOAT, [], [2.0])
+        epsilon = helper.make_tensor("epsilon", TensorProto.FLOAT, [], [1e-5])
+        scale = helper.make_tensor(
+            "scale", TensorProto.FLOAT, [4], [1.1, 1.2, 1.3, 1.4]
+        )
+        bias = helper.make_tensor(
+            "bias", TensorProto.FLOAT, [4], [0.1, -0.2, 0.3, -0.4]
+        )
+
+        nodes = [
+            helper.make_node(
+                "ReduceMean",
+                ["x", "axes"],
+                ["mean0"],
+                name="reduce_mean_0",
+                keepdims=1,
+            ),
+            helper.make_node("Sub", ["x", "mean0"], ["sub0"], name="sub_0"),
+            helper.make_node(
+                "Pow",
+                ["sub0", "exponent"],
+                ["pow0"],
+                name="pow_0",
+            ),
+            helper.make_node(
+                "ReduceMean",
+                ["pow0", "axes"],
+                ["mean1"],
+                name="reduce_mean_1",
+                keepdims=1,
+            ),
+            helper.make_node(
+                "Add",
+                ["mean1", "epsilon"],
+                ["add0"],
+                name="add_0",
+            ),
+            helper.make_node("Sqrt", ["add0"], ["sqrt0"], name="sqrt_0"),
+            helper.make_node(
+                "Div",
+                ["sub0", "sqrt0"],
+                ["div0"],
+                name="div_0",
+            ),
+            helper.make_node(
+                "Mul",
+                ["div0", "scale"],
+                ["mul0"],
+                name="mul_0",
+            ),
+            helper.make_node("Add", ["mul0", "bias"], ["y"], name="add_1"),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "layernorm_axes_input_graph",
+            [x],
+            [y],
+            [axes, exponent, epsilon, scale, bias],
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 24)]
+        )
+
     def test_infer_onnx_model_restores_shape_info_for_float16_model(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_add_model()
@@ -307,6 +376,30 @@ class TestOnnxSlimPass(unittest.TestCase):
             [node.op_type for node in optimized_model.graph.node],
             ["Pad", "MaxPool"],
         )
+
+    def test_optimize_onnx_model_fuses_layernorm_with_axes_input(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_layernorm_pattern_model_with_axes_input()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["LayerNormalization"],
+        )
+
+        layernorm_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in layernorm_node.attribute
+        }
+        self.assertEqual(attrs["axis"], 2)
+        self.assertAlmostEqual(attrs["epsilon"], 1e-5, places=7)
+        self.assertEqual(layernorm_node.domain, "")
 
     def test_format_onnx_model_fills_missing_conv_kernel_shape(self):
         onnx_graph_helper_module = _load_onnx_graph_helper_module()

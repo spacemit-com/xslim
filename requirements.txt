@@ -8,9 +8,7 @@ opencv-python
 onnx>=1.21.0,<1.22.0
 tabulate
 onnxruntime>=1.24.0,<=1.24.3
-nvidia-pyindex
-onnx-graphsurgeon
-onnxconverter_common>=1.14.0
+onnx-graphsurgeon>=0.6.1
+onnxconverter_common>=1.16.0
 loguru
-sympy>=1.12.0
 onnxslim==0.1.87
