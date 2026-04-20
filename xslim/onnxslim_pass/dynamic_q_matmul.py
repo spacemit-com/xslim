@@ -3,7 +3,7 @@ import onnxslim.third_party.onnx_graphsurgeon as osg
 from onnxslim.core.pattern import Pattern, PatternMatcher
 from onnxslim.core.pattern.registry import register_fusion_pattern
 
-from xslim.defs import resolve_operator_domain
+from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
 
 
 class DynamicQuantizeMatMulIntegerPatternMatcher(PatternMatcher):
@@ -27,7 +27,7 @@ class DynamicQuantizeMatMulIntegerPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMulInteger'."""
         return "FusionDynamicQuantizeMatMulInteger"
 
-    def rewrite(self, opset=24):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         lhs_dyn_quant_0 = self.lhs_dyn_quant_0
         matmul_0 = self.matmul_0
         mul_0 = self.mul_0
@@ -77,7 +77,7 @@ class DynamicQuantizeMatMulPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMul'."""
         return "FusionDynamicQuantizeMatMul"
 
-    def rewrite(self, opset=24):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         lhs_dyn_quant_0 = self.lhs_dyn_quant_0
         rhs_dq_0 = self.rhs_dq_0
         matmul_0 = self.matmul_0
@@ -125,7 +125,7 @@ class DynamicQuantizeMatMulBiasRHSPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMulBiasRHS'."""
         return "FusionDynamicQuantizeMatMulBiasRHS"
 
-    def rewrite(self, opset=24):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         dyn_matmul_0 = self.dyn_matmul_0
         bias_add_0 = self.bias_add_0
 
@@ -177,7 +177,7 @@ class DynamicQuantizeMatMulBiasLHSPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionDynamicQuantizeMatMulBiasLHS'."""
         return "FusionDynamicQuantizeMatMulBiasLHS"
 
-    def rewrite(self, opset=24):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         dyn_matmul_0 = self.dyn_matmul_0
         bias_add_0 = self.bias_add_0
 

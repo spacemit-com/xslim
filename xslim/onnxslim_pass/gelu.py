@@ -3,7 +3,7 @@ import onnxslim.third_party.onnx_graphsurgeon as osg
 from onnxslim.core.pattern import Pattern, PatternMatcher
 from onnxslim.core.pattern.registry import register_fusion_pattern
 
-from xslim.defs import resolve_operator_domain
+from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
 
 
 class GeluPatternMatcher(PatternMatcher):
@@ -27,7 +27,7 @@ class GeluPatternMatcher(PatternMatcher):
         """Returns the name of the fusion pattern, 'FusionGelu'."""
         return "FusionGelu"
 
-    def rewrite(self, opset=24):
+    def rewrite(self, opset=MIN_ONNX_OPSET_VERSION):
         """Rewrite the computation graph pattern to fuse GELU operations."""
         input_variable = self.div_0.inputs[0]
         mul_node = self.mul_0
