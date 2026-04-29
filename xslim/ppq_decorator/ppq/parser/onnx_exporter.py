@@ -43,11 +43,21 @@ class InterpExporter(OperationExporter):
         return op
 
 
+def _resolve_graph_default_onnx_opset(graph: BaseGraph) -> int:
+    graph_detail = getattr(graph, "_detail", None)
+    if not isinstance(graph_detail, dict):
+        return MIN_ONNX_OPSET_VERSION
+    return get_default_onnx_opset_version(
+        graph_detail.get("pb_opset_import", []),
+        MIN_ONNX_OPSET_VERSION,
+    )
+
+
 class OOSExporter(OperationExporter):
     def export(self, op: Operation, graph: BaseGraph, **kwargs) -> Operation:
         target_domain = resolve_operator_domain(
             op.type,
-            get_default_onnx_opset_version(graph._detail.get("pb_opset_import", []), MIN_ONNX_OPSET_VERSION),
+            _resolve_graph_default_onnx_opset(graph),
         )
         if target_domain is None:
             op.attributes.pop("domain", None)
@@ -60,7 +70,7 @@ class AttentionExporter(OperationExporter):
     def export(self, op: Operation, graph: BaseGraph, **kwargs) -> Operation:
         target_domain = resolve_operator_domain(
             op.type,
-            get_default_onnx_opset_version(graph._detail.get("pb_opset_import", []), MIN_ONNX_OPSET_VERSION),
+            _resolve_graph_default_onnx_opset(graph),
         )
         if target_domain is None:
             op.attributes.pop("domain", None)
