@@ -13,7 +13,7 @@ import onnx
 import onnx_graphsurgeon as osg
 from onnxruntime.quantization.quant_utils import \
     quantize_data as ort_quantize_data
-from xslim.defs import XQUANT_CONFIG
+from xslim.defs import MIN_ONNX_OPSET_VERSION, XQUANT_CONFIG
 from xslim.logger import logger
 
 from ..onnx_graph_helper import format_onnx_model
@@ -209,6 +209,7 @@ def dynamic_quantize_onnx_model(
     ignore_op_types_list: Sequence[str],
     ignore_op_names_list: Sequence[str],
     sim_en: bool = True,
+    target_onnx_opset: int = MIN_ONNX_OPSET_VERSION,
 ):
     from onnxruntime.quantization import QuantizationMode, QuantType
     from onnxruntime.quantization.onnx_quantizer import ONNXQuantizer
@@ -221,7 +222,7 @@ def dynamic_quantize_onnx_model(
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(
             type(file_or_model)))
 
-    onnx_model = format_onnx_model(onnx_model, sim_en)
+    onnx_model = format_onnx_model(onnx_model, sim_en, target_onnx_opset)
 
     dynamic_q_op_types = {"Attention", "LSTM", "MatMul"}
 
@@ -253,7 +254,7 @@ def dynamic_quantize_onnx_model(
     quantized_model = quantizer.model.model
     quantized_model = dynamic_weight_only_quantize(
         quantized_model, ignore_op_types_list, ignore_op_names_list)
-    quantized_model = format_onnx_model(quantized_model, True)
+    quantized_model = format_onnx_model(quantized_model, True, target_onnx_opset)
 
     quantized_model.producer_name = "xslim"
     export_time = quantized_model.metadata_props.add()

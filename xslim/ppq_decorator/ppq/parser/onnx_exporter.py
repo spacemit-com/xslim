@@ -4,7 +4,8 @@ from typing import Union
 import numpy as np
 import onnx
 import torch
-from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
+from xslim.defs import (MIN_ONNX_OPSET_VERSION, get_default_onnx_opset_version,
+                        resolve_operator_domain)
 from onnx import helper, numpy_helper
 from ..core import (
     GRAPH_OPSET_ATTRIB,
@@ -42,9 +43,22 @@ class InterpExporter(OperationExporter):
         return op
 
 
+def _resolve_graph_default_onnx_opset(graph: BaseGraph) -> int:
+    graph_detail = getattr(graph, "_detail", None)
+    if not isinstance(graph_detail, dict):
+        return MIN_ONNX_OPSET_VERSION
+    return get_default_onnx_opset_version(
+        graph_detail.get("pb_opset_import", []),
+        MIN_ONNX_OPSET_VERSION,
+    )
+
+
 class OOSExporter(OperationExporter):
     def export(self, op: Operation, graph: BaseGraph, **kwargs) -> Operation:
-        target_domain = resolve_operator_domain(op.type, MIN_ONNX_OPSET_VERSION)
+        target_domain = resolve_operator_domain(
+            op.type,
+            _resolve_graph_default_onnx_opset(graph),
+        )
         if target_domain is None:
             op.attributes.pop("domain", None)
         else:
@@ -54,7 +68,10 @@ class OOSExporter(OperationExporter):
 
 class AttentionExporter(OperationExporter):
     def export(self, op: Operation, graph: BaseGraph, **kwargs) -> Operation:
-        target_domain = resolve_operator_domain(op.type, MIN_ONNX_OPSET_VERSION)
+        target_domain = resolve_operator_domain(
+            op.type,
+            _resolve_graph_default_onnx_opset(graph),
+        )
         if target_domain is None:
             op.attributes.pop("domain", None)
         else:
@@ -197,7 +214,9 @@ class OnnxExporter(GraphExporter):
         # if opset is missing from your graph, give it a default one.
         if GRAPH_OPSET_ATTRIB not in graph._detail:
             op = onnx.OperatorSetIdProto()
-            op.version = ONNX_EXPORT_OPSET
+            op.version = get_default_onnx_opset_version(
+                graph._detail.get("pb_opset_import", []), ONNX_EXPORT_OPSET
+            )
             opsets = [op]
         else:
             opsets = []

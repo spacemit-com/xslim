@@ -8,6 +8,7 @@ import torch
 from onnx import helper
 
 from xslim.defs import (GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION,
+                        get_default_onnx_opset_version,
                         PASSIVE_OPERATIONS, XQUANT_CONFIG)
 
 from ..core import (ONNX_DOMAIN, QuantizationProperty, QuantizationStates,
@@ -571,7 +572,14 @@ class ONNXRUNTIMExporter(OnnxExporter):
             nodes.append(node_proto)
 
         import_opset_list = function_impl._detail.get(
-            "function_opset_import", [{"domain": "", "version": MIN_ONNX_OPSET_VERSION}]
+            "function_opset_import",
+            [{
+                "domain": "",
+                "version": get_default_onnx_opset_version(
+                    function_impl._detail.get("pb_opset_import", []),
+                    MIN_ONNX_OPSET_VERSION,
+                ),
+            }],
         )
         import_opsets = {opset["domain"]: opset["version"] for opset in import_opset_list}
         opsets = []
@@ -718,7 +726,12 @@ class ONNXRUNTIMExporter(OnnxExporter):
         graph_def = helper.make_graph(
             name=name, nodes=_nodes, inputs=_inputs, outputs=_outputs, initializer=_initilizers, value_info=_value_info
         )
-        import_opsets = OrderedDict({ONNX_DOMAIN: MIN_ONNX_OPSET_VERSION})
+        import_opsets = OrderedDict({
+            ONNX_DOMAIN: get_default_onnx_opset_version(
+                graph._detail.get("pb_opset_import", []),
+                MIN_ONNX_OPSET_VERSION,
+            )
+        })
 
         if add_spacemit_functions:
             import_opsets["spacemit_functions"] = 1
@@ -726,7 +739,7 @@ class ONNXRUNTIMExporter(OnnxExporter):
         if "pb_opset_import" in graph._detail:
             for opset in graph._detail["pb_opset_import"]:
                 if opset["domain"] in import_opsets or opset["domain"] == "":
-                    import_opsets[ONNX_DOMAIN] = max(opset["version"], import_opsets[ONNX_DOMAIN])
+                    import_opsets[ONNX_DOMAIN] = opset["version"]
                 else:
                     import_opsets[opset["domain"]] = opset["version"]
 

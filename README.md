@@ -88,6 +88,9 @@ python -m xslim -i input.onnx -o output.onnx --dynq
 # FP16 conversion (no config file needed)
 python -m xslim -i input.onnx -o output.onnx --fp16
 
+# Convert the default ai.onnx opset to a target version
+python -m xslim -i input.onnx -o output.onnx --opset 20
+
 # ONNX simplification only (no config file needed)
 python -m xslim -i input.onnx -o output.onnx
 ```

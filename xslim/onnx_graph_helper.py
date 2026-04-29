@@ -260,14 +260,14 @@ def _deduplicate_node_names(onnx_model: onnx.ModelProto) -> onnx.ModelProto:
 
 
 def format_onnx_model(
-    onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: int = MIN_ONNX_OPSET_VERSION
+    onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: Optional[int] = None
 ) -> onnx.ModelProto:
     """
     Regularize an onnx model, including removing shape fields, value_info fields, etc., to avoid entering bugs.
 
     Args:
         onnx_model (onnx.ModelProto): input onnx Model
-        min_onnx_version (int, optional): min onnx opset version. Defaults to 13.
+        min_onnx_version (int, optional): target default ai.onnx opset version.
 
     Returns:
         onnx.ModelProto: output ONNX Model
@@ -284,12 +284,20 @@ def format_onnx_model(
     onnx_model = _deduplicate_node_names(onnx_model)
     onnx_model = _normalize_kernel_shape_attrs(onnx_model)
 
-    ai_onnx_version = ensure_default_onnx_opset(onnx_model, min_onnx_version)
-    if ai_onnx_version < min_onnx_version:
+    target_onnx_version = min_onnx_version
+    required_onnx_version = MIN_ONNX_OPSET_VERSION if target_onnx_version is None else target_onnx_version
+
+    ai_onnx_version = ensure_default_onnx_opset(onnx_model, required_onnx_version)
+    if target_onnx_version is None and ai_onnx_version < required_onnx_version:
         logger.warning("convert ai.onnx version {} to {}...".format(
-            ai_onnx_version, min_onnx_version))
+            ai_onnx_version, required_onnx_version))
         onnx_model = onnx.version_converter.convert_version(
-            onnx_model, min_onnx_version)
+            onnx_model, required_onnx_version)
+    elif target_onnx_version is not None and ai_onnx_version != target_onnx_version:
+        logger.warning("convert ai.onnx version {} to {}...".format(
+            ai_onnx_version, target_onnx_version))
+        onnx_model = onnx.version_converter.convert_version(
+            onnx_model, target_onnx_version)
 
     if sim_en:
         logger.info("simplify onnx model...")

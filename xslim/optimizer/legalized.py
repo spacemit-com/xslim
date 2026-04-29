@@ -6,6 +6,7 @@ import numpy as np
 import onnx
 import torch
 from xslim.defs import (GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION,
+                        get_default_onnx_opset_version,
                         resolve_operator_domain)
 from xslim.logger import logger
 
@@ -27,6 +28,12 @@ class GraphLegalized:
         self._graph = graph
         self._merger = GraphMerger(self._graph)
         self._formatter = GraphFormatter(self._graph)
+
+    def _target_onnx_opset(self) -> int:
+        return get_default_onnx_opset_version(
+            self._graph._detail.get("pb_opset_import", []),
+            MIN_ONNX_OPSET_VERSION,
+        )
 
     def __call__(self) -> Any:
         self._formatter.remove_constant_input()
@@ -108,7 +115,7 @@ class GraphLegalized:
         function_impl._detail["function_input"] = [var_A.name, var_B.name, var_C.name]
         function_impl._detail["function_output"] = [var_Y.name]
         function_impl._detail["function_domain"] = "spacemit_functions"
-        function_impl._detail["function_opset_import"] = [{"domain": "", "version": MIN_ONNX_OPSET_VERSION}]
+        function_impl._detail["function_opset_import"] = [{"domain": "", "version": self._target_onnx_opset()}]
         function_impl._detail["function_attribute"] = ["transA", "transB", "transY"]
 
         add_function_impl = False
@@ -232,10 +239,11 @@ class GraphLegalized:
 
     def format_ms_domain(self):
         custom_domain_opsets = set()
+        target_onnx_opset = self._target_onnx_opset()
         for op in self._graph.operations.values():
             if op.type in {"Gelu"}:
                 target_domain = resolve_operator_domain(
-                    op.type, MIN_ONNX_OPSET_VERSION
+                    op.type, target_onnx_opset
                 )
                 if target_domain is None:
                     op.attributes.pop("domain", None)

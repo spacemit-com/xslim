@@ -9,11 +9,26 @@ from xslim.logger import logger
 import onnx_graphsurgeon as osg
 from ..onnx_graph_helper import format_onnx_model
 from ..onnxslim_pass import infer_onnx_model
-from xslim.defs import XQUANT_CONFIG
+from xslim.defs import MIN_ONNX_OPSET_VERSION, XQUANT_CONFIG
 from datetime import datetime
 
 
 def legalize_fp16_graph(osg_graph: osg.Graph):
+    for node in osg_graph.nodes:
+        if node.op in {"Equal", "NotEqual", "Greater", "Less", "GreaterEqual", "LessEqual", "Add", "Sub", "Mul", "Div"}:
+            if node.inputs[0].dtype == np.float16 and node.inputs[1].dtype != np.float16:
+                if isinstance(node.inputs[1], osg.Constant):
+                    node.inputs[1].values = node.inputs[1].values.astype(
+                        np.float16)
+                else:
+                    node.inputs[1].dtype = np.dtype(np.float16)
+            elif node.inputs[0].dtype != np.float16 and node.inputs[1].dtype == np.float16:
+                if isinstance(node.inputs[0], osg.Constant):
+                    node.inputs[0].values = node.inputs[0].values.astype(
+                        np.float16)
+                else:
+                    node.inputs[0].dtype = np.dtype(np.float16)
+
     for node in osg_graph.nodes:
         if node.op in {"Resize", "Upsample"}:
             for input_var in node.inputs:
@@ -62,6 +77,7 @@ def convert_to_fp16_onnx_model(
     ignore_op_types_list: Sequence[str],
     ignore_node_names_list: Sequence[str],
     sim_en: bool = True,
+    target_onnx_opset: int = MIN_ONNX_OPSET_VERSION,
 ):
     if isinstance(file_or_model, onnx.ModelProto):
         onnx_model = file_or_model
@@ -71,7 +87,7 @@ def convert_to_fp16_onnx_model(
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(
             type(file_or_model)))
 
-    model_opt = format_onnx_model(onnx_model, sim_en)
+    model_opt = format_onnx_model(onnx_model, sim_en, target_onnx_opset)
 
     logger.info("convert onnx model to fp16.")
 
@@ -87,8 +103,6 @@ def convert_to_fp16_onnx_model(
                                "LinearRegressor",
                                "Normalizer",
                                "OneHotEncoder",
-                               "RandomUniformLike",
-                               "RandomNormalLike",
                                "SVMClassifier",
                                "SVMRegressor",
                                "Scaler",
@@ -114,13 +128,13 @@ def convert_to_fp16_onnx_model(
         logger.info(f"FP16 Convert Failed!: {e}")
         raise
 
-    model_fp16 = format_onnx_model(model_fp16)
+    model_fp16 = format_onnx_model(model_fp16, True, target_onnx_opset)
 
     osg_graph = osg.import_onnx(model_fp16)
     osg_graph = legalize_fp16_graph(osg_graph)
     model_fp16 = osg.export_onnx(osg_graph)
 
-    model_fp16 = format_onnx_model(model_fp16)
+    model_fp16 = format_onnx_model(model_fp16, True, target_onnx_opset)
 
     model_fp16.producer_name = "xslim"
     export_time = model_fp16.metadata_props.add()

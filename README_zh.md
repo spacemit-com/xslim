@@ -88,6 +88,9 @@ python -m xslim -i input.onnx -o output.onnx --dynq
 # FP16 转换（无需配置文件）
 python -m xslim -i input.onnx -o output.onnx --fp16
 
+# 将默认 ai.onnx opset 转换到指定版本
+python -m xslim -i input.onnx -o output.onnx --opset 20
+
 # 仅模型精简（无需配置文件）
 python -m xslim -i input.onnx -o output.onnx
 ```
