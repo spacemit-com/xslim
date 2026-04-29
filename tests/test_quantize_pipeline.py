@@ -11,6 +11,7 @@ import onnx
 import torch
 import torchvision
 from onnx import TensorProto
+from onnx import helper
 from onnx.external_data_helper import convert_model_to_external_data
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -24,6 +25,16 @@ class TestQuantizePipeline(unittest.TestCase):
     input_shape = (1, 3, 64, 64)
     model_cache_dir = os.environ.get("XSLIM_TEST_MODEL_CACHE")
     _tempdirs = []
+
+    @classmethod
+    def _build_add_model(cls, path, opset_version):
+        x = helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])
+        y = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1])
+        bias = helper.make_tensor("bias", TensorProto.FLOAT, [1], [1.0])
+        add_node = helper.make_node("Add", ["input", "bias"], ["output"], name="add")
+        graph = helper.make_graph([add_node], "add_graph", [x], [y], [bias])
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", opset_version)])
+        onnx.save(model, path)
 
     @classmethod
     def _export_torchvision_model(cls, model, path):
@@ -140,6 +151,41 @@ class TestQuantizePipeline(unittest.TestCase):
             onnx.checker.check_model(fp16_model)
             self.assertEqual(fp16_model.graph.input[0].type.tensor_type.elem_type, TensorProto.FLOAT)
             self.assertIn(TensorProto.FLOAT16, {initializer.data_type for initializer in fp16_model.graph.initializer})
+
+    def test_quantize_pipeline_respects_configured_target_opset(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            model_path = os.path.join(tempdir, "add.onnx")
+            output_path = os.path.join(tempdir, "add.simplified.onnx")
+            self._build_add_model(model_path, opset_version=24)
+
+            model = xslim.quantize_onnx_model(
+                {
+                    "model_parameters": {
+                        "onnx_model": model_path,
+                        "skip_onnxsim": True,
+                        "opset": 20,
+                    },
+                    "calibration_parameters": {
+                        "input_parameters": [
+                            {
+                                "input_name": "input",
+                                "input_shape": [1],
+                                "dtype": "float32",
+                            }
+                        ]
+                    },
+                    "quantization_parameters": {
+                        "precision_level": 100,
+                        "analysis_enable": False,
+                    },
+                },
+                output_path=output_path,
+            )
+
+            default_opset = next(opset.version for opset in model.opset_import if opset.domain in {"", "ai.onnx"})
+            self.assertEqual(default_opset, 20)
+            self.assertTrue(os.path.exists(output_path))
+            onnx.checker.check_model(model)
 
 
 if __name__ == "__main__":

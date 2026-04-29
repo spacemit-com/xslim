@@ -96,6 +96,19 @@ OBSERVER_SIGMOID_MAX_VALUE = 10
 MIN_ONNX_OPSET_VERSION = 24
 
 
+def get_default_onnx_opset_version(opset_imports, default_version: int = MIN_ONNX_OPSET_VERSION) -> int:
+    """Return the default ai.onnx opset version from an import list."""
+    for opset in opset_imports or []:
+        domain = getattr(opset, "domain", None)
+        version = getattr(opset, "version", None)
+        if isinstance(opset, dict):
+            domain = opset.get("domain", domain)
+            version = opset.get("version", version)
+        if domain in {"", "ai.onnx"} and version is not None:
+            return int(version)
+    return default_version
+
+
 def is_ai_onnx_operator_supported(
     op_type: str, opset_version: int = MIN_ONNX_OPSET_VERSION
 ) -> bool:

@@ -62,7 +62,10 @@ def dispatch_graph(graph: BaseGraph, dispatcher: Union[str, GraphDispatcher] = "
 
 
 def xslim_load_onnx_graph(
-    file_or_model: Union[str, onnx.ModelProto], sim_en: bool = True, truncate_var_name: Sequence[str] = []
+    file_or_model: Union[str, onnx.ModelProto],
+    sim_en: bool = True,
+    truncate_var_name: Sequence[str] = [],
+    target_onnx_opset: Optional[int] = None,
 ):
     if isinstance(file_or_model, onnx.ModelProto):
         onnx_model = file_or_model
@@ -71,7 +74,7 @@ def xslim_load_onnx_graph(
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
 
-    onnx_model = format_onnx_model(onnx_model, sim_en)
+    onnx_model = format_onnx_model(onnx_model, sim_en, target_onnx_opset)
     onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
 
     graph = OnnxParser().build(onnx_model)
@@ -137,6 +140,7 @@ def quantize_onnx_model(
 
     output_prefix = config_setting.model_parameters.output_prefix
     working_dir = config_setting.model_parameters.working_dir
+    target_onnx_opset = config_setting.model_parameters.opset
     calibration_step = config_setting.calibration_parameters.calibration_step
     calibration_device = config_setting.calibration_parameters.calibration_device
 
@@ -152,7 +156,11 @@ def quantize_onnx_model(
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
 
     if config_setting.quantization_parameters.precision_level.value >= 100:
-        quant_onnx_model = format_onnx_model(ori_onnx_model, not config_setting.model_parameters.skip_onnxsim)
+        quant_onnx_model = format_onnx_model(
+            ori_onnx_model,
+            not config_setting.model_parameters.skip_onnxsim,
+            target_onnx_opset,
+        )
     elif config_setting.quantization_parameters.precision_level.value >= 4:
         if len(config_setting.quantization_parameters.ignore_op_types) > 0:
             logger.info(f"Ignoring op types: {config_setting.quantization_parameters.ignore_op_types}")
@@ -163,6 +171,7 @@ def quantize_onnx_model(
             config_setting.quantization_parameters.ignore_op_types,
             config_setting.quantization_parameters.ignore_op_names,
             not config_setting.model_parameters.skip_onnxsim,
+            target_onnx_opset,
         )
     elif config_setting.quantization_parameters.precision_level.value == 3:
         if len(config_setting.quantization_parameters.ignore_op_types) > 0:
@@ -174,12 +183,14 @@ def quantize_onnx_model(
             config_setting.quantization_parameters.ignore_op_types,
             config_setting.quantization_parameters.ignore_op_names,
             not config_setting.model_parameters.skip_onnxsim,
+            target_onnx_opset,
         )
     else:
         ppq_ir, truncate_left_graph, truncate_vars = xslim_load_onnx_graph(
             model_path,
             not config_setting.model_parameters.skip_onnxsim,
             config_setting.quantization_parameters.truncate_var_names,
+            target_onnx_opset,
         )
 
         GraphLegalized(ppq_ir)()

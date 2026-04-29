@@ -4,7 +4,7 @@ import copy
 import json
 import os
 from enum import Enum
-from typing import Dict, Literal, Pattern, Sequence, Union
+from typing import Dict, Literal, Optional, Pattern, Sequence, Union
 
 import onnx
 
@@ -49,10 +49,17 @@ class ModelParameterSetting(SettingSerialize):
         self.output_prefix: str = None
         self.working_dir: str = None
         self.skip_onnxsim: bool = False
+        self.opset: Optional[int] = None
 
     def check(self, qsetting):
         # if not os.path.exists(self.onnx_model):
         #    raise FileExistsError(self.onnx_model)
+
+        if self.opset is not None and not isinstance(self.opset, int):
+            raise TypeError("opset type error, {} .vs int".format(type(self.opset)))
+
+        if self.opset is not None and self.opset < 1:
+            raise ValueError("opset should be a positive integer.")
 
         if self.working_dir is None:
             if isinstance(self.onnx_model, str) and os.path.exists(self.onnx_model):

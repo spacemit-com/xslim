@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 import argparse
+import json
 
 from xslim.logger import logger
 
@@ -14,6 +15,13 @@ parser.add_argument("--fp16", required=False, action="store_true", help="convert
 parser.add_argument("--dynq", required=False, action="store_true", help="convert onnx model to dynq.")
 parser.add_argument("--ignore_op_types", required=False, default="", help="Ignore op types.")
 parser.add_argument("--ignore_op_names", required=False, default="", help="Ignore op names.")
+parser.add_argument(
+    "--opset",
+    required=False,
+    type=int,
+    default=None,
+    help="Convert the default ai.onnx opset to the target version.",
+)
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -44,5 +52,11 @@ if __name__ == "__main__":
                 "ignore_op_names": [i for i in args.ignore_op_names.split(",") if i != ""],
             },
         }
+        if args.opset is not None:
+            args.config["model_parameters"] = {"opset": args.opset}
+    elif args.opset is not None:
+        with open(args.config, "r") as fp:
+            args.config = json.load(fp)
+        args.config.setdefault("model_parameters", {})["opset"] = args.opset
 
     quantize_onnx_model(args.config, args.input_path, args.output_path)
