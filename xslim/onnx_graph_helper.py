@@ -120,7 +120,7 @@ def _normalize_kernel_shape_attrs(
             if weight_shape is None or len(weight_shape) < 3:
                 logger.warning(
                     (
-                        "skip filling kernel_shape for %s because "
+                        "skip filling kernel_shape for {} because "
                         "weight shape is unavailable"
                     ),
                     node.name or node.op,
@@ -131,8 +131,8 @@ def _normalize_kernel_shape_attrs(
             if any(dim is None or isinstance(dim, str) for dim in kernel_shape):
                 logger.warning(
                     (
-                        "skip filling kernel_shape for %s because "
-                        "weight shape %s is not static"
+                        "skip filling kernel_shape for {} because "
+                        "weight shape {} is not static"
                     ),
                     node.name or node.op,
                     weight_shape,
@@ -226,7 +226,7 @@ def _normalize_kernel_shape_attrs(
     except Exception as exc:
         logger.warning(
             "Failed to normalize kernel_shape attributes via GraphSurgeon; "
-            "returning original ONNX model. Error: %s",
+            "returning original ONNX model. Error: {}",
             exc,
         )
         return onnx_model
@@ -309,7 +309,7 @@ def format_onnx_model(
     try:
         onnx_model = infer_onnx_model(onnx_model)
     except Exception as e:
-        logger.warning("shape_inference error with {}, skiped".format(e))
+        logger.warning("shape_inference error with {}, skipped".format(e))
 
     onnx_model = _deduplicate_node_names(onnx_model)
     return onnx_model
