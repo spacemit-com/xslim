@@ -148,10 +148,10 @@ def build_yolo_decode_function(opset_version=MIN_ONNX_OPSET_VERSION):
             "axes1_const", "axes1", TensorProto.INT64, [1], [1]
         ),
         _make_tensor_constant_node(
-            "shape_idx_0_const", "shape_idx_0", TensorProto.INT64, [1], [0]
+            "shape_idx_0_const", "shape_idx_0", TensorProto.INT64, [], [0]
         ),
         _make_tensor_constant_node(
-            "shape_idx_2_const", "shape_idx_2", TensorProto.INT64, [1], [2]
+            "shape_idx_2_const", "shape_idx_2", TensorProto.INT64, [], [2]
         ),
         _make_tensor_constant_node(
             "slice_0_starts_const", "slice_0_starts", TensorProto.INT64, [1], [0]
