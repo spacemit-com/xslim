@@ -2270,9 +2270,25 @@ def BatchMatMul_forward(
 ) -> torch.Tensor:
     ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=3)
     values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
-    output = torch.matmul(values[0], values[1])
+
+    def _transpose_last_two_dims(value: torch.Tensor, attr_name: str) -> torch.Tensor:
+        if value.ndim < 2:
+            raise ValueError(
+                f"BatchMatMul expects rank >= 2 when {attr_name}=1, got shape {list(value.shape)}"
+            )
+        return value.transpose(-1, -2)
+
+    lhs, rhs = values[:2]
+    if op.attributes.get("transA", 0):
+        lhs = _transpose_last_two_dims(lhs, "transA")
+    if op.attributes.get("transB", 0):
+        rhs = _transpose_last_two_dims(rhs, "transB")
+
+    output = torch.matmul(lhs, rhs)
     if len(values) > 2:
         output = output + values[2]
+    if op.attributes.get("transY", 0):
+        output = _transpose_last_two_dims(output, "transY")
     return output
 
 
@@ -4180,8 +4196,8 @@ DEFAULT_BACKEND_TABLE = {
     "Less": Less_forward,
     "LogSoftmax": LogSoftmax_forward,
     "MatMul": MatMul_forward,
+    "BatchMatMul": BatchMatMul_forward,
     "YoloDecode": YoloDecode_forward,
-    # "BatchMatMul": BatchMatMul_forward,
     "Max": Eltwise_forward,
     "MaxPool": MaxPool2d_forward,
     "Min": Eltwise_forward,

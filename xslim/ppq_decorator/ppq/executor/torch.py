@@ -1,8 +1,6 @@
 from typing import Callable, Dict, List, Union
 
 import torch
-from xslim.defs import GLOBAL_FUNCTIONS_MAPPING
-from xslim.logger import logger
 
 from ..core import DataType, QuantizationStates, TargetPlatform, TensorQuantizationConfig, empty_ppq_cache
 from ..IR import BaseGraph, Operation, QuantableOperation, RunnableGraph
@@ -283,7 +281,6 @@ class TorchExecutor(BaseGraphExecutor, torch.nn.Module):
         self._deployed = False
         self._device = device
         self._executing_context = TorchBackendContext(executing_device=self._device)
-        self._global_functions_mapping = dict()
         super().__init__(graph)
 
         self._runnable_graph = RunnableGraph(self._graph)
@@ -497,18 +494,13 @@ class TorchExecutor(BaseGraphExecutor, torch.nn.Module):
                     f"only PPQ.core.TargetPlatform is expected here, while {type(operation.platform)} was given"
                 )
                 platform_dispatching_table = OPERATION_FORWARD_TABLE[operation.platform]
-                op_function_name = "{}.{}".format(operation.opset.domain, operation.type)
-                operation_forward_func = None
-                if op_function_name in self._global_functions_mapping:
-                    operation_forward_func = self._global_functions_mapping[op_function_name]
-                elif operation.type not in platform_dispatching_table:
+                if operation.type not in platform_dispatching_table:
                     raise NotImplementedError(
                         f"Graph op: {operation.name}({operation.type}) "
                         f"has no backend implementation on target platform {operation.platform}. "
                         "Register this op to ppq.executor.base.py and ppq.executor.op first"
                     )
-                if operation_forward_func is None:
-                    operation_forward_func = platform_dispatching_table[operation.type]
+                operation_forward_func = platform_dispatching_table[operation.type]
                 operation_runtime_hook = (
                     hooks[operation.name] if (hooks is not None) and (operation.name in hooks) else None
                 )
@@ -538,17 +530,7 @@ class TorchExecutor(BaseGraphExecutor, torch.nn.Module):
                         raise TypeError(f"invalid hook instance was given with operation: {operation}")
 
                 # forward and collecting result
-                if isinstance(operation_forward_func, TorchExecutor):
-                    function_input_dict = {
-                        in_name: inputs[idx]
-                        for idx, in_name in enumerate(operation_forward_func._graph._detail["function_input"])
-                    }
-                    function_output_names = [_ for _ in operation_forward_func._graph._detail["function_output"]]
-                    outputs = operation_forward_func.forward(
-                        inputs=function_input_dict, output_names=function_output_names
-                    )
-                else:
-                    outputs = operation_forward_func(operation, inputs, self._executing_context)
+                outputs = operation_forward_func(operation, inputs, self._executing_context)
                 outputs = outputs if isinstance(outputs, (list, tuple)) else [outputs]
                 fp_outputs = outputs
 
@@ -618,9 +600,6 @@ class TorchExecutor(BaseGraphExecutor, torch.nn.Module):
 
     def load_graph(self, graph: BaseGraph) -> dict:
         super().load_graph(graph)
-        for k, v in self._graph._detail.get(GLOBAL_FUNCTIONS_MAPPING, {}).items():
-            function_impl = TorchExecutor(v, device=self._device)
-            self._global_functions_mapping[k] = function_impl
         self._deployed = False
         self._runnable_graph = RunnableGraph(self._graph)
         self._runnable_graph(GraphDeployCommand(device=self._device))

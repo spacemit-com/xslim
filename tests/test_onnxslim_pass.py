@@ -897,6 +897,14 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
         self.assertEqual(_constant_values("shape_idx_0_const"), [0])
         self.assertEqual(_constant_values("shape_idx_2_const"), [2])
+        self.assertEqual(
+            helper.get_attribute_value(nodes_by_name["shape_idx_0_const"].attribute[0]).dims,
+            [],
+        )
+        self.assertEqual(
+            helper.get_attribute_value(nodes_by_name["shape_idx_2_const"].attribute[0]).dims,
+            [],
+        )
 
         reg_max_attr = nodes_by_name["reg_max_const"].attribute[0]
         num_class_attr = nodes_by_name["num_class_const"].attribute[0]
