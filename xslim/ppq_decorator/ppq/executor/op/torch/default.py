@@ -2276,6 +2276,71 @@ def BatchMatMul_forward(
     return output
 
 
+def YoloDecode_forward(
+    op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs
+) -> torch.Tensor:
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=5, max_num_of_input=5)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+
+    input_value, flat_weight, sub_const, add_const, mul_const = values
+
+    reg_max = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="reg_max", default=-1)
+    num_class = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="num_class", default=-1)
+
+    if reg_max is None or int(reg_max) <= 0:
+        reg_max = int(flat_weight.numel())
+    else:
+        reg_max = int(reg_max)
+
+    if num_class is None or int(num_class) < 0:
+        num_class = int(input_value.shape[1] - reg_max * 4)
+    else:
+        num_class = int(num_class)
+
+    if input_value.ndim != 3:
+        raise ValueError(
+            f"YoloDecode expects a 3D input tensor [batch, channels, spatial], got shape {list(input_value.shape)}"
+        )
+    if reg_max * 4 > input_value.shape[1]:
+        raise ValueError(
+            f"YoloDecode expects at least {reg_max * 4} bbox channels, got {input_value.shape[1]}"
+        )
+    if num_class < 0:
+        raise ValueError(f"YoloDecode resolved an invalid num_class value: {num_class}")
+
+    batch_size, _, spatial_dim = input_value.shape
+    bbox_channels = reg_max * 4
+
+    bbox_input = input_value[:, :bbox_channels, :]
+    cls_input = input_value[:, bbox_channels : bbox_channels + num_class, :]
+
+    bbox_input = bbox_input.reshape(batch_size, 4, reg_max, spatial_dim)
+    bbox_input = bbox_input.permute(0, 2, 1, 3)
+    bbox_input = torch.softmax(bbox_input, dim=1)
+
+    conv_weight = flat_weight.to(device=input_value.device, dtype=input_value.dtype)
+    conv_weight = conv_weight.reshape(1, reg_max, 1, 1)
+    bbox_dfl = F.conv2d(bbox_input, conv_weight)
+    bbox_output = bbox_dfl.reshape(batch_size, 4, spatial_dim)
+
+    sub_const = sub_const.to(device=input_value.device, dtype=input_value.dtype)
+    add_const = add_const.to(device=input_value.device, dtype=input_value.dtype)
+    mul_const = mul_const.to(device=input_value.device, dtype=input_value.dtype)
+
+    bbox_slice_0 = bbox_output[:, :2, :]
+    bbox_slice_1 = bbox_output[:, 2:4, :]
+
+    bbox_sub = sub_const - bbox_slice_0
+    bbox_add = add_const + bbox_slice_1
+    bbox_adjusted = bbox_add - bbox_sub
+    bbox_div = (bbox_sub + bbox_add) / 2.0
+    bbox_concat = torch.cat([bbox_div, bbox_adjusted], dim=1)
+    bbox_scaled = bbox_concat * mul_const
+
+    cls_sigmoid = torch.sigmoid(cls_input)
+    return torch.cat([bbox_scaled, cls_sigmoid], dim=1)
+
+
 def Einsum_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1)
     values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
@@ -4115,6 +4180,7 @@ DEFAULT_BACKEND_TABLE = {
     "Less": Less_forward,
     "LogSoftmax": LogSoftmax_forward,
     "MatMul": MatMul_forward,
+    "YoloDecode": YoloDecode_forward,
     # "BatchMatMul": BatchMatMul_forward,
     "Max": Eltwise_forward,
     "MaxPool": MaxPool2d_forward,

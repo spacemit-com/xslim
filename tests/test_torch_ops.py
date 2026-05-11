@@ -234,6 +234,87 @@ class TestMatrixOps(unittest.TestCase):
         torch.testing.assert_close(result, expected)
 
 
+class TestCustomOps(unittest.TestCase):
+    """Test custom operator forward functions."""
+
+    @staticmethod
+    def _build_yolo_decode_inputs():
+        input_value = torch.tensor(
+            [
+                [
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                    [1.0, 1.0],
+                    [1.0, 1.0],
+                    [3.0, 0.0],
+                    [0.0, 3.0],
+                    [2.0, 2.0],
+                    [2.0, 2.0],
+                    [0.2, -0.2],
+                    [0.4, -0.4],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        flat_weight = torch.tensor([0.0, 1.0], dtype=torch.float32)
+        sub_const = torch.tensor([[[10.0, 20.0], [30.0, 40.0]]], dtype=torch.float32)
+        add_const = torch.tensor([[[11.0, 21.0], [31.0, 41.0]]], dtype=torch.float32)
+        mul_const = torch.tensor(
+            [[[8.0, 8.0], [8.0, 8.0], [16.0, 16.0], [16.0, 16.0]]],
+            dtype=torch.float32,
+        )
+        return input_value, flat_weight, sub_const, add_const, mul_const
+
+    @staticmethod
+    def _reference_yolo_decode(input_value, flat_weight, sub_const, add_const, mul_const):
+        batch_size, _, spatial_dim = input_value.shape
+        reg_max = int(flat_weight.numel())
+
+        bbox_input = input_value[:, : reg_max * 4, :].reshape(batch_size, 4, reg_max, spatial_dim)
+        bbox_input = bbox_input.permute(0, 2, 1, 3)
+        bbox_input = torch.softmax(bbox_input, dim=1)
+
+        conv_weight = flat_weight.reshape(1, reg_max, 1, 1)
+        bbox_output = torch.nn.functional.conv2d(bbox_input, conv_weight).reshape(batch_size, 4, spatial_dim)
+
+        bbox_sub = sub_const - bbox_output[:, :2, :]
+        bbox_add = add_const + bbox_output[:, 2:4, :]
+        bbox_adjusted = bbox_add - bbox_sub
+        bbox_div = (bbox_sub + bbox_add) / 2.0
+        bbox_scaled = torch.cat([bbox_div, bbox_adjusted], dim=1) * mul_const
+        cls_sigmoid = torch.sigmoid(input_value[:, reg_max * 4 :, :])
+        return torch.cat([bbox_scaled, cls_sigmoid], dim=1)
+
+    def test_yolo_decode(self):
+        op = make_op(
+            "yolo_decode",
+            "YoloDecode",
+            attributes={"reg_max": 2, "num_class": 2},
+            num_inputs=5,
+        )
+        values = list(self._build_yolo_decode_inputs())
+
+        result = DEFAULT_BACKEND_TABLE["YoloDecode"](op, values, CTX)
+        expected = self._reference_yolo_decode(*values)
+
+        self.assertEqual(result.shape, torch.Size([1, 6, 2]))
+        torch.testing.assert_close(result, expected)
+
+    def test_yolo_decode_infers_num_class(self):
+        op = make_op(
+            "yolo_decode_infer_cls",
+            "YoloDecode",
+            attributes={"reg_max": 2, "num_class": -1},
+            num_inputs=5,
+        )
+        values = list(self._build_yolo_decode_inputs())
+
+        result = DEFAULT_BACKEND_TABLE["YoloDecode"](op, values, CTX)
+        expected = self._reference_yolo_decode(*values)
+
+        torch.testing.assert_close(result, expected)
+
+
 class TestOtherOps(unittest.TestCase):
     """Test miscellaneous operator forward functions."""
 

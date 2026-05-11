@@ -326,6 +326,21 @@ def merge_onnx_model(
             o_idx = o_var.inputs[0].outputs.index(o_var)
             o_var.inputs[0].outputs[o_idx] = truncate_vars[idx]
 
+        # Reuse tensors from the downstream graph when names already exist there.
+        # Otherwise GraphSurgeon will keep distinct Variable objects with the same
+        # name, which later triggers duplicate-tensor warnings during export.
+        shared_tensors = truncate_left_graph.tensors()
+        for node in osg_graph.nodes:
+            for tensor_list in (node.inputs, node.outputs):
+                for tensor_idx, tensor in enumerate(tensor_list):
+                    if tensor.is_empty():
+                        continue
+                    shared_tensor = shared_tensors.get(tensor.name)
+                    if shared_tensor is not None and shared_tensor is not tensor:
+                        tensor_list[tensor_idx] = shared_tensor
+                    else:
+                        shared_tensors[tensor.name] = tensor
+
         new_osg_graph = osg.Graph(
             nodes=osg_graph.nodes + truncate_left_graph.nodes,
             inputs=truncate_left_graph.inputs,
