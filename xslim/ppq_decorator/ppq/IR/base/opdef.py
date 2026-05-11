@@ -1,6 +1,8 @@
 from abc import ABCMeta, abstractproperty
 from typing import Any, Dict, List
 
+import onnx
+
 from ...core import (
     CAFFE_DOMAIN,
     COMPUTING_OP,
@@ -187,6 +189,16 @@ def CEHCK_TYPE(op: OperationBase, t: str):
     pass
 
 
+def _is_newer_onnx_schema_available(op: OperationBase) -> bool:
+    if op.opset.domain != ONNX_DOMAIN:
+        return False
+    try:
+        onnx.defs.get_schema(op.type, max_inclusive_version=op.opset.version, domain="")
+        return True
+    except onnx.defs.SchemaError:
+        return False
+
+
 def CHECK_OPSET(
     min_version_supported: int,
     max_version_supported: int,
@@ -203,11 +215,20 @@ def CHECK_OPSET(
             "cause it might not be a standard onnx operation."
         )
 
-    if opset.version > max_version_supported or opset.version < min_version_supported:
+    if opset.version < min_version_supported:
         raise TypeError(
             f"opset version is not supported, "
             f"can not generate dispatching scheme with op {op.name}({op.type}), "
             f"currently we support only [{min_version_supported, max_version_supported}], "
+            f"however {opset.version} was given."
+        )
+
+    if opset.version > max_version_supported and not _is_newer_onnx_schema_available(op):
+        raise TypeError(
+            f"opset version is not supported, "
+            f"can not generate dispatching scheme with op {op.name}({op.type}), "
+            f"currently we support only [{min_version_supported, max_version_supported}] "
+            f"or newer versions recognized by the installed ONNX schema, "
             f"however {opset.version} was given."
         )
 
@@ -292,7 +313,7 @@ def Gather_Socket(op: OperationBase) -> OpSocket:
 
 def Resize_Socket(op: OperationBase) -> OpSocket:
     """
-    From Opset 11 - 13:
+    From Opset 10+:
 
     Inputs (1 - 4)
         X (differentiable) : T1

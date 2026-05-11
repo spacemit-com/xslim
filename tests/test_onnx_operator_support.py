@@ -8,6 +8,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
+from xslim.ppq_decorator.ppq.IR.base.opdef import Opset, Resize_Socket
 from xslim.ppq_decorator.ppq.parser.onnx_exporter import (AttentionExporter,
                                                           OOSExporter)
 
@@ -47,6 +48,30 @@ class TestOnnxOperatorSupport(unittest.TestCase):
         attention = mock.Mock(type="Attention", attributes={"domain": "com.microsoft"})
         exported_attention = AttentionExporter().export(attention, graph=None)
         self.assertNotIn("domain", exported_attention.attributes)
+
+    def test_resize_socket_accepts_high_opset_when_onnx_schema_supports_it(self):
+        for opset_version in (21, MIN_ONNX_OPSET_VERSION):
+            resize_op = mock.Mock()
+            resize_op.name = "resize"
+            resize_op.type = "Resize"
+            resize_op.num_of_input = 4
+            resize_op.num_of_output = 1
+            resize_op.opset = Opset("ai.onnx", opset_version)
+
+            socket = Resize_Socket(resize_op)
+
+            self.assertEqual(len(socket.in_plat), 4)
+
+    def test_resize_socket_rejects_opset_before_resize_was_standardized(self):
+        resize_op = mock.Mock()
+        resize_op.name = "resize"
+        resize_op.type = "Resize"
+        resize_op.num_of_input = 4
+        resize_op.num_of_output = 1
+        resize_op.opset = Opset("ai.onnx", 9)
+
+        with self.assertRaises(TypeError):
+            Resize_Socket(resize_op)
 
 
 if __name__ == "__main__":
