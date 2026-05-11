@@ -8,13 +8,20 @@ from xslim.logger import logger
 from . import quantize_onnx_model
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument("-c", "--config", required=False, default=None, help="Path to the Xquant Config.")
-parser.add_argument("-i", "--input_path", required=False, default=None, help="Path to the Input ONNX Model.")
-parser.add_argument("-o", "--output_path", required=False, default=None, help="Path to the Output ONNX Model.")
-parser.add_argument("--fp16", required=False, action="store_true", help="convert onnx model to fp16.")
-parser.add_argument("--dynq", required=False, action="store_true", help="convert onnx model to dynq.")
-parser.add_argument("--ignore_op_types", required=False, default="", help="Ignore op types.")
-parser.add_argument("--ignore_op_names", required=False, default="", help="Ignore op names.")
+parser.add_argument("-c", "--config", required=False,
+                    default=None, help="Path to the Xquant Config.")
+parser.add_argument("-i", "--input_path", required=False,
+                    default=None, help="Path to the Input ONNX Model.")
+parser.add_argument("-o", "--output_path", required=False,
+                    default=None, help="Path to the Output ONNX Model.")
+parser.add_argument("--fp16", required=False,
+                    action="store_true", help="convert onnx model to fp16.")
+parser.add_argument("--dynq", required=False,
+                    action="store_true", help="convert onnx model to dynq.")
+parser.add_argument("--ignore_op_types", required=False,
+                    default="", help="Ignore op types.")
+parser.add_argument("--ignore_op_names", required=False,
+                    default="", help="Ignore op names.")
 parser.add_argument(
     "--opset",
     required=False,
@@ -39,11 +46,14 @@ if __name__ == "__main__":
             precesion_level = 3
 
         if precesion_level == 3:
-            logger.info("No config provided, using default config, dynamic quantization...")
+            logger.info(
+                "No config provided, using default config, dynamic quantization...")
         elif precesion_level == 4:
-            logger.info("No config provided, using default config, convert onnx model to fp16...")
+            logger.info(
+                "No config provided, using default config, convert onnx model to fp16...")
         elif precesion_level >= 100:
-            logger.info("No config provided, using default config, only simplify onnx model...")
+            logger.info(
+                "No config provided, using default config, only simplify onnx model...")
 
         args.config = {
             "quantization_parameters": {
