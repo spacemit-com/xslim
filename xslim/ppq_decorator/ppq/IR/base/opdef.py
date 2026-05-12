@@ -193,8 +193,8 @@ def _is_newer_onnx_schema_available(op: OperationBase) -> bool:
     if op.opset.domain != ONNX_DOMAIN:
         return False
     try:
-        onnx.defs.get_schema(op.type, max_inclusive_version=op.opset.version, domain="")
-        return True
+        schema = onnx.defs.get_schema(op.type, max_inclusive_version=op.opset.version, domain="")
+        return schema.since_version == op.opset.version
     except onnx.defs.SchemaError:
         return False
 
