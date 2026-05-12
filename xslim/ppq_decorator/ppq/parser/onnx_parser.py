@@ -214,10 +214,9 @@ class OnnxParser(GraphBuilder):
 
         graph._detail[GLOBAL_FUNCTIONS_MAPPING] = {}
         for function_proto in model_pb.functions:
-            function_impl = self.build_graph(function_proto, import_opset_dict)
             graph._detail[GLOBAL_FUNCTIONS_MAPPING][
                 "{}.{}".format(function_proto.domain, function_proto.name)
-            ] = function_impl
+            ] = function_proto
 
         graph._detail["pb_opset_import"] = model_opset_import
         graph._detail["pb_input"] = [item for item in graph_pb.input if item.name in graph.inputs]

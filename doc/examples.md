@@ -193,7 +193,51 @@ python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_dynq.onnx 
 
 ---
 
-## 6. Custom Preprocessing
+## 6. YOLO Detection with Automatic Decode Fusion
+
+For supported YOLO exports, XSlim can fuse decode-heavy post-processing into a single `spacemit_functions.YoloDecode` node backed by an embedded ONNX `FunctionProto`. No extra switch is required; start with a normal detection-oriented INT8 configuration.
+
+**Config file** (`yolo_int8.json`):
+
+```json
+{
+    "model_parameters": {
+        "onnx_model": "models/yolov8n.onnx",
+        "working_dir": "./output"
+    },
+    "calibration_parameters": {
+        "calibration_step": 500,
+        "input_parameters": [
+            {
+                "color_format": "rgb",
+                "mean_value": [0.0, 0.0, 0.0],
+                "std_value": [255.0, 255.0, 255.0],
+                "data_list_path": "./calib_data/img_list.txt"
+            }
+        ]
+    },
+    "quantization_parameters": {
+        "precision_level": 1,
+        "finetune_level": 2
+    }
+}
+```
+
+**Run via CLI:**
+
+```bash
+python -m xslim -c yolo_int8.json
+```
+
+**Key points:**
+- Start with `precision_level: 1` and `finetune_level: 2` for detection models.
+- When the decode pattern matches, XSlim rewrites the post-processing subgraph to `spacemit_functions.YoloDecode` and preserves the required ONNX `FunctionProto` during export.
+- Open the exported model in [Netron](https://netron.app) if you want to confirm that the large decode subgraph was replaced by `YoloDecode`.
+- If your export still keeps bbox / cls post-processing in a concat-heavy subgraph, use `truncate_var_names` as a fallback; see the accuracy-tuning guide.
+
+---
+
+## 7. Custom Preprocessing
 
 Use your own preprocessing function when the built-in `PT_IMAGENET` / `IMAGENET` presets don't match your pipeline.
 
@@ -259,7 +303,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
 
 ---
 
-## 7. Python API
+## 8. Python API
 
 All scenarios above can be driven through the Python API instead of the CLI.
 
@@ -303,4 +347,5 @@ quantized_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 - **Calibration sample count**: 100–300 samples are usually sufficient. More samples improve calibration quality but increase runtime.
 - **Choosing precision level**: Start with `precision_level: 0`. If accuracy drops, try `1` or `2`. Use `4` (FP16) only when INT8 quality is insufficient.
 - **Transformer models**: Use `precision_level: 1` or `2` combined with `finetune_level: 2` for best results.
-- **Inspecting tensor names**: Use [Netron](https://netron.app) to visualize the ONNX graph and find tensor names for `custom_setting` or `truncate_var_names`.
+- **YOLO models**: Start with `precision_level: 1` and `finetune_level: 2`. If the output model contains `spacemit_functions.YoloDecode`, automatic decode fusion succeeded; otherwise consider `truncate_var_names` as a fallback.
+- **Inspecting tensor names**: Use [Netron](https://netron.app) to visualize the ONNX graph and find tensor names for `custom_setting`, `truncate_var_names`, or fused YOLO decode validation.

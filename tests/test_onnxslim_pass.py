@@ -8,6 +8,7 @@ import unittest
 from unittest import mock
 
 import onnx
+import onnxslim.third_party.onnx_graphsurgeon as osg
 from onnx import TensorProto, helper
 from onnxconverter_common import float16 as convert_float_to_float16
 
@@ -280,6 +281,356 @@ class TestOnnxSlimPass(unittest.TestCase):
             graph, opset_imports=[helper.make_opsetid("", 24)]
         )
 
+    @staticmethod
+    def _build_yolo_decode_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 16, 4])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 18, 4])
+
+        reshape_0_shape = helper.make_tensor(
+            "reshape_0_shape", TensorProto.INT64, [4], [1, 4, 16, 1]
+        )
+        conv_weight = helper.make_tensor(
+            "conv_weight",
+            TensorProto.FLOAT,
+            [1, 16, 1, 1],
+            [float(index) / 16.0 for index in range(16)],
+        )
+        reshape_1_shape = helper.make_tensor(
+            "reshape_1_shape", TensorProto.INT64, [3], [1, 2, 4]
+        )
+        slice_0_starts = helper.make_tensor(
+            "slice_0_starts", TensorProto.INT64, [1], [0]
+        )
+        slice_0_ends = helper.make_tensor(
+            "slice_0_ends", TensorProto.INT64, [1], [1]
+        )
+        slice_1_starts = helper.make_tensor(
+            "slice_1_starts", TensorProto.INT64, [1], [1]
+        )
+        slice_1_ends = helper.make_tensor(
+            "slice_1_ends", TensorProto.INT64, [1], [2]
+        )
+        slice_axes = helper.make_tensor("slice_axes", TensorProto.INT64, [1], [1])
+        slice_steps = helper.make_tensor(
+            "slice_steps", TensorProto.INT64, [1], [1]
+        )
+        sub_const = helper.make_tensor(
+            "sub_const",
+            TensorProto.FLOAT,
+            [1, 1, 4],
+            [10.0, 20.0, 30.0, 40.0],
+        )
+        add_const = helper.make_tensor(
+            "add_const",
+            TensorProto.FLOAT,
+            [1, 1, 4],
+            [11.0, 21.0, 31.0, 41.0],
+        )
+        div_const = helper.make_tensor("div_const", TensorProto.FLOAT, [], [2.0])
+        mul_const = helper.make_tensor(
+            "mul_const",
+            TensorProto.FLOAT,
+            [1, 1, 4],
+            [8.0, 8.0, 16.0, 16.0],
+        )
+
+        nodes = [
+            helper.make_node("Sigmoid", ["x"], ["sigmoid_out"], name="sigmoid_0"),
+            helper.make_node(
+                "Reshape",
+                ["x", "reshape_0_shape"],
+                ["reshape_0_out"],
+                name="reshape_0",
+            ),
+            helper.make_node(
+                "Transpose",
+                ["reshape_0_out"],
+                ["transpose_0_out"],
+                name="transpose_0",
+                perm=[0, 2, 1, 3],
+            ),
+            helper.make_node(
+                "Softmax",
+                ["transpose_0_out"],
+                ["softmax_0_out"],
+                name="softmax_0",
+                axis=1,
+            ),
+            helper.make_node(
+                "Conv",
+                ["softmax_0_out", "conv_weight"],
+                ["conv_0_out"],
+                name="conv_0",
+                pads=[0, 0, 0, 0],
+            ),
+            helper.make_node(
+                "Reshape",
+                ["conv_0_out", "reshape_1_shape"],
+                ["reshape_1_out"],
+                name="reshape_1",
+            ),
+            helper.make_node(
+                "Slice",
+                [
+                    "reshape_1_out",
+                    "slice_0_starts",
+                    "slice_0_ends",
+                    "slice_axes",
+                    "slice_steps",
+                ],
+                ["slice_0_out"],
+                name="slice_0",
+            ),
+            helper.make_node(
+                "Slice",
+                [
+                    "reshape_1_out",
+                    "slice_1_starts",
+                    "slice_1_ends",
+                    "slice_axes",
+                    "slice_steps",
+                ],
+                ["slice_1_out"],
+                name="slice_1",
+            ),
+            helper.make_node(
+                "Sub",
+                ["sub_const", "slice_0_out"],
+                ["sub_0_out"],
+                name="sub_0",
+            ),
+            helper.make_node(
+                "Add",
+                ["add_const", "slice_1_out"],
+                ["add_0_out"],
+                name="add_0",
+            ),
+            helper.make_node(
+                "Sub",
+                ["add_0_out", "sub_0_out"],
+                ["sub_1_out"],
+                name="sub_1",
+            ),
+            helper.make_node(
+                "Add",
+                ["sub_0_out", "add_0_out"],
+                ["add_1_out"],
+                name="add_1",
+            ),
+            helper.make_node(
+                "Div",
+                ["add_1_out", "div_const"],
+                ["div_0_out"],
+                name="div_0",
+            ),
+            helper.make_node(
+                "Concat",
+                ["div_0_out", "sub_1_out"],
+                ["concat_0_out"],
+                name="concat_0",
+                axis=1,
+            ),
+            helper.make_node(
+                "Mul",
+                ["concat_0_out", "mul_const"],
+                ["mul_0_out"],
+                name="mul_0",
+            ),
+            helper.make_node(
+                "Concat",
+                ["mul_0_out", "sigmoid_out"],
+                ["y"],
+                name="concat_1",
+                axis=1,
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "yolo_decode_pattern_graph",
+            [x],
+            [y],
+            [
+                reshape_0_shape,
+                conv_weight,
+                reshape_1_shape,
+                slice_0_starts,
+                slice_0_ends,
+                slice_1_starts,
+                slice_1_ends,
+                slice_axes,
+                slice_steps,
+                sub_const,
+                add_const,
+                div_const,
+                mul_const,
+            ],
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 24)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
+    def _build_yolo_decode_split_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 72, 4])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 12, 4])
+        split_sizes = helper.make_tensor(
+            "split_sizes", TensorProto.INT64, [2], [64, 8]
+        )
+
+        split_outputs = [
+            helper.make_tensor_value_info("split_0_out", TensorProto.FLOAT, [1, 64, 4]),
+            helper.make_tensor_value_info("split_1_out", TensorProto.FLOAT, [1, 8, 4]),
+        ]
+        graph = onnx.helper.make_graph(
+            [
+                helper.make_node(
+                    "Split",
+                    ["x", "split_sizes"],
+                    ["split_0_out", "split_1_out"],
+                    name="split_0",
+                    axis=1,
+                ),
+                helper.make_node("Sigmoid", ["split_1_out"], ["sigmoid_out"], name="sigmoid_0"),
+                helper.make_node(
+                    "Reshape",
+                    ["split_0_out", "reshape_0_shape"],
+                    ["reshape_0_out"],
+                    name="reshape_0",
+                ),
+                helper.make_node(
+                    "Transpose",
+                    ["reshape_0_out"],
+                    ["transpose_0_out"],
+                    name="transpose_0",
+                    perm=[0, 2, 1, 3],
+                ),
+                helper.make_node(
+                    "Softmax",
+                    ["transpose_0_out"],
+                    ["softmax_0_out"],
+                    name="softmax_0",
+                    axis=1,
+                ),
+                helper.make_node(
+                    "Conv",
+                    ["softmax_0_out", "conv_weight"],
+                    ["conv_0_out"],
+                    name="conv_0",
+                    pads=[0, 0, 0, 0],
+                ),
+                helper.make_node(
+                    "Reshape",
+                    ["conv_0_out", "reshape_1_shape"],
+                    ["reshape_1_out"],
+                    name="reshape_1",
+                ),
+                helper.make_node(
+                    "Slice",
+                    [
+                        "reshape_1_out",
+                        "slice_0_starts",
+                        "slice_0_ends",
+                        "slice_axes",
+                        "slice_steps",
+                    ],
+                    ["slice_0_out"],
+                    name="slice_0",
+                ),
+                helper.make_node(
+                    "Slice",
+                    [
+                        "reshape_1_out",
+                        "slice_1_starts",
+                        "slice_1_ends",
+                        "slice_axes",
+                        "slice_steps",
+                    ],
+                    ["slice_1_out"],
+                    name="slice_1",
+                ),
+                helper.make_node(
+                    "Sub",
+                    ["sub_const", "slice_0_out"],
+                    ["sub_0_out"],
+                    name="sub_0",
+                ),
+                helper.make_node(
+                    "Add",
+                    ["add_const", "slice_1_out"],
+                    ["add_0_out"],
+                    name="add_0",
+                ),
+                helper.make_node(
+                    "Sub",
+                    ["add_0_out", "sub_0_out"],
+                    ["sub_1_out"],
+                    name="sub_1",
+                ),
+                helper.make_node(
+                    "Add",
+                    ["sub_0_out", "add_0_out"],
+                    ["add_1_out"],
+                    name="add_1",
+                ),
+                helper.make_node(
+                    "Div",
+                    ["add_1_out", "div_const"],
+                    ["div_0_out"],
+                    name="div_0",
+                ),
+                helper.make_node(
+                    "Concat",
+                    ["div_0_out", "sub_1_out"],
+                    ["concat_0_out"],
+                    name="concat_0",
+                    axis=1,
+                ),
+                helper.make_node(
+                    "Mul",
+                    ["concat_0_out", "mul_const"],
+                    ["mul_0_out"],
+                    name="mul_0",
+                ),
+                helper.make_node(
+                    "Concat",
+                    ["mul_0_out", "sigmoid_out"],
+                    ["y"],
+                    name="concat_1",
+                    axis=1,
+                ),
+            ],
+            "yolo_decode_split_pattern_graph",
+            [x],
+            [y],
+            [
+                split_sizes,
+                helper.make_tensor("reshape_0_shape", TensorProto.INT64, [4], [1, 4, 16, 4]),
+                helper.make_tensor(
+                    "conv_weight",
+                    TensorProto.FLOAT,
+                    [1, 16, 1, 1],
+                    [float(index) / 16.0 for index in range(16)],
+                ),
+                helper.make_tensor("reshape_1_shape", TensorProto.INT64, [3], [1, 4, 4]),
+                helper.make_tensor("slice_0_starts", TensorProto.INT64, [1], [0]),
+                helper.make_tensor("slice_0_ends", TensorProto.INT64, [1], [2]),
+                helper.make_tensor("slice_1_starts", TensorProto.INT64, [1], [2]),
+                helper.make_tensor("slice_1_ends", TensorProto.INT64, [1], [4]),
+                helper.make_tensor("slice_axes", TensorProto.INT64, [1], [1]),
+                helper.make_tensor("slice_steps", TensorProto.INT64, [1], [1]),
+                helper.make_tensor("sub_const", TensorProto.FLOAT, [1, 2, 4], [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+                helper.make_tensor("add_const", TensorProto.FLOAT, [1, 2, 4], [11.0, 21.0, 31.0, 41.0, 51.0, 61.0, 71.0, 81.0]),
+                helper.make_tensor("div_const", TensorProto.FLOAT, [], [2.0]),
+                helper.make_tensor("mul_const", TensorProto.FLOAT, [1, 4, 4], [8.0, 8.0, 16.0, 16.0, 8.0, 8.0, 16.0, 16.0, 8.0, 8.0, 16.0, 16.0, 8.0, 8.0, 16.0, 16.0]),
+            ],
+            value_info=split_outputs,
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 24)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
     def test_infer_onnx_model_restores_shape_info_for_float16_model(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_add_model()
@@ -400,6 +751,245 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(attrs["axis"], 2)
         self.assertAlmostEqual(attrs["epsilon"], 1e-5, places=7)
         self.assertEqual(layernorm_node.domain, "")
+
+    def test_optimize_onnx_model_fuses_yolo_decode_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_yolo_decode_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["YoloDecode"],
+        )
+
+        yolo_decode_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in yolo_decode_node.attribute
+        }
+        initializers = {
+            initializer.name: onnx.numpy_helper.to_array(initializer)
+            for initializer in optimized_model.graph.initializer
+        }
+
+        self.assertEqual(yolo_decode_node.domain, "spacemit_functions")
+        self.assertEqual(yolo_decode_node.name, "yolo_decode_concat_1")
+        self.assertEqual(list(yolo_decode_node.input), [
+            "x",
+            "conv_weight_flat",
+            "sub_const",
+            "add_const",
+            "mul_const",
+        ])
+        self.assertEqual(attrs["num_class"], -1)
+        self.assertEqual(attrs["reg_max"], 16)
+        self.assertEqual(initializers["conv_weight_flat"].shape, (16,))
+        self.assertIn(
+            ("spacemit_functions", 1),
+            {(item.domain, item.version) for item in optimized_model.opset_import},
+        )
+        self.assertEqual(
+            [(function.domain, function.name) for function in optimized_model.functions],
+            [("spacemit_functions", "YoloDecode")],
+        )
+
+        yolo_decode_function = optimized_model.functions[0]
+        self.assertEqual(
+            list(yolo_decode_function.input),
+            ["input", "flat_weight", "sub_const", "add_const", "mul_const"],
+        )
+        self.assertEqual(list(yolo_decode_function.output), ["output"])
+        self.assertEqual(
+            list(yolo_decode_function.attribute),
+            ["num_class", "reg_max"],
+        )
+
+        onnx.checker.check_model(optimized_model)
+
+    def test_optimize_onnx_model_fuses_yolo_decode_split_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_yolo_decode_split_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["YoloDecode"],
+        )
+
+        yolo_decode_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in yolo_decode_node.attribute
+        }
+        self.assertEqual(yolo_decode_node.domain, "spacemit_functions")
+        self.assertEqual(list(yolo_decode_node.input), [
+            "x",
+            "conv_weight_flat",
+            "sub_const",
+            "add_const",
+            "mul_const",
+        ])
+        self.assertEqual(attrs["num_class"], 8)
+        self.assertEqual(attrs["reg_max"], 16)
+
+        self.assertIn(("", 24), {(item.domain, item.version) for item in optimized_model.opset_import})
+        self.assertIn(("spacemit_functions", 1), {(item.domain, item.version) for item in optimized_model.opset_import})
+        self.assertEqual(
+            [(function.domain, function.name) for function in optimized_model.functions],
+            [("spacemit_functions", "YoloDecode")],
+        )
+        self.assertEqual(
+            list(optimized_model.functions[0].attribute),
+            ["num_class", "reg_max"],
+        )
+
+        onnx.checker.check_model(optimized_model)
+
+    def test_build_yolo_decode_function_uses_dynamic_bbox_reshape_shape(self):
+        _load_onnxslim_pass_module()
+        yolo_decode_module = sys.modules["xslim.onnxslim_pass.yolo_decode"]
+
+        function_proto = yolo_decode_module.build_yolo_decode_function()
+        nodes_by_name = {node.name: node for node in function_proto.node}
+
+        def _constant_values(node_name):
+            tensor = helper.get_attribute_value(nodes_by_name[node_name].attribute[0])
+            return onnx.numpy_helper.to_array(tensor).reshape(-1).tolist()
+
+        self.assertEqual(list(function_proto.input), [
+            "input",
+            "flat_weight",
+            "sub_const",
+            "add_const",
+            "mul_const",
+        ])
+        self.assertEqual(list(function_proto.output), ["output"])
+        self.assertEqual(
+            list(function_proto.attribute),
+            ["num_class", "reg_max"],
+        )
+
+        self.assertEqual(
+            list(nodes_by_name["bbox_reshape"].input),
+            ["bbox_input", "bbox_reshape_shape"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_reshape_shape_concat"].input),
+            ["batch_dim_vec", "four_vec", "reg_max_vec", "spatial_dim_vec"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["conv_weight_shape_concat"].input),
+            ["one_vec", "reg_max_vec", "one_vec", "one_vec"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_output_shape_concat"].input),
+            ["batch_dim_vec", "four_vec", "spatial_dim_vec"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["gather_batch_dim"].input),
+            ["bbox_shape", "shape_idx_0"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["gather_spatial_dim"].input),
+            ["bbox_shape", "shape_idx_2"],
+        )
+        self.assertEqual(_constant_values("shape_idx_0_const"), [0])
+        self.assertEqual(_constant_values("shape_idx_2_const"), [2])
+        self.assertEqual(
+            helper.get_attribute_value(nodes_by_name["shape_idx_0_const"].attribute[0]).dims,
+            [],
+        )
+        self.assertEqual(
+            helper.get_attribute_value(nodes_by_name["shape_idx_2_const"].attribute[0]).dims,
+            [],
+        )
+
+        reg_max_attr = nodes_by_name["reg_max_const"].attribute[0]
+        num_class_attr = nodes_by_name["num_class_const"].attribute[0]
+        self.assertEqual(reg_max_attr.ref_attr_name, "reg_max")
+        self.assertEqual(num_class_attr.ref_attr_name, "num_class")
+
+        self.assertEqual(nodes_by_name["bbox_dfl"].op_type, "Conv")
+        self.assertEqual(
+            list(nodes_by_name["bbox_output_reshape"].input),
+            ["bbox_dfl", "bbox_output_shape"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_slice_0"].input),
+            ["bbox_output", "slice_0_starts", "slice_0_ends", "axes1", "slice_steps"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_slice_1"].input),
+            ["bbox_output", "slice_1_starts", "slice_1_ends", "axes1", "slice_steps"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_concat"].input),
+            ["bbox_div", "bbox_adjusted"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_scaled"].input),
+            ["bbox_concat", "mul_const"],
+        )
+
+        transpose_attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in nodes_by_name["bbox_transpose"].attribute
+        }
+        softmax_attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in nodes_by_name["bbox_softmax"].attribute
+        }
+        concat_attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in nodes_by_name["bbox_concat"].attribute
+        }
+        output_concat_attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in nodes_by_name["output_concat"].attribute
+        }
+        self.assertEqual(list(transpose_attrs["perm"]), [0, 2, 1, 3])
+        self.assertEqual(softmax_attrs["axis"], 1)
+        self.assertEqual(concat_attrs["axis"], 1)
+        self.assertEqual(output_concat_attrs["axis"], 1)
+
+    def test_merge_onnx_model_reuses_existing_named_tensors(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        model = self._build_add_model()
+
+        truncated_model, truncate_left_graph, truncate_vars = (
+            onnx_graph_helper_module.truncate_onnx_model(model, ["z"])
+        )
+        merged_model = onnx_graph_helper_module.merge_onnx_model(
+            truncated_model,
+            truncate_left_graph,
+            truncate_vars,
+        )
+
+        merged_graph = osg.import_onnx(merged_model)
+        tensors_by_name = {}
+        duplicate_names = []
+        merged_tensors = list(merged_graph.inputs)
+        for node in merged_graph.nodes:
+            merged_tensors.extend(node.inputs)
+            merged_tensors.extend(node.outputs)
+        merged_tensors.extend(merged_graph.outputs)
+
+        for tensor in merged_tensors:
+            if tensor.is_empty():
+                continue
+            if (
+                tensor.name in tensors_by_name
+                and tensors_by_name[tensor.name] is not tensor
+            ):
+                duplicate_names.append(tensor.name)
+            else:
+                tensors_by_name[tensor.name] = tensor
+
+        self.assertEqual(duplicate_names, [])
+        self.assertEqual([node.op_type for node in merged_model.graph.node], ["Add", "Identity"])
+        onnx.checker.check_model(merged_model)
 
     def test_format_onnx_model_fills_missing_conv_kernel_shape(self):
         onnx_graph_helper_module = _load_onnx_graph_helper_module()

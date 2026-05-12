@@ -11,7 +11,6 @@ from xslim.defs import (GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION,
 from xslim.logger import logger
 
 from ..ppq_decorator import (
-    BaseGraph,
     DataType,
     GraphFormatter,
     GraphMerger,
@@ -76,47 +75,28 @@ class GraphLegalized:
             self._graph.remove_operation(removing_op=const_op)
 
     def fuse_matmul_bias(self):
-        function_impl = BaseGraph(name="BatchMatMul")
-        var_A = Variable(name="A", dtype=DataType.FP32)
-        var_B = Variable(name="B", dtype=DataType.FP32)
-        var_C = Variable(name="C", dtype=DataType.FP32)
-        var_temp = Variable(name="MatMul_temp", dtype=DataType.FP32)
-        var_Y = Variable(name="Y", dtype=DataType.FP32)
-        function_impl.operations["MatMul"] = Operation(
-            name="MatMul",
-            op_type="MatMul",
-            attributes={},
-            inputs=[var_A, var_B],
-            outputs=[var_temp],
+        function_impl = onnx.helper.make_function(
+            domain="spacemit_functions",
+            fname="BatchMatMul",
+            inputs=["A", "B", "C"],
+            outputs=["Y"],
+            nodes=[
+                onnx.helper.make_node(
+                    "MatMul",
+                    ["A", "B"],
+                    ["MatMul_temp"],
+                    name="MatMul",
+                ),
+                onnx.helper.make_node(
+                    "Add",
+                    ["MatMul_temp", "C"],
+                    ["Y"],
+                    name="Add",
+                ),
+            ],
+            opset_imports=[onnx.helper.make_opsetid("", self._target_onnx_opset())],
+            attributes=["transA", "transB", "transY"],
         )
-        function_impl.operations["Add"] = Operation(
-            name="Add",
-            op_type="Add",
-            attributes={},
-            inputs=[var_temp, var_C],
-            outputs=[var_Y],
-        )
-        var_A.dest_ops.append(function_impl.operations["MatMul"])
-        var_B.dest_ops.append(function_impl.operations["MatMul"])
-        var_C.dest_ops.append(function_impl.operations["Add"])
-        var_temp.dest_ops.append(function_impl.operations["Add"])
-        var_temp.source_op = function_impl.operations["MatMul"]
-        var_Y.source_op = function_impl.operations["Add"]
-        for op in function_impl.operations.values():
-            for in_var in op.inputs:
-                function_impl.variables[in_var.name] = in_var
-            for out_var in op.outputs:
-                function_impl.variables[out_var.name] = out_var
-
-        function_impl.inputs[var_A.name] = var_A
-        function_impl.inputs[var_B.name] = var_B
-        function_impl.inputs[var_C.name] = var_C
-        function_impl.outputs[var_Y.name] = var_Y
-        function_impl._detail["function_input"] = [var_A.name, var_B.name, var_C.name]
-        function_impl._detail["function_output"] = [var_Y.name]
-        function_impl._detail["function_domain"] = "spacemit_functions"
-        function_impl._detail["function_opset_import"] = [{"domain": "", "version": self._target_onnx_opset()}]
-        function_impl._detail["function_attribute"] = ["transA", "transB", "transY"]
 
         add_function_impl = False
         for current_op in [_ for _ in self._graph.operations.values()]:

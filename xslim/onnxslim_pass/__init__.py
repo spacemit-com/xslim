@@ -8,6 +8,7 @@ from .dynamic_q_matmul import *
 from .gelu import *
 from .layernorm import *
 from .padpool import *
+from .yolo_decode import *
 
 # from .swish import *
 
@@ -26,4 +27,5 @@ def infer_onnx_model(onnx_model):
 
 def optimize_onnx_model(onnx_model):
     onnx_model = onnxslim.slim(onnx_model, skip_fusion_patterns=["FusionGemm"])
+    onnx_model = ensure_yolo_decode_function(onnx_model)
     return onnx_model

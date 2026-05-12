@@ -189,7 +189,7 @@ Once preprocessing is verified and calibration data is adequate, systematically 
 | LSTM / RNN | `precision_level: 3` (dynamic quantization) |
 | Extreme accuracy sensitivity | `precision_level: 4` (FP16) |
 
-> **YOLO note:** For Ultralytics-style YOLO exports, start from `precision_level: 1` and `finetune_level: 2`, then check whether the detection head merges confidence and bbox branches through `Concat`. If it does, see the YOLO-specific guidance in [Method 5](#method-5-split-yolo-post-processing-with-truncate_var_names).
+> **YOLO note:** For Ultralytics-style YOLO exports, start from `precision_level: 1` and `finetune_level: 2`. XSlim now first tries to fuse supported decode branches into `spacemit_functions.YoloDecode`; if the exported graph still keeps a concat-heavy post-processing path or the fusion does not trigger, continue with [Method 6](#method-6-split-yolo-post-processing-with-truncate_var_names) as the fallback.
 
 ---
 
@@ -345,9 +345,31 @@ When the report shows moderate error across many layers (`0.01 < SNR < 0.1`) wit
 }
 ```
 
-### Method 5: Split YOLO Post-Processing with `truncate_var_names`
+### Method 5: Prefer Automatic `YoloDecode` Fusion First
 
-YOLO models often need one extra check beyond the general workflow. In many exported detection heads, the bbox branch and confidence / classification branch are merged by `Concat` during post-processing. These tensors frequently have very different quantization scales. Forcing them into the same INT8 range can severely damage detection accuracy even when the backbone and neck quantize well.
+For supported YOLO exports, XSlim can replace the decode-heavy post-processing subgraph with a single `spacemit_functions.YoloDecode` node backed by an embedded ONNX `FunctionProto`. This is now the preferred path because it keeps post-processing inside one model graph while avoiding the widest bbox / class concat pattern that often hurts detection accuracy after quantization.
+
+Recommended starting point:
+
+```json
+"quantization_parameters": {
+    "precision_level": 1,
+    "finetune_level": 2
+}
+```
+
+How to confirm that the fusion triggered:
+
+1. Open the optimized or quantized model in Netron.
+2. Check whether the large decode subgraph has been replaced by `spacemit_functions.YoloDecode`.
+3. Confirm the exported model carries the `spacemit_functions` import and its matching ONNX `FunctionProto`.
+4. If the post-processing path is still expanded into the original concat-heavy graph, continue with Method 6.
+
+This fusion targets common YOLO decode layouts, including direct decode branches and exports that split bbox and classification tensors before recombining them. If your exporter inserts extra plugins, custom reshape orders, or a different decode flow, XSlim may not match the pattern and truncation remains the safer fallback.
+
+### Method 6: Split YOLO Post-Processing with `truncate_var_names`
+
+When automatic `spacemit_functions.YoloDecode` fusion does not trigger, YOLO models often need one extra fallback beyond the general workflow. In many exported detection heads, the bbox branch and confidence / classification branch are merged by `Concat` during post-processing. These tensors frequently have very different quantization scales. Forcing them into the same INT8 range can severely damage detection accuracy even when the backbone and neck quantize well.
 
 This pattern is common in ONNX models exported from [Ultralytics](https://github.com/ultralytics/ultralytics). For example, some YOLOv8 exports use `/model.22/...` tensors in the post-processing path. In this case, a practical solution is to truncate the graph before the post-processing concat path so XSlim quantizes the main network while keeping the post-processing part in floating point.
 
@@ -371,7 +393,7 @@ Recommended workflow for Ultralytics YOLO ONNX models:
 4. Quantize again with `precision_level: 1` and `finetune_level: 2`, then inspect the Graphwise report for any remaining hotspots in the pre-truncated subgraph.
 5. If needed, further tune the pre-truncated network with `custom_setting`, but keep the concat-heavy YOLO post-processing path outside the quantized region.
 
-> **Tip:** The exact tensor names differ by YOLO version and export options. The `"/model.22/..."` example is a useful Ultralytics starting point, but always confirm the real names in your own ONNX graph.
+> **Tip:** The exact tensor names differ by YOLO version and export options. The `"/model.22/..."` example is a useful Ultralytics starting point, but always confirm the real names in your own ONNX graph. If the exported model already contains a fused `spacemit_functions.YoloDecode` node, you usually do not need `truncate_var_names`.
 
 ### Combined Tuning Example
 
@@ -426,7 +448,7 @@ The following configuration combines multiple methods for a CNN model with high 
 | Small accuracy drop (1–5%) | Insufficient or non-representative calibration data | Increase `calibration_step`; ensure data diversity |
 | Small accuracy drop | `precision_level` too low | Try `precision_level: 1` or `2` |
 | Small accuracy drop | Inaccurate calibration range | Try `calibration_type: "percentile"` or `"kl"` |
-| YOLO accuracy collapses after post-processing is quantized | Detection head merges bbox and confidence branches with very different scales | Split the graph with `truncate_var_names` and keep YOLO post-processing outside the quantized region |
+| YOLO accuracy drops around decode / post-processing | The decode path was not fused, or bbox and confidence branches still share a wide concat range | First confirm `spacemit_functions.YoloDecode` was generated; if not, split the graph with `truncate_var_names` and keep YOLO post-processing outside the quantized region |
 | Specific layer has very high SNR in report | Abnormal activation range in that layer | Use `custom_setting` for that subgraph with `precision_level: 2` or `minmax` calibration |
 | Many layers show Cosine < 0.99 | High global quantization error | Increase `finetune_level` to `2` or `3` |
 | INT8 accuracy unacceptably low regardless of tuning | Model is highly sensitive to quantization | Use `precision_level: 3` (dynamic) or `4` (FP16) |

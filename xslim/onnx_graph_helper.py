@@ -120,7 +120,7 @@ def _normalize_kernel_shape_attrs(
             if weight_shape is None or len(weight_shape) < 3:
                 logger.warning(
                     (
-                        "skip filling kernel_shape for %s because "
+                        "skip filling kernel_shape for {} because "
                         "weight shape is unavailable"
                     ),
                     node.name or node.op,
@@ -131,8 +131,8 @@ def _normalize_kernel_shape_attrs(
             if any(dim is None or isinstance(dim, str) for dim in kernel_shape):
                 logger.warning(
                     (
-                        "skip filling kernel_shape for %s because "
-                        "weight shape %s is not static"
+                        "skip filling kernel_shape for {} because "
+                        "weight shape {} is not static"
                     ),
                     node.name or node.op,
                     weight_shape,
@@ -309,7 +309,7 @@ def format_onnx_model(
     try:
         onnx_model = infer_onnx_model(onnx_model)
     except Exception as e:
-        logger.warning("shape_inference error with {}, skiped".format(e))
+        logger.warning("shape_inference error with {}, skipped".format(e))
 
     onnx_model = _deduplicate_node_names(onnx_model)
     return onnx_model
@@ -325,6 +325,21 @@ def merge_onnx_model(
         for idx, o_var in enumerate(osg_graph.outputs):
             o_idx = o_var.inputs[0].outputs.index(o_var)
             o_var.inputs[0].outputs[o_idx] = truncate_vars[idx]
+
+        # Reuse tensors from the downstream graph when names already exist there.
+        # Otherwise GraphSurgeon will keep distinct Variable objects with the same
+        # name, which later triggers duplicate-tensor warnings during export.
+        shared_tensors = truncate_left_graph.tensors()
+        for node in osg_graph.nodes:
+            for tensor_list in (node.inputs, node.outputs):
+                for tensor_idx, tensor in enumerate(tensor_list):
+                    if tensor.is_empty():
+                        continue
+                    shared_tensor = shared_tensors.get(tensor.name)
+                    if shared_tensor is not None and shared_tensor is not tensor:
+                        tensor_list[tensor_idx] = shared_tensor
+                    else:
+                        shared_tensors[tensor.name] = tensor
 
         new_osg_graph = osg.Graph(
             nodes=osg_graph.nodes + truncate_left_graph.nodes,

@@ -193,7 +193,51 @@ python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_dynq.onnx 
 
 ---
 
-## 6. 自定义预处理
+## 6. 自动 Decode 融合的 YOLO 检测模型
+
+对于受支持的 YOLO 导出模型，XSlim 可以把 decode 密集的后处理融合成单个 `spacemit_functions.YoloDecode` 节点，并在模型里保留对应的 ONNX `FunctionProto`。无需额外开关，直接从常规检测模型 INT8 配置起步即可。
+
+**配置文件**（`yolo_int8.json`）：
+
+```json
+{
+    "model_parameters": {
+        "onnx_model": "models/yolov8n.onnx",
+        "working_dir": "./output"
+    },
+    "calibration_parameters": {
+        "calibration_step": 500,
+        "input_parameters": [
+            {
+                "color_format": "rgb",
+                "mean_value": [0.0, 0.0, 0.0],
+                "std_value": [255.0, 255.0, 255.0],
+                "data_list_path": "./calib_data/img_list.txt"
+            }
+        ]
+    },
+    "quantization_parameters": {
+        "precision_level": 1,
+        "finetune_level": 2
+    }
+}
+```
+
+**命令行运行：**
+
+```bash
+python -m xslim -c yolo_int8.json
+```
+
+**要点：**
+- 检测模型建议从 `precision_level: 1` 与 `finetune_level: 2` 起步。
+- 当 decode 模式匹配成功时，XSlim 会把后处理子图改写为 `spacemit_functions.YoloDecode`，并在导出时保留所需的 ONNX `FunctionProto`。
+- 若要确认融合是否触发，可用 [Netron](https://netron.app) 打开导出模型，查看大段 decode 子图是否已被 `YoloDecode` 替代。
+- 如果导出图仍保留 bbox / cls 的 concat 密集后处理，可把 `truncate_var_names` 作为回退方案；详见精度调优指南。
+
+---
+
+## 7. 自定义预处理
 
 当内置的 `PT_IMAGENET` 或 `IMAGENET` 预设不符合您的处理流程时，可使用自定义预处理函数。
 
@@ -259,7 +303,7 @@ def preprocess_impl(path_list: Sequence[str], input_parametr: dict) -> torch.Ten
 
 ---
 
-## 7. Python API
+## 8. Python API
 
 上述所有场景均可通过 Python API 代替命令行驱动。
 
@@ -303,4 +347,5 @@ quantized_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 - **校准样本数量**：通常 100–300 个样本即可。更多样本可提高校准质量，但会增加耗时。
 - **精度级别选择**：从 `precision_level: 0` 开始。若精度下降，依次尝试 `1` 或 `2`。仅当 INT8 质量不满足要求时才使用 `4`（FP16）。
 - **Transformer 模型**：建议使用 `precision_level: 1` 或 `2`，结合 `finetune_level: 2` 以获得最佳效果。
-- **查看 Tensor 名称**：使用 [Netron](https://netron.app) 可视化 ONNX 计算图，找到用于 `custom_setting` 或 `truncate_var_names` 的 Tensor 名称。
+- **YOLO 模型**：建议从 `precision_level: 1` 与 `finetune_level: 2` 起步。若输出模型中已经出现 `spacemit_functions.YoloDecode`，说明自动 decode 融合已生效；否则可考虑回退到 `truncate_var_names`。
+- **查看 Tensor 名称**：使用 [Netron](https://netron.app) 可视化 ONNX 计算图，找到用于 `custom_setting`、`truncate_var_names` 或验证 YOLO 融合结果的 Tensor / 节点名称。

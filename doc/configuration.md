@@ -26,6 +26,7 @@ Controls input/output paths and model pre-processing.
 | `output_prefix` | `string` | Model filename stem (output appends `.q.onnx`) | Prefix for the output file name |
 | `working_dir` | `string` | Directory containing `onnx_model` | Directory for the output model and intermediate files |
 | `skip_onnxsim` | `bool` | `false` | Set `true` to skip ONNX model simplification before quantization |
+| `opset` | `int` | Keep the model's default `ai.onnx` opset | Convert the default `ai.onnx` opset to a target version during simplify / quantize / export |
 
 ### Example
 
@@ -36,6 +37,8 @@ Controls input/output paths and model pre-processing.
     "working_dir": "./output"
 }
 ```
+
+> `opset` is the JSON equivalent of the CLI `--opset` flag. Use it when your target runtime requires a specific default ai.onnx opset version.
 
 ---
 
@@ -214,6 +217,8 @@ A list of per-subgraph overrides. Each entry selects a contiguous subgraph by it
 
 Specifies a list of tensor names at which the computation graph is **split into exactly two parts**. The split tensors become output tensors of the first subgraph and input tensors of the second. The tool validates the binary split and raises an error if the result is invalid.
 
+> **YOLO note:** XSlim first tries to fuse supported decode-heavy YOLO post-processing into `spacemit_functions.YoloDecode`. Use `truncate_var_names` as a fallback when the export pattern does not match the fusion pass or when you intentionally want to keep post-processing outside the quantized region.
+
 ```json
 "truncate_var_names": ["/Concat_5_output_0", "/Transpose_6_output_0"]
 ```
@@ -226,6 +231,12 @@ Operators matching any entry in `ignore_op_types` (by ONNX op type) or `ignore_o
 "ignore_op_types": ["LayerNormalization", "Softmax"],
 "ignore_op_names": ["/model/encoder/layer.0/attention/MatMul"]
 ```
+
+---
+
+## ONNX Function Preservation
+
+XSlim preserves existing ONNX `FunctionProto` definitions from the input model and automatically emits the required `spacemit_functions` import when fused nodes such as `YoloDecode` or `BatchMatMul` are present. No extra configuration is required.
 
 ---
 

@@ -75,10 +75,12 @@ def xslim_load_onnx_graph(
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
 
     onnx_model = format_onnx_model(onnx_model, sim_en, target_onnx_opset)
+    # Save functions before truncation, they will be restored after quantization
+    saved_functions = list(onnx_model.functions)
     onnx_model, truncate_left_graph, truncate_vars = truncate_onnx_model(onnx_model, truncate_var_name)
 
     graph = OnnxParser().build(onnx_model)
-    return graph, truncate_left_graph, truncate_vars
+    return graph, truncate_left_graph, truncate_vars, saved_functions
 
 
 def parse_xslim_config(file_or_dict: Union[str, dict]) -> XSlimSetting:
@@ -186,7 +188,7 @@ def quantize_onnx_model(
             target_onnx_opset,
         )
     else:
-        ppq_ir, truncate_left_graph, truncate_vars = xslim_load_onnx_graph(
+        ppq_ir, truncate_left_graph, truncate_vars, saved_functions = xslim_load_onnx_graph(
             model_path,
             not config_setting.model_parameters.skip_onnxsim,
             config_setting.quantization_parameters.truncate_var_names,
@@ -250,6 +252,12 @@ def quantize_onnx_model(
         )
 
         quant_onnx_model = merge_onnx_model(quant_onnx_model, truncate_left_graph, truncate_vars)
+
+        # Restore functions that were saved before quantization
+        for function_proto in saved_functions:
+            # Check if function already exists to avoid duplicates
+            if not any(f.domain == function_proto.domain and f.name == function_proto.name for f in quant_onnx_model.functions):
+                quant_onnx_model.functions.append(function_proto)
 
     quant_onnx_model.metadata_props.extend(ori_onnx_model.metadata_props)
     quant_onnx_model.ir_version = max(9, ori_onnx_model.ir_version)
