@@ -226,7 +226,7 @@ def _normalize_kernel_shape_attrs(
     except Exception as exc:
         logger.warning(
             "Failed to normalize kernel_shape attributes via GraphSurgeon; "
-            "returning original ONNX model. Error: {}",
+            "returning original ONNX model. Error: %s",
             exc,
         )
         return onnx_model
