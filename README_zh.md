@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-[![版本](https://img.shields.io/badge/版本-2.0.13-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![版本](https://img.shields.io/badge/版本-2.1.0-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 
@@ -25,6 +25,8 @@
 - **JSON 驱动配置** — 简洁的声明式量化设定
 - **Python API 与命令行** — 可作为库调用或通过命令行使用
 - **自定义预处理** — 支持自定义预处理函数
+- **自动 YOLO Decode 融合** — 将受支持的 YOLO 解码后处理子图融合为单个 `spacemit_functions.YoloDecode` 节点
+- **感知 ONNX Function 的导出链路** — 自动保留内嵌 `FunctionProto` 定义并补齐所需的自定义域导入
 - **基于 ONNX** — 构建在 ONNX 生态系统之上
 
 ## 安装
@@ -95,6 +97,8 @@ python -m xslim -i input.onnx -o output.onnx --opset 20
 python -m xslim -i input.onnx -o output.onnx
 ```
 
+对于受支持的 YOLO 导出模型，无需额外开关：XSlim 会在模型精简阶段尝试把 decode 密集的后处理融合成 `spacemit_functions.YoloDecode`，并在导出模型时保留对应的 ONNX `FunctionProto`。
+
 ## 文档
 
 - [配置参考](doc/configuration_zh.md) — 所有 JSON 配置选项的完整说明
@@ -103,16 +107,18 @@ python -m xslim -i input.onnx -o output.onnx
 
 ## 示例
 
-请查看 [samples](samples/) 目录，包含 ResNet-18、MobileNet V3、BERT 等模型的可运行示例。
+请查看 [samples](samples/) 目录，包含 ResNet-18、MobileNet V3、BERT 等模型的可运行示例。YOLO 专项用法请参考示例文档与精度调优指南。
 
 ## 更新日志
 
-完整的更新记录请查阅 [Releases](https://github.com/spacemit-com/xslim/releases) 页面。
+完整的已发布版本记录请查阅 [Releases](https://github.com/spacemit-com/xslim/releases) 页面。下表已按该页面同步；`2.1.0` 是当前代码树中的开发版本，尚未正式发布。
 
 | 版本 | 主要更新 |
-|---|---|
-| 2.0.13 | 当前开发版本 |
-| [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | 最新发布版本；补全 README 更新日志与发布元数据，新增精度调优文档及 README 链接，引入 xslim-accuracy-tuning GitHub skill，补充 YOLO 截断后处理指导，并统一 input parameters 命名 |
+| --- | --- |
+| 2.1.0 | 当前代码树中的开发版本；新增面向受支持 YOLO 导出模型的 `spacemit_functions.YoloDecode` 自动融合，量化/导出时保留自定义 ONNX `FunctionProto` 定义，并补强 opset 24 与自定义域相关处理覆盖 |
+| [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | 最新正式发布版本；为量化与转换流程新增可配置的默认 `ai.onnx` opset 转换能力 |
+| [2.0.13](https://github.com/spacemit-com/xslim/releases/tag/2.0.13) | 将默认 ONNX opset 升级到 24，统一算子 domain，并对齐 2.0.12 发布后的版本元数据 |
+| [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | 补全 README 更新日志与发布元数据，新增精度调优文档及 README 链接，引入 xslim-accuracy-tuning GitHub skill，补充 YOLO 截断后处理指导，并统一 input parameters 命名 |
 | [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | 修复 Pad / 缺失输入处理问题，新增 Or / Einsum / Selu 支持，补齐 Conv / ConvTranspose 的 kernel shape 规范化，并将最低 Python 版本提升到 3.9 |
 | [2.0.10](https://github.com/spacemit-com/xslim/releases/tag/2.0.10) | 对齐发布元数据，增强 CI / 测试覆盖，补齐动态量化前缺失的默认 ONNX opset，并改进 shape inference 处理 |
 | [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | 补充文档，保留 FP16 转换期间的 tensor dtype 元数据，并恢复与 onnxslim 0.1.87 的兼容性 |

@@ -189,7 +189,7 @@ XSlim 支持以下量化方案，推荐按以下优先级依次尝试：
 | LSTM / RNN | `precision_level: 3`（动态量化） |
 | 精度极敏感（无法接受任何精度损失） | `precision_level: 4`（FP16） |
 
-> **YOLO 提示：** 对 Ultralytics 风格导出的 YOLO ONNX，建议先用 `precision_level: 1`、`finetune_level: 2` 起步，再重点检查检测头后处理里是否通过 `Concat` 合并了置信度分支和 bbox 分支。若存在该模式，请参考下方[方法五](#方法五使用-truncate_var_names-截断-yolo-后处理)。
+> **YOLO 提示：** 对 Ultralytics 风格导出的 YOLO ONNX，建议先用 `precision_level: 1`、`finetune_level: 2` 起步。XSlim 现在会优先尝试把受支持的 decode 分支融合成 `spacemit_functions.YoloDecode`；如果导出图仍保留 concat 密集后处理，或融合未触发，再继续参考下方[方法六](#方法六使用-truncate_var_names-截断-yolo-后处理) 作为回退方案。
 
 ---
 
@@ -345,9 +345,31 @@ SNR = 量化误差的能量 / 原始信号的能量。**SNR 越高，该 Tensor 
 }
 ```
 
-### 方法五：使用 `truncate_var_names` 截断 YOLO 后处理
+### 方法五：优先使用自动 `YoloDecode` 融合
 
-YOLO 模型通常还有一个额外的专项问题需要检查：很多检测头导出的后处理子图里，会把 bbox 分支和 conf / cls 分支通过 `Concat` 合并。这两类 Tensor 的量化 scale 往往相差很大，如果强行共用同一套 INT8 动态范围，哪怕主干网络量化正常，也可能导致检测精度明显下降。
+对于受支持的 YOLO 导出模型，XSlim 可以把 decode 密集的后处理子图替换为单个 `spacemit_functions.YoloDecode` 节点，并在模型中保留对应的 ONNX `FunctionProto`。这已经成为优先方案，因为它既能保留单模型图内的后处理，又能避开 bbox / cls 宽范围 `Concat` 常见带来的量化精度损失。
+
+推荐起步配置：
+
+```json
+"quantization_parameters": {
+    "precision_level": 1,
+    "finetune_level": 2
+}
+```
+
+可按以下方式确认融合是否触发：
+
+1. 用 Netron 打开精简后或量化后的模型。
+2. 检查大段 decode 子图是否已经被 `spacemit_functions.YoloDecode` 替代。
+3. 确认导出模型里带有 `spacemit_functions` import，以及对应的 ONNX `FunctionProto` 定义。
+4. 如果后处理仍然展开为原先的 concat 密集图，再继续使用方法六。
+
+该融合主要覆盖常见的 YOLO decode 结构，包括直接 decode 分支，以及先拆分 bbox / cls 再重新组合的导出形态。若导出器插入了额外插件、不同的 reshape 顺序或完全不同的 decode 流程，XSlim 可能无法命中模式，此时截断仍是更稳妥的回退方案。
+
+### 方法六：使用 `truncate_var_names` 截断 YOLO 后处理
+
+当自动 `spacemit_functions.YoloDecode` 融合没有触发时，YOLO 模型通常还需要一个额外的回退专项检查：很多检测头导出的后处理子图里，会把 bbox 分支和 conf / cls 分支通过 `Concat` 合并。这两类 Tensor 的量化 scale 往往相差很大，如果强行共用同一套 INT8 动态范围，哪怕主干网络量化正常，也可能导致检测精度明显下降。
 
 这个现象在 [Ultralytics](https://github.com/ultralytics/ultralytics) 导出的 ONNX 模型中比较常见。例如部分 YOLOv8 导出模型会在 `/model.22/...` 这组 Tensor 附近进入后处理路径。此时更稳妥的做法，是在进入后处理 `Concat` 之前使用 `truncate_var_names` 把图截断，让 XSlim 只量化主干和检测头预测部分，后处理保持浮点执行。
 
@@ -371,7 +393,7 @@ YOLO 模型通常还有一个额外的专项问题需要检查：很多检测头
 4. 以 `precision_level: 1`、`finetune_level: 2` 重新量化，再检查截断前子图的 Graphwise 报告。
 5. 如果截断前仍有局部热点，再结合 `custom_setting` 做定向调优，但尽量不要把 concat 密集的 YOLO 后处理重新纳入量化区域。
 
-> **提示：** 不同 YOLO 版本、不同导出参数下 Tensor 名称会变化。`"/model.22/..."` 只是 Ultralytics 模型里的常见起点，最终仍应以你自己的 ONNX 图为准。
+> **提示：** 不同 YOLO 版本、不同导出参数下 Tensor 名称会变化。`"/model.22/..."` 只是 Ultralytics 模型里的常见起点，最终仍应以你自己的 ONNX 图为准。如果输出模型里已经存在融合后的 `spacemit_functions.YoloDecode` 节点，通常就不需要再使用 `truncate_var_names`。
 
 ### 综合调优示例
 
@@ -426,7 +448,7 @@ YOLO 模型通常还有一个额外的专项问题需要检查：很多检测头
 | 量化后精度小幅下降（1–5%） | 校准数据不足或分布不均 | 增加 `calibration_step`，确保数据多样性 |
 | 量化后精度小幅下降 | `precision_level` 过低 | 尝试 `precision_level: 1` 或 `2` |
 | 量化后精度小幅下降 | 校准范围不准 | 尝试 `calibration_type: "percentile"` 或 `"kl"` |
-| YOLO 在后处理量化后精度断崖下降 | 检测头把 bbox 与 conf 分支做 `Concat`，scale 差异过大 | 使用 `truncate_var_names` 截断后处理，让 YOLO 后处理保留浮点 |
+| YOLO 在 decode / 后处理附近精度明显下降 | decode 路径没有融合成功，或 bbox 与 conf 分支仍共享宽范围 concat | 先确认是否已经生成 `spacemit_functions.YoloDecode`；若没有，再用 `truncate_var_names` 截断后处理，让 YOLO 后处理保留浮点 |
 | Graphwise 报告中某层 SNR 极高 | 该层激活值范围异常 | 对该子图使用 `custom_setting`，尝试 `precision_level: 2` 或 `minmax` 校准 |
 | Graphwise 报告中多层 Cosine < 0.99 | 全局量化误差较高 | 提升 `finetune_level` 至 `2` 或 `3` |
 | INT8 精度无论如何都无法满足需求 | 模型对量化极为敏感 | 使用 `precision_level: 3`（动态量化）或 `4`（FP16） |

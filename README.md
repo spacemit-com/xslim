@@ -2,7 +2,7 @@
 
 [中文版](README_zh.md) | English
 
-[![Version](https://img.shields.io/badge/version-2.0.13-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 
@@ -25,6 +25,8 @@
 - **JSON-driven configuration** – simple, declarative quantization setup
 - **Python API & CLI** – use as a library or from the command line
 - **Custom preprocessing** – plug in your own preprocessing functions
+- **Automatic YOLO decode fusion** – fuse supported YOLO decode subgraphs into a single `spacemit_functions.YoloDecode` node
+- **ONNX Function-aware export** – preserve embedded FunctionProto definitions and emit required custom-domain imports automatically
 - **ONNX-based workflow** – built on the ONNX ecosystem
 
 ## Installation
@@ -95,6 +97,8 @@ python -m xslim -i input.onnx -o output.onnx --opset 20
 python -m xslim -i input.onnx -o output.onnx
 ```
 
+For supported YOLO exports, no extra switch is required: XSlim will try to fuse decode-heavy post-processing into `spacemit_functions.YoloDecode` during simplification and keep the corresponding ONNX `FunctionProto` in the exported model.
+
 ## Documentation
 
 - [Configuration Reference](doc/configuration.md) – Full description of all JSON configuration options
@@ -103,16 +107,18 @@ python -m xslim -i input.onnx -o output.onnx
 
 ## Samples
 
-See the [samples](samples/) directory for ready-to-run examples covering ResNet-18, MobileNet V3, BERT, and more.
+See the [samples](samples/) directory for ready-to-run examples covering ResNet-18, MobileNet V3, BERT, and more. YOLO-specific usage notes are documented in the examples and accuracy-tuning guides.
 
 ## Changelog
 
-For a full list of changes, see the [Releases](https://github.com/spacemit-com/xslim/releases) page.
+For a full list of published versions, see the [Releases](https://github.com/spacemit-com/xslim/releases) page. The summary below is synchronized with that release history; `2.1.0` is the current in-tree development version and has not been published yet.
 
 | Version | Highlights |
-|---|---|
-| 2.0.13 | Current development version |
-| [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | Latest release; complete README changelog/release metadata, add accuracy-tuning docs and README links, introduce the xslim-accuracy-tuning GitHub skill, add YOLO truncation guidance, and rename input parameters for consistency |
+| --- | --- |
+| 2.1.0 | Current in-tree development version; add automatic `spacemit_functions.YoloDecode` fusion for supported YOLO exports, preserve custom ONNX `FunctionProto` definitions during quantization/export, and improve opset-24/custom-domain handling coverage |
+| [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | Latest published release; add configurable default `ai.onnx` opset conversion for quantization and conversion workflows |
+| [2.0.13](https://github.com/spacemit-com/xslim/releases/tag/2.0.13) | Upgrade the default ONNX opset to 24, standardize operator domains, and align version metadata with the 2.0.12 release |
+| [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | Complete README changelog/release metadata, add accuracy-tuning docs and README links, introduce the xslim-accuracy-tuning GitHub skill, add YOLO truncation guidance, and rename input parameters for consistency |
 | [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | Fix Pad/missing-input handling, add Or/Einsum/Selu support, normalize Conv/ConvTranspose kernel shapes, and raise minimum Python to 3.9 |
 | [2.0.10](https://github.com/spacemit-com/xslim/releases/tag/2.0.10) | Align release metadata, improve CI/test coverage, normalize missing default ONNX opset before dynamic quantization, and refine shape inference handling |
 | [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | Add documentation, preserve tensor dtype metadata during FP16 conversion, and restore compatibility with onnxslim 0.1.87 |
