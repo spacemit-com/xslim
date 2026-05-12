@@ -113,7 +113,7 @@ def build_yolo_decode_function(opset_version=MIN_ONNX_OPSET_VERSION):
     - Concatenating bbox and sigmoid-activated class predictions
 
     Inputs:
-        input: Model output tensor [batch, (bbox_length * 4 + num_class) * spatial]
+        input: Model output tensor [batch, (bbox_length * 4 + num_class), spatial]
         flat_weight: Flattened DFL weight from 1x16x1x1 conv
         sub_const: Constant for bbox coordinate adjustment
         add_const: Constant for additional adjustment
