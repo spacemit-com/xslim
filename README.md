@@ -40,8 +40,16 @@ Or install from source:
 ```bash
 git clone https://github.com/spacemit-com/xslim.git
 cd xslim
-pip install -r requirements.txt
+pip install .
 ```
+
+For local development, use an editable install:
+
+```bash
+pip install -e .
+```
+
+Build metadata is defined in `pyproject.toml`; `setup.py` is kept only as a legacy compatibility shim.
 
 ## Quick Start
 
@@ -78,23 +86,26 @@ xslim.quantize_onnx_model("config.json", "input.onnx", "output.onnx")
 ### Command Line
 
 ```bash
-# INT8 quantization with a JSON config
+# Installed CLI entry point
+xslim --config config.json
+
+# Module entry point also remains available
 python -m xslim --config config.json
 
 # Specify input and output model paths
-python -m xslim -c config.json -i input.onnx -o output.onnx
+xslim -c config.json -i input.onnx -o output.onnx
 
 # Dynamic quantization (no config file needed)
-python -m xslim -i input.onnx -o output.onnx --dynq
+xslim -i input.onnx -o output.onnx --dynq
 
 # FP16 conversion (no config file needed)
-python -m xslim -i input.onnx -o output.onnx --fp16
+xslim -i input.onnx -o output.onnx --fp16
 
 # Convert the default ai.onnx opset to a target version
-python -m xslim -i input.onnx -o output.onnx --opset 20
+xslim -i input.onnx -o output.onnx --opset 20
 
 # ONNX simplification only (no config file needed)
-python -m xslim -i input.onnx -o output.onnx
+xslim -i input.onnx -o output.onnx
 ```
 
 For supported YOLO exports, no extra switch is required: XSlim will try to fuse decode-heavy post-processing into `spacemit_functions.YoloDecode` during simplification and keep the corresponding ONNX `FunctionProto` in the exported model.

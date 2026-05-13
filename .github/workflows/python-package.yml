@@ -37,6 +37,16 @@ jobs:
         pip install dist/*.whl --no-deps
         # Verify the package is installed and metadata is accessible
         pip show xslim
+        python - <<'PY'
+        from importlib.metadata import distribution
+
+        entry_points = {
+            entry_point.name: entry_point.value
+            for entry_point in distribution("xslim").entry_points
+            if entry_point.group == "console_scripts"
+        }
+        assert entry_points.get("xslim") == "xslim.__main__:main"
+        PY
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:

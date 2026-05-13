@@ -40,8 +40,16 @@ pip install xslim
 ```bash
 git clone https://github.com/spacemit-com/xslim.git
 cd xslim
-pip install -r requirements.txt
+pip install .
 ```
+
+本地开发建议使用可编辑安装：
+
+```bash
+pip install -e .
+```
+
+构建元数据统一定义在 `pyproject.toml` 中；`setup.py` 仅保留给旧工具链做兼容入口。
 
 ## 快速开始
 
@@ -78,23 +86,26 @@ xslim.quantize_onnx_model("config.json", "input.onnx", "output.onnx")
 ### 命令行
 
 ```bash
-# 使用 JSON 配置进行 INT8 量化
+# 安装后的标准命令入口
+xslim --config config.json
+
+# 模块入口仍然可用
 python -m xslim --config config.json
 
 # 指定输入和输出模型路径
-python -m xslim -c config.json -i input.onnx -o output.onnx
+xslim -c config.json -i input.onnx -o output.onnx
 
 # 动态量化（无需配置文件）
-python -m xslim -i input.onnx -o output.onnx --dynq
+xslim -i input.onnx -o output.onnx --dynq
 
 # FP16 转换（无需配置文件）
-python -m xslim -i input.onnx -o output.onnx --fp16
+xslim -i input.onnx -o output.onnx --fp16
 
 # 将默认 ai.onnx opset 转换到指定版本
-python -m xslim -i input.onnx -o output.onnx --opset 20
+xslim -i input.onnx -o output.onnx --opset 20
 
 # 仅模型精简（无需配置文件）
-python -m xslim -i input.onnx -o output.onnx
+xslim -i input.onnx -o output.onnx
 ```
 
 对于受支持的 YOLO 导出模型，无需额外开关：XSlim 会在模型精简阶段尝试把 decode 密集的后处理融合成 `spacemit_functions.YoloDecode`，并在导出模型时保留对应的 ONNX `FunctionProto`。
