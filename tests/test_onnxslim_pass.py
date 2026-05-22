@@ -631,6 +631,73 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
         return onnx.shape_inference.infer_shapes(model)
 
+    @staticmethod
+    def _build_matmul_qkv_split_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 2])
+        q_out = helper.make_tensor_value_info("q_out", TensorProto.FLOAT, [1, 2])
+        k_out = helper.make_tensor_value_info("k_out", TensorProto.FLOAT, [1, 2])
+        v_out = helper.make_tensor_value_info("v_out", TensorProto.FLOAT, [1, 2])
+
+        weight_values = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0,
+                         7.0, 8.0, 9.0, 10.0, 11.0, 12.0]
+        bias_values = [0.1, 1.1, 0.2, 1.2, 0.3, 1.3]
+
+        weight = helper.make_tensor(
+            "weight", TensorProto.FLOAT, [2, 6], weight_values
+        )
+        bias = helper.make_tensor(
+            "bias", TensorProto.FLOAT, [6], bias_values
+        )
+        reshape_shape = helper.make_tensor(
+            "reshape_shape", TensorProto.INT64, [3], [1, 2, 3]
+        )
+        gather_index_0 = helper.make_tensor("gather_index_0", TensorProto.INT64, [1], [0])
+        gather_index_1 = helper.make_tensor("gather_index_1", TensorProto.INT64, [1], [1])
+        gather_index_2 = helper.make_tensor("gather_index_2", TensorProto.INT64, [1], [2])
+
+        nodes = [
+            helper.make_node("MatMul", ["x", "weight"], ["matmul_out"], name="matmul_0"),
+            helper.make_node("Add", ["bias", "matmul_out"], ["add_out"], name="add_0"),
+            helper.make_node(
+                "Reshape",
+                ["add_out", "reshape_shape"],
+                ["reshape_out"],
+                name="reshape_0",
+            ),
+            helper.make_node(
+                "Gather",
+                ["reshape_out", "gather_index_0"],
+                ["q_out"],
+                name="gather_0",
+                axis=2,
+            ),
+            helper.make_node(
+                "Gather",
+                ["reshape_out", "gather_index_1"],
+                ["k_out"],
+                name="gather_1",
+                axis=2,
+            ),
+            helper.make_node(
+                "Gather",
+                ["reshape_out", "gather_index_2"],
+                ["v_out"],
+                name="gather_2",
+                axis=2,
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "matmul_qkv_split_pattern_graph",
+            [x],
+            [q_out, k_out, v_out],
+            [weight, bias, reshape_shape, gather_index_0, gather_index_1, gather_index_2],
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
     def test_infer_onnx_model_restores_shape_info_for_float16_model(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_add_model()
@@ -846,6 +913,73 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
 
         onnx.checker.check_model(optimized_model)
+
+    def test_optimize_onnx_model_fuses_matmul_qkv_split_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_matmul_qkv_split_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["MatMul", "MatMul", "MatMul", "Add", "Add", "Add"],
+        )
+        self.assertEqual(
+            [node.name for node in optimized_model.graph.node],
+            [
+                "matmul_0_q",
+                "matmul_0_k",
+                "matmul_0_v",
+                "add_0_q",
+                "add_0_k",
+                "add_0_v",
+            ],
+        )
+
+        initializers = {
+            initializer.name: onnx.numpy_helper.to_array(initializer).tolist()
+            for initializer in optimized_model.graph.initializer
+        }
+        self.assertEqual(
+            initializers["matmul_0_q_weight"],
+            [[1.0, 4.0], [7.0, 10.0]],
+        )
+        self.assertEqual(
+            initializers["matmul_0_k_weight"],
+            [[2.0, 5.0], [8.0, 11.0]],
+        )
+        self.assertEqual(
+            initializers["matmul_0_v_weight"],
+            [[3.0, 6.0], [9.0, 12.0]],
+        )
+        self.assertTrue(
+            all(
+                abs(actual - expected) < 1e-6
+                for actual, expected in zip(
+                    initializers["add_0_q_bias"], [0.1, 1.2]
+                )
+            )
+        )
+        self.assertTrue(
+            all(
+                abs(actual - expected) < 1e-6
+                for actual, expected in zip(
+                    initializers["add_0_k_bias"], [1.1, 0.3]
+                )
+            )
+        )
+        self.assertTrue(
+            all(
+                abs(actual - expected) < 1e-6
+                for actual, expected in zip(
+                    initializers["add_0_v_bias"], [0.2, 1.3]
+                )
+            )
+        )
 
     def test_build_yolo_decode_function_uses_dynamic_bbox_reshape_shape(self):
         _load_onnxslim_pass_module()
