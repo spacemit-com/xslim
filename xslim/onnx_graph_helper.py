@@ -295,7 +295,7 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
         )
         return onnx.TensorProto.FLOAT
 
-    def _dtype_bound(data_type: int, bound_name: str):
+    def _dtype_bound(data_type: int, bound_name: str) -> Union[bool, int, float]:
         """Return the dtype minimum or maximum value for an ONNX tensor dtype."""
         if data_type == onnx.TensorProto.BOOL:
             return bound_name == "max"
@@ -315,7 +315,14 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
             return False
         return numpy_helper.to_array(initializer).size == 0
 
-    def _set_bound_input(node: onnx.NodeProto, input_idx: int, bound_name: str, data_type: int) -> None:
+    def _set_bound_input(
+        node: onnx.NodeProto,
+        input_idx: int,
+        bound_name: str,
+        data_type: int,
+        graph: onnx.GraphProto,
+        initializers: Dict[str, onnx.TensorProto],
+    ) -> None:
         """Create a scalar bound initializer and attach it to a Clip input."""
         bound_initializer = helper.make_tensor(
             name=_make_unique_name(f"{node.name or node.op_type}_{bound_name}"),
@@ -323,8 +330,8 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
             dims=[],
             vals=[_dtype_bound(data_type, bound_name)],
         )
-        onnx_model.graph.initializer.append(bound_initializer)
-        initializer_by_name[bound_initializer.name] = bound_initializer
+        graph.initializer.append(bound_initializer)
+        initializers[bound_initializer.name] = bound_initializer
         while len(node.input) <= input_idx:
             node.input.append("")
         node.input[input_idx] = bound_initializer.name
@@ -335,7 +342,7 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
         data_type = _tensor_dtype(node.input[0])
         for input_idx, bound_name in ((1, "min"), (2, "max")):
             if input_idx >= len(node.input) or _is_empty_bound(node.input[input_idx]):
-                _set_bound_input(node, input_idx, bound_name, data_type)
+                _set_bound_input(node, input_idx, bound_name, data_type, onnx_model.graph, initializer_by_name)
                 updated = True
 
     return onnx_model

@@ -7,10 +7,14 @@ import types
 import unittest
 from unittest import mock
 
+import numpy as np
 import onnx
 import onnxslim.third_party.onnx_graphsurgeon as osg
 from onnx import TensorProto, helper, numpy_helper
 from onnxconverter_common import float16 as convert_float_to_float16
+
+FLOAT32_MIN = np.finfo(np.float32).min
+FLOAT32_MAX = np.finfo(np.float32).max
 
 
 def _load_onnxslim_pass_module():
@@ -1254,8 +1258,8 @@ class TestOnnxSlimPass(unittest.TestCase):
         clip_node = formatted_model.graph.node[0]
         initializers = {initializer.name: initializer for initializer in formatted_model.graph.initializer}
         self.assertEqual(len(clip_node.input), 3)
-        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), -3.4028234663852886e38)
-        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), 3.4028234663852886e38)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), FLOAT32_MIN)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), FLOAT32_MAX)
         onnx.checker.check_model(formatted_model)
 
     def test_format_onnx_model_materializes_empty_clip_bounds(self):
@@ -1282,8 +1286,8 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(len(clip_node.input), 3)
         self.assertNotEqual(clip_node.input[1], "empty_min")
         self.assertNotEqual(clip_node.input[2], "empty_max")
-        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), -3.4028234663852886e38)
-        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), 3.4028234663852886e38)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), FLOAT32_MIN)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), FLOAT32_MAX)
         onnx.checker.check_model(formatted_model)
 
     def test_format_onnx_model_materializes_empty_clip_optional_input_name(self):
@@ -1309,7 +1313,7 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(len(clip_node.input), 3)
         self.assertNotEqual(clip_node.input[1], "")
         self.assertEqual(clip_node.input[2], "clip_max")
-        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), -3.4028234663852886e38)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), FLOAT32_MIN)
         self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), 6.0)
         onnx.checker.check_model(formatted_model)
 
