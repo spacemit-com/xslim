@@ -279,24 +279,70 @@ class GraphFormatter(GraphCommandProcessor):
         ValueError will be raised when any of min, max parameters is null
         """
 
-        interested_ops = []
-        for _, operation in self.graph.operations.items():
-            if operation.type == "Clip" and ("min" in operation.attributes or "max" in operation.attributes):
-                interested_ops.append(operation)
-        for op in interested_ops:
+        def make_unique_name(base_name: str) -> str:
+            if base_name not in self.graph.variables:
+                return base_name
+            suffix = 0
+            while f"{base_name}_{suffix}" in self.graph.variables:
+                suffix += 1
+            return f"{base_name}_{suffix}"
+
+        def is_empty_clip_bound(var: Variable) -> bool:
+            if var.name == "":
+                return True
+            value = var.value
+            if isinstance(value, torch.Tensor):
+                return value.numel() == 0
+            return False
+
+        def dtype_bound_tensor(op: Operation, bound: str) -> torch.Tensor:
+            try:
+                torch_dtype = DataType.to_torch(op.inputs[0].dtype)
+            except (AssertionError, KeyError):
+                torch_dtype = torch.float32
+
+            if torch.is_floating_point(torch.empty((), dtype=torch_dtype)):
+                info = torch.finfo(torch_dtype)
+            else:
+                info = torch.iinfo(torch_dtype)
+            return torch.tensor(getattr(info, bound), dtype=torch_dtype)
+
+        def scalar_tensor(value: Any, op: Operation) -> torch.Tensor:
+            try:
+                torch_dtype = DataType.to_torch(op.inputs[0].dtype)
+            except (AssertionError, KeyError):
+                torch_dtype = torch.float32
+            return torch.as_tensor(value, dtype=torch_dtype)
+
+        def set_clip_bound(op: Operation, input_idx: int, bound_name: str, value: torch.Tensor) -> None:
+            bound_var = Variable(
+                name=make_unique_name(f"{op.name}_{bound_name}"),
+                value=value,
+                is_parameter=True,
+                dest_ops=[op],
+            )
+            self.graph.append_variable(bound_var)
+
+            if input_idx < len(op.inputs):
+                old_var = op.inputs[input_idx]
+                if op in old_var.dest_ops:
+                    old_var.dest_ops.remove(op)
+                op.inputs[input_idx] = bound_var
+            else:
+                op.inputs.append(bound_var)
+
+        for op in self.graph.operations.values():
+            if op.type != "Clip":
+                continue
             assert isinstance(op, Operation)
-            min = op.attributes.get("min", -2 << 30)
-            max = op.attributes.get("max", +2 << 30)
-            min_var = Variable(name=op.name + "_min", value=min, is_parameter=True, dest_ops=[op])
-            max_var = Variable(name=op.name + "_max", value=max, is_parameter=True, dest_ops=[op])
-            self.graph.append_variable(min_var)
-            self.graph.append_variable(max_var)
-            op.inputs.append(min_var)
-            op.inputs.append(max_var)
-            if "min" in op.attributes:
-                op.attributes.pop("min")
-            if "max" in op.attributes:
-                op.attributes.pop("max")
+            for input_idx, attr_name, bound_name in ((1, "min", "min"), (2, "max", "max")):
+                if attr_name in op.attributes:
+                    value = scalar_tensor(op.attributes.pop(attr_name), op)
+                elif input_idx >= len(op.inputs) or is_empty_clip_bound(op.inputs[input_idx]):
+                    value = dtype_bound_tensor(op, bound_name)
+                else:
+                    continue
+                set_clip_bound(op, input_idx, attr_name, value)
 
     def format_gather(self) -> None:
         """gather op 的参数 index 可能由 input variable 给出 但 index
