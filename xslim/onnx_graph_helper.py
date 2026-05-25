@@ -270,6 +270,7 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
     updated = False
 
     def _make_unique_name(base_name: str) -> str:
+        """Return an unused tensor name, appending numeric suffixes on collision."""
         name = base_name
         suffix = 0
         while name in used_names:
@@ -279,6 +280,7 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
         return name
 
     def _tensor_dtype(tensor_name: str) -> int:
+        """Infer an ONNX tensor dtype, falling back to FLOAT when unavailable."""
         initializer = initializer_by_name.get(tensor_name)
         if initializer is not None:
             return initializer.data_type
@@ -294,6 +296,7 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
         return onnx.TensorProto.FLOAT
 
     def _dtype_bound(data_type: int, bound_name: str):
+        """Return the dtype minimum or maximum value for an ONNX tensor dtype."""
         if data_type == onnx.TensorProto.BOOL:
             return bound_name == "max"
         np_dtype = helper.tensor_dtype_to_np_dtype(data_type)
@@ -304,6 +307,7 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
         return getattr(info, bound_name).item()
 
     def _is_empty_bound(input_name: str) -> bool:
+        """Return whether a Clip bound input is omitted or a zero-size initializer."""
         if input_name == "":
             return True
         initializer = initializer_by_name.get(input_name)
@@ -312,6 +316,7 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
         return numpy_helper.to_array(initializer).size == 0
 
     def _set_bound_input(node: onnx.NodeProto, input_idx: int, bound_name: str, data_type: int) -> None:
+        """Create a scalar bound initializer and attach it to a Clip input."""
         bound_initializer = helper.make_tensor(
             name=_make_unique_name(f"{node.name or node.op_type}_{bound_name}"),
             data_type=data_type,
