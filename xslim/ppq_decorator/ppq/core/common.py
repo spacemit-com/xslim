@@ -12,7 +12,7 @@ MAX_RECURSION_DEPTH = 5000
 OBSERVER_MIN_SCALE = 1e-8
 # Observer 中，最小 scale 的手动覆盖属性
 OBSERVER_MIN_SCALE_MANUL_OVERRIDE = 'OBSERVER_MIN_SCALE_MANUL_OVERRIDE'
-# 当出现 scale < min_scale 的情况时，是否给出警报 
+# 当出现 scale < min_scale 的情况时，是否给出警报
 OBSERVER_WARNING = False
 # Observer 中 kl 散度的计算设备
 OBSERVER_KL_COMPUTING_DEVICE = 'cpu'
@@ -60,8 +60,8 @@ SOI_OP = {'TopK', 'Shape', 'NonMaxSuppression'}
 
 # 强制联合定点的算子种类
 TYPES_FOR_ALIGNMENT = {
-    'Elementwise': {'Add', 'Sub', 'Sum'}, 
-    'Concat': {'Concat'}, 
+    'Elementwise': {'Add', 'Sub', 'Sum'},
+    'Concat': {'Concat'},
     'Pooling': {'AveragePool', 'GlobalAveragePool'}}
 # 强制联合定点手动覆盖
 ALIGNMENT_MANUL_OVERRIDE = 'ALIGNMENT_MANUL_OVERRIDE'

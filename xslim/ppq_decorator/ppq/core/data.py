@@ -165,7 +165,7 @@ class TensorMeta:
 
     def __str__(self) -> str:
         return f'Tensor({self.name}) meta: dtype({self.dtype}), shape({self.shape})'
-    
+
     def copy(self):
         if self.shape is not None:
             return TensorMeta(dtype=self.dtype, shape=self.shape.copy(), tensor_name=self.name)
@@ -218,7 +218,7 @@ class OperationMeta:
         return OperationMeta(
             input_metas = [meta.copy() for meta in self.input_metas],
             output_metas = [meta.copy() for meta in self.output_metas],
-            operation_name=self.operation_name, operation_type=self.operation_type, 
+            operation_name=self.operation_name, operation_type=self.operation_type,
             executing_order=self.executing_order)
 
 

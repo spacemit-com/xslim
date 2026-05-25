@@ -21,7 +21,7 @@ class ComplieHelper(metaclass=SingletonMeta):
     def complie(self):
         ppq_warning('Compling Kernels... Please wait (It will take a few minutes).')
         lock_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'csrc/build/lock')
-        if os.path.exists(lock_file): 
+        if os.path.exists(lock_file):
             try: os.remove(lock_file)
             except Exception as e:
                 raise PermissionError(f'Can not delete lock file at {lock_file}, delete it first!')
@@ -39,7 +39,7 @@ class ComplieHelper(metaclass=SingletonMeta):
             build_directory=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'csrc/build/'),
             with_cuda=True,
             extra_cflags=['-O3'])
-    
+
     @ property
     def CUDA_EXTENSION(self):
         if self.__CUDA_EXTENTION__ is None:
@@ -274,7 +274,7 @@ class CUDA:
         tensor: torch.Tensor,
         scales: torch.Tensor,
         offsets: torch.Tensor,
-        exponent: int = 4, 
+        exponent: int = 4,
         mantissa: int = 3,
         minimum: float = - 448, # FP8 E4M3
         maximum: float = + 448,
@@ -293,7 +293,7 @@ class CUDA:
         scales: torch.Tensor,
         offsets: torch.Tensor,
         channel_axis: int,
-        exponent: int = 4, 
+        exponent: int = 4,
         mantissa: int = 3,
         minimum: float = - 448, # FP8 E4M3
         maximum: float = + 448,
@@ -302,7 +302,7 @@ class CUDA:
         if exponent <= 0: raise ValueError('Floating Quantization requires exponent > 0')
         if not tensor.is_contiguous(): tensor = tensor.contiguous()
         return CUDA_COMPLIER.CUDA_EXTENSION.QuantizeTensor_FC(
-            tensor, scales, offsets, exponent, mantissa, 
+            tensor, scales, offsets, exponent, mantissa,
             minimum, maximum, channel_axis, rounding)
 
     @ staticmethod
@@ -311,7 +311,7 @@ class CUDA:
         scales: torch.Tensor,
         offsets: torch.Tensor,
         dy: torch.Tensor,
-        exponent: int, 
+        exponent: int,
         mantissa: int,
         minimum: float,
         maximum: float,
@@ -329,7 +329,7 @@ class CUDA:
         scales: torch.Tensor,
         offsets: torch.Tensor,
         dy: torch.Tensor,
-        exponent: int, 
+        exponent: int,
         mantissa: int,
         minimum: float,
         maximum: float,
@@ -339,7 +339,7 @@ class CUDA:
         if not tensor.is_contiguous(): tensor = tensor.contiguous()
         return CUDA_COMPLIER.CUDA_EXTENSION.QuantizeTensor_FC_B(
             tensor, scales, offsets,
-            dy, exponent, mantissa, minimum, maximum, 
+            dy, exponent, mantissa, minimum, maximum,
             rounding, channel_axis
         )
 
