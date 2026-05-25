@@ -218,9 +218,10 @@ class TestGlobalFunctionsMapping(unittest.TestCase):
 
         clip = graph.operations["clip"]
         expected_min = torch.tensor(torch.finfo(torch.float32).min)
+        expected_max = torch.tensor(6.0)
         self.assertEqual(len(clip.inputs), 3)
         self.assertTrue(torch.equal(clip.inputs[1].value, expected_min))
-        self.assertTrue(torch.equal(clip.inputs[2].value, torch.tensor(6.0)))
+        self.assertTrue(torch.equal(clip.inputs[2].value, expected_max))
 
 
 if __name__ == "__main__":

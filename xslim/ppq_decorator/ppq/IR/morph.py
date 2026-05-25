@@ -293,6 +293,8 @@ class GraphFormatter(GraphCommandProcessor):
             return unique_name
 
         def is_empty_clip_bound(var: Variable) -> bool:
+            if var is None:
+                return True
             if var.name == "":
                 return True
             value = var.value
