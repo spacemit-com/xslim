@@ -373,8 +373,6 @@ def format_onnx_model(
         onnx_model = onnx.version_converter.convert_version(
             onnx_model, target_onnx_version)
 
-    onnx_model = _normalize_clip_optional_bounds(onnx_model)
-
     if sim_en:
         logger.info("simplify onnx model...")
     try:
@@ -387,6 +385,7 @@ def format_onnx_model(
     except Exception as e:
         logger.warning("shape_inference error with {}, skipped".format(e))
 
+    onnx_model = _normalize_clip_optional_bounds(onnx_model)
     onnx_model = _deduplicate_node_names(onnx_model)
     return onnx_model
 
