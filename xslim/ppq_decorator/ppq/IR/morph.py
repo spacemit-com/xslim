@@ -273,10 +273,10 @@ class GraphFormatter(GraphCommandProcessor):
                min, max parameter will be given by the attribute
         此函数统一 clip 算子行为：所有 clip 算子的 min, max 参数第二第三个变量给出
         this func unifies behaviors of clip op: min, max parameter will be given by input vars
-        针对可能存在的 min, max 为空的情况，将其直接置为 2 << 30（保证处理后非空）
+        针对可能存在的 min, max 缺省或为空 tensor 的情况，将其直接置为输入类型最小或最大值（保证处理后非空）
 
-        当 min, max 参数由 第二、第三个输入变量给出时，其中一个为空时直接返回 ValueError
-        ValueError will be raised when any of min, max parameters is null
+        当 min, max 参数由 第二、第三个输入变量给出时，其中一个为空时按该类型边界值处理
+        Missing or empty min, max parameters will be regularized to dtype bounds
         """
 
         def make_unique_name(base_name: str) -> str:
@@ -301,6 +301,8 @@ class GraphFormatter(GraphCommandProcessor):
             except (AssertionError, KeyError):
                 torch_dtype = torch.float32
 
+            if torch_dtype == torch.bool:
+                return torch.tensor(bound == "max", dtype=torch_dtype)
             if torch.is_floating_point(torch.empty((), dtype=torch_dtype)):
                 info = torch.finfo(torch_dtype)
             else:
