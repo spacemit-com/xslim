@@ -283,11 +283,14 @@ class GraphFormatter(GraphCommandProcessor):
 
         def make_unique_name(base_name: str) -> str:
             if base_name not in variable_names:
+                variable_names.add(base_name)
                 return base_name
             suffix = 0
             while f"{base_name}_{suffix}" in variable_names:
                 suffix += 1
-            return f"{base_name}_{suffix}"
+            unique_name = f"{base_name}_{suffix}"
+            variable_names.add(unique_name)
+            return unique_name
 
         def is_empty_clip_bound(var: Variable) -> bool:
             if var.name == "":
@@ -327,7 +330,6 @@ class GraphFormatter(GraphCommandProcessor):
                 dest_ops=[op],
             )
             self.graph.append_variable(bound_var)
-            variable_names.add(bound_var.name)
 
             if input_idx < len(op.inputs):
                 old_var = op.inputs[input_idx]
