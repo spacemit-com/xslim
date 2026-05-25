@@ -287,7 +287,10 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
             data_type = value_info.type.tensor_type.elem_type
             if data_type != onnx.TensorProto.UNDEFINED:
                 return data_type
-        logger.warning(f"Unable to infer Clip input {tensor_name} dtype, defaulting to FLOAT.")
+        logger.warning(
+            f"Unable to infer dtype for Clip input {tensor_name}; defaulting to FLOAT. "
+            "This may cause incorrect bound values if the actual input has a different dtype."
+        )
         return onnx.TensorProto.FLOAT
 
     def _dtype_bound(data_type: int, bound_name: str):
