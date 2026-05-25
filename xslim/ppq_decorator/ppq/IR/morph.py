@@ -302,7 +302,11 @@ class GraphFormatter(GraphCommandProcessor):
                 torch_dtype = torch.float32
 
             if torch_dtype == torch.bool:
-                return torch.tensor(bound == "max", dtype=torch_dtype)
+                if bound == "min":
+                    return torch.tensor(False, dtype=torch_dtype)
+                if bound == "max":
+                    return torch.tensor(True, dtype=torch_dtype)
+                raise ValueError(f"Unsupported Clip bound: {bound}")
             if torch.is_floating_point(torch.empty((), dtype=torch_dtype)):
                 info = torch.finfo(torch_dtype)
             else:
@@ -337,14 +341,14 @@ class GraphFormatter(GraphCommandProcessor):
             if op.type != "Clip":
                 continue
             assert isinstance(op, Operation)
-            for input_idx, attr_name, bound_name in ((1, "min", "min"), (2, "max", "max")):
-                if attr_name in op.attributes:
-                    value = scalar_tensor(op.attributes.pop(attr_name), op)
+            for input_idx, bound_name in ((1, "min"), (2, "max")):
+                if bound_name in op.attributes:
+                    value = scalar_tensor(op.attributes.pop(bound_name), op)
                 elif input_idx >= len(op.inputs) or is_empty_clip_bound(op.inputs[input_idx]):
                     value = dtype_bound_tensor(op, bound_name)
                 else:
                     continue
-                set_clip_bound(op, input_idx, attr_name, value)
+                set_clip_bound(op, input_idx, bound_name, value)
 
     def format_gather(self) -> None:
         """gather op 的参数 index 可能由 input variable 给出 但 index
