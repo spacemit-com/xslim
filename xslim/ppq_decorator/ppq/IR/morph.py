@@ -279,11 +279,13 @@ class GraphFormatter(GraphCommandProcessor):
         Missing or empty min, max parameters will be regularized to dtype bounds
         """
 
+        variable_names = set(self.graph.variables)
+
         def make_unique_name(base_name: str) -> str:
-            if base_name not in self.graph.variables:
+            if base_name not in variable_names:
                 return base_name
             suffix = 0
-            while f"{base_name}_{suffix}" in self.graph.variables:
+            while f"{base_name}_{suffix}" in variable_names:
                 suffix += 1
             return f"{base_name}_{suffix}"
 
@@ -295,15 +297,19 @@ class GraphFormatter(GraphCommandProcessor):
                 return value.numel() == 0
             return False
 
+        def clip_input_dtype(op: Operation) -> torch.dtype:
+            try:
+                return DataType.to_torch(op.inputs[0].dtype)
+            except (AssertionError, KeyError):
+                return torch.float32
+
         def dtype_bound_tensor(op: Operation, bound: str) -> torch.Tensor:
             assert bound in {"min", "max"}
-            try:
-                torch_dtype = DataType.to_torch(op.inputs[0].dtype)
-            except (AssertionError, KeyError):
-                torch_dtype = torch.float32
-
+            torch_dtype = clip_input_dtype(op)
             if torch_dtype == torch.bool:
-                return torch.tensor(bound == "max", dtype=torch_dtype)
+                if bound == "min":
+                    return torch.tensor(False, dtype=torch_dtype)
+                return torch.tensor(True, dtype=torch_dtype)
             if torch_dtype.is_floating_point:
                 info = torch.finfo(torch_dtype)
             else:
@@ -311,11 +317,7 @@ class GraphFormatter(GraphCommandProcessor):
             return torch.tensor(getattr(info, bound), dtype=torch_dtype)
 
         def scalar_tensor(value: Any, op: Operation) -> torch.Tensor:
-            try:
-                torch_dtype = DataType.to_torch(op.inputs[0].dtype)
-            except (AssertionError, KeyError):
-                torch_dtype = torch.float32
-            return torch.as_tensor(value, dtype=torch_dtype)
+            return torch.as_tensor(value, dtype=clip_input_dtype(op))
 
         def set_clip_bound(op: Operation, input_idx: int, bound_name: str, value: torch.Tensor) -> None:
             bound_var = Variable(
@@ -325,6 +327,7 @@ class GraphFormatter(GraphCommandProcessor):
                 dest_ops=[op],
             )
             self.graph.append_variable(bound_var)
+            variable_names.add(bound_var.name)
 
             if input_idx < len(op.inputs):
                 old_var = op.inputs[input_idx]
