@@ -296,18 +296,15 @@ class GraphFormatter(GraphCommandProcessor):
             return False
 
         def dtype_bound_tensor(op: Operation, bound: str) -> torch.Tensor:
+            assert bound in {"min", "max"}
             try:
                 torch_dtype = DataType.to_torch(op.inputs[0].dtype)
             except (AssertionError, KeyError):
                 torch_dtype = torch.float32
 
             if torch_dtype == torch.bool:
-                if bound == "min":
-                    return torch.tensor(False, dtype=torch_dtype)
-                if bound == "max":
-                    return torch.tensor(True, dtype=torch_dtype)
-                raise ValueError(f"Unsupported Clip bound: {bound}")
-            if torch.is_floating_point(torch.empty((), dtype=torch_dtype)):
+                return torch.tensor(bound == "max", dtype=torch_dtype)
+            if torch_dtype.is_floating_point:
                 info = torch.finfo(torch_dtype)
             else:
                 info = torch.iinfo(torch_dtype)

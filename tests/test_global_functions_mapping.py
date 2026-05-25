@@ -190,9 +190,11 @@ class TestGlobalFunctionsMapping(unittest.TestCase):
         GraphLegalized(graph)()
 
         clip = graph.operations["clip"]
+        expected_min = torch.tensor(torch.finfo(torch.float32).min)
+        expected_max = torch.tensor(torch.finfo(torch.float32).max)
         self.assertEqual(len(clip.inputs), 3)
-        self.assertTrue(torch.equal(clip.inputs[1].value, torch.tensor(torch.finfo(torch.float32).min)))
-        self.assertTrue(torch.equal(clip.inputs[2].value, torch.tensor(torch.finfo(torch.float32).max)))
+        self.assertTrue(torch.equal(clip.inputs[1].value, expected_min))
+        self.assertTrue(torch.equal(clip.inputs[2].value, expected_max))
 
     def test_clip_legalization_materializes_empty_bounds(self):
         empty_min = helper.make_tensor("empty_min", TensorProto.FLOAT, [0], [])
@@ -202,9 +204,11 @@ class TestGlobalFunctionsMapping(unittest.TestCase):
         GraphLegalized(graph)()
 
         clip = graph.operations["clip"]
+        expected_min = torch.tensor(torch.finfo(torch.float32).min)
+        expected_max = torch.tensor(torch.finfo(torch.float32).max)
         self.assertEqual(len(clip.inputs), 3)
-        self.assertTrue(torch.equal(clip.inputs[1].value, torch.tensor(torch.finfo(torch.float32).min)))
-        self.assertTrue(torch.equal(clip.inputs[2].value, torch.tensor(torch.finfo(torch.float32).max)))
+        self.assertTrue(torch.equal(clip.inputs[1].value, expected_min))
+        self.assertTrue(torch.equal(clip.inputs[2].value, expected_max))
 
     def test_clip_legalization_materializes_empty_optional_input_name(self):
         clip_max = helper.make_tensor("clip_max", TensorProto.FLOAT, [], [6.0])
@@ -213,8 +217,9 @@ class TestGlobalFunctionsMapping(unittest.TestCase):
         GraphLegalized(graph)()
 
         clip = graph.operations["clip"]
+        expected_min = torch.tensor(torch.finfo(torch.float32).min)
         self.assertEqual(len(clip.inputs), 3)
-        self.assertTrue(torch.equal(clip.inputs[1].value, torch.tensor(torch.finfo(torch.float32).min)))
+        self.assertTrue(torch.equal(clip.inputs[1].value, expected_min))
         self.assertTrue(torch.equal(clip.inputs[2].value, torch.tensor(6.0)))
 
 
