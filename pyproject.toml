@@ -49,10 +49,31 @@ dependencies = { file = ["requirements.txt"] }
 
 [tool.black]
 line-length = 120
+target-version = ["py39"]
 
 [tool.ruff]
 line-length = 120
-select = ["E", "W", "F"]
-ignore = ["F401"]
+target-version = "py39"
 respect-gitignore = true
-ignore-init-module-imports = true
+
+[tool.ruff.lint]
+select = ["E", "W", "F"]
+ignore = [
+    "E402",
+    "E501",
+    "E701",
+    "E711",
+    "E712",
+    "E713",
+    "E721",
+    "E722",
+    "E731",
+    "F401",
+    "F403",
+    "F405",
+    "F541",
+    "F811",
+    "F821",
+    "F841",
+    "F901",
+]

@@ -99,7 +99,7 @@ class ValueState(Serializable):
                 if value is not None:
                     value = value.reshape(self._shape)
                 value = convert_any_to_torch_tensor(
-                    value, device='cpu', 
+                    value, device='cpu',
                     dtype=DataType.to_torch(DataType.convert_from_numpy(self._dtype)))
                 return value
             else:
