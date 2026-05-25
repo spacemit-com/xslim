@@ -81,16 +81,6 @@ def _build_matmul_add_pattern_model():
     )
 
 
-def _build_clip_model(clip_inputs, initializers=None):
-    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1])
-    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])
-    node = helper.make_node("Clip", clip_inputs, ["y"], name="clip")
-    return helper.make_model(
-        helper.make_graph([node], "clip_graph", [x], [y], initializers or []),
-        opset_imports=[helper.make_opsetid("", 13)],
-    )
-
-
 class TestGlobalFunctionsMapping(unittest.TestCase):
     def test_parser_stores_function_proto_in_global_mapping(self):
         graph = OnnxParser().build(_build_batch_matmul_model())
@@ -183,45 +173,6 @@ class TestGlobalFunctionsMapping(unittest.TestCase):
         expected = (expected + bias).transpose(-1, -2)
         self.assertTrue(torch.allclose(outputs[0], expected))
         self.assertEqual(list(outputs[0].shape), [4, 3])
-
-    def test_clip_legalization_materializes_omitted_bounds(self):
-        graph = OnnxParser().build(_build_clip_model(["x"]))
-
-        GraphLegalized(graph)()
-
-        clip = graph.operations["clip"]
-        expected_min = torch.tensor(torch.finfo(torch.float32).min)
-        expected_max = torch.tensor(torch.finfo(torch.float32).max)
-        self.assertEqual(len(clip.inputs), 3)
-        self.assertTrue(torch.equal(clip.inputs[1].value, expected_min))
-        self.assertTrue(torch.equal(clip.inputs[2].value, expected_max))
-
-    def test_clip_legalization_materializes_empty_bounds(self):
-        empty_min = helper.make_tensor("empty_min", TensorProto.FLOAT, [0], [])
-        empty_max = helper.make_tensor("empty_max", TensorProto.FLOAT, [0], [])
-        graph = OnnxParser().build(_build_clip_model(["x", "empty_min", "empty_max"], [empty_min, empty_max]))
-
-        GraphLegalized(graph)()
-
-        clip = graph.operations["clip"]
-        expected_min = torch.tensor(torch.finfo(torch.float32).min)
-        expected_max = torch.tensor(torch.finfo(torch.float32).max)
-        self.assertEqual(len(clip.inputs), 3)
-        self.assertTrue(torch.equal(clip.inputs[1].value, expected_min))
-        self.assertTrue(torch.equal(clip.inputs[2].value, expected_max))
-
-    def test_clip_legalization_materializes_empty_optional_input_name(self):
-        clip_max = helper.make_tensor("clip_max", TensorProto.FLOAT, [], [6.0])
-        graph = OnnxParser().build(_build_clip_model(["x", "", "clip_max"], [clip_max]))
-
-        GraphLegalized(graph)()
-
-        clip = graph.operations["clip"]
-        expected_min = torch.tensor(torch.finfo(torch.float32).min)
-        expected_max = torch.tensor(6.0)
-        self.assertEqual(len(clip.inputs), 3)
-        self.assertTrue(torch.equal(clip.inputs[1].value, expected_min))
-        self.assertTrue(torch.equal(clip.inputs[2].value, expected_max))
 
 
 if __name__ == "__main__":

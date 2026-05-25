@@ -273,86 +273,30 @@ class GraphFormatter(GraphCommandProcessor):
                min, max parameter will be given by the attribute
         此函数统一 clip 算子行为：所有 clip 算子的 min, max 参数第二第三个变量给出
         this func unifies behaviors of clip op: min, max parameter will be given by input vars
-        针对可能存在的 min, max 缺省或为空 tensor 的情况，将其直接置为输入类型最小或最大值（保证处理后非空）
+        针对可能存在的 min, max 为空的情况，将其直接置为 2 << 30（保证处理后非空）
 
-        当 min, max 参数由 第二、第三个输入变量给出时，其中一个为空时按该类型边界值处理
-        Missing or empty min, max parameters will be regularized to dtype bounds
+        当 min, max 参数由 第二、第三个输入变量给出时，其中一个为空时直接返回 ValueError
+        ValueError will be raised when any of min, max parameters is null
         """
 
-        variable_names = set(self.graph.variables)
-
-        def make_unique_name(base_name: str) -> str:
-            if base_name not in variable_names:
-                variable_names.add(base_name)
-                return base_name
-            suffix = 0
-            while f"{base_name}_{suffix}" in variable_names:
-                suffix += 1
-            unique_name = f"{base_name}_{suffix}"
-            variable_names.add(unique_name)
-            return unique_name
-
-        def is_empty_clip_bound(var: Variable) -> bool:
-            if var is None:
-                return True
-            if var.name == "":
-                return True
-            value = var.value
-            if isinstance(value, torch.Tensor):
-                return value.numel() == 0
-            return False
-
-        def clip_input_dtype(op: Operation) -> torch.dtype:
-            try:
-                return DataType.to_torch(op.inputs[0].dtype)
-            except (AssertionError, KeyError):
-                return torch.float32
-
-        def dtype_bound_tensor(op: Operation, bound: str) -> torch.Tensor:
-            assert bound in {"min", "max"}
-            torch_dtype = clip_input_dtype(op)
-            if torch_dtype == torch.bool:
-                if bound == "min":
-                    return torch.tensor(False, dtype=torch_dtype)
-                return torch.tensor(True, dtype=torch_dtype)
-            if torch_dtype.is_floating_point:
-                info = torch.finfo(torch_dtype)
-            else:
-                info = torch.iinfo(torch_dtype)
-            return torch.tensor(getattr(info, bound), dtype=torch_dtype)
-
-        def scalar_tensor(value: Any, op: Operation) -> torch.Tensor:
-            return torch.as_tensor(value, dtype=clip_input_dtype(op))
-
-        def set_clip_bound(op: Operation, input_idx: int, bound_name: str, value: torch.Tensor) -> None:
-            bound_var = Variable(
-                name=make_unique_name(f"{op.name}_{bound_name}"),
-                value=value,
-                is_parameter=True,
-                dest_ops=[op],
-            )
-            self.graph.append_variable(bound_var)
-
-            if input_idx < len(op.inputs):
-                old_var = op.inputs[input_idx]
-                if op in old_var.dest_ops:
-                    old_var.dest_ops.remove(op)
-                op.inputs[input_idx] = bound_var
-            else:
-                op.inputs.append(bound_var)
-
+        interested_ops = []
         for op in self.graph.operations.values():
-            if op.type != "Clip":
-                continue
+            if op.type == "Clip" and ("min" in op.attributes or "max" in op.attributes):
+                interested_ops.append(op)
+        for op in interested_ops:
             assert isinstance(op, Operation)
-            for input_idx, bound_name in ((1, "min"), (2, "max")):
-                if bound_name in op.attributes:
-                    value = scalar_tensor(op.attributes.pop(bound_name), op)
-                elif input_idx >= len(op.inputs) or is_empty_clip_bound(op.inputs[input_idx]):
-                    value = dtype_bound_tensor(op, bound_name)
-                else:
-                    continue
-                set_clip_bound(op, input_idx, bound_name, value)
+            min = op.attributes.get("min", -2 << 30)
+            max = op.attributes.get("max", +2 << 30)
+            min_var = Variable(name=op.name + "_min", value=min, is_parameter=True, dest_ops=[op])
+            max_var = Variable(name=op.name + "_max", value=max, is_parameter=True, dest_ops=[op])
+            self.graph.append_variable(min_var)
+            self.graph.append_variable(max_var)
+            op.inputs.append(min_var)
+            op.inputs.append(max_var)
+            if "min" in op.attributes:
+                op.attributes.pop("min")
+            if "max" in op.attributes:
+                op.attributes.pop("max")
 
     def format_gather(self) -> None:
         """gather op 的参数 index 可能由 input variable 给出 但 index
