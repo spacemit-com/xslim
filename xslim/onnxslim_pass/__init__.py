@@ -7,8 +7,10 @@ from .batchnorm import *
 from .dynamic_q_matmul import *
 from .gelu import *
 from .layernorm import *
+from .rmsnorm import *
 from .padpool import *
 from .qkv_split import *
+from .reciprocal_div import *
 from .yolo_decode import *
 
 # from .swish import *
