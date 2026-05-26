@@ -7,10 +7,14 @@ import types
 import unittest
 from unittest import mock
 
+import numpy as np
 import onnx
 import onnxslim.third_party.onnx_graphsurgeon as osg
-from onnx import TensorProto, helper
+from onnx import TensorProto, helper, numpy_helper
 from onnxconverter_common import float16 as convert_float_to_float16
+
+FLOAT32_MIN = np.finfo(np.float32).min
+FLOAT32_MAX = np.finfo(np.float32).max
 
 
 def _load_onnxslim_pass_module():
@@ -210,6 +214,16 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
         return helper.make_model(
             graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+
+    @staticmethod
+    def _build_clip_model(clip_inputs, initializers=None):
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])
+        node = helper.make_node("Clip", clip_inputs, ["y"], name="clip")
+        return helper.make_model(
+            helper.make_graph([node], "clip_graph", [x], [y], initializers or []),
+            opset_imports=[helper.make_opsetid("", 13)],
         )
 
     @staticmethod
@@ -1223,6 +1237,85 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(list(attrs["strides"]), [1])
         self.assertEqual(list(attrs["dilations"]), [1])
         self.assertEqual(list(attrs["pads"]), [0, 0])
+
+    def test_format_onnx_model_materializes_omitted_clip_bounds(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        model = self._build_clip_model(["x"])
+
+        with mock.patch.object(
+            onnx_graph_helper_module,
+            "optimize_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ), mock.patch.object(
+            onnx_graph_helper_module,
+            "infer_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ):
+            formatted_model = onnx_graph_helper_module.format_onnx_model(
+                model, sim_en=False
+            )
+
+        clip_node = formatted_model.graph.node[0]
+        initializers = {initializer.name: initializer for initializer in formatted_model.graph.initializer}
+        self.assertEqual(len(clip_node.input), 3)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), FLOAT32_MIN)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), FLOAT32_MAX)
+        onnx.checker.check_model(formatted_model)
+
+    def test_format_onnx_model_materializes_empty_clip_bounds(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        empty_min = helper.make_tensor("empty_min", TensorProto.FLOAT, [0], [])
+        empty_max = helper.make_tensor("empty_max", TensorProto.FLOAT, [0], [])
+        model = self._build_clip_model(["x", "empty_min", "empty_max"], [empty_min, empty_max])
+
+        with mock.patch.object(
+            onnx_graph_helper_module,
+            "optimize_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ), mock.patch.object(
+            onnx_graph_helper_module,
+            "infer_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ):
+            formatted_model = onnx_graph_helper_module.format_onnx_model(
+                model, sim_en=False
+            )
+
+        clip_node = formatted_model.graph.node[0]
+        initializers = {initializer.name: initializer for initializer in formatted_model.graph.initializer}
+        self.assertEqual(len(clip_node.input), 3)
+        self.assertNotEqual(clip_node.input[1], "empty_min")
+        self.assertNotEqual(clip_node.input[2], "empty_max")
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), FLOAT32_MIN)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), FLOAT32_MAX)
+        onnx.checker.check_model(formatted_model)
+
+    def test_format_onnx_model_materializes_empty_clip_optional_input_name(self):
+        onnx_graph_helper_module = _load_onnx_graph_helper_module()
+        clip_max = helper.make_tensor("clip_max", TensorProto.FLOAT, [], [6.0])
+        model = self._build_clip_model(["x", "", "clip_max"], [clip_max])
+
+        with mock.patch.object(
+            onnx_graph_helper_module,
+            "optimize_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ), mock.patch.object(
+            onnx_graph_helper_module,
+            "infer_onnx_model",
+            side_effect=lambda model_arg: model_arg,
+        ):
+            formatted_model = onnx_graph_helper_module.format_onnx_model(
+                model, sim_en=False
+            )
+
+        clip_node = formatted_model.graph.node[0]
+        initializers = {initializer.name: initializer for initializer in formatted_model.graph.initializer}
+        self.assertEqual(len(clip_node.input), 3)
+        self.assertNotEqual(clip_node.input[1], "")
+        self.assertEqual(clip_node.input[2], "clip_max")
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), FLOAT32_MIN)
+        self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), 6.0)
+        onnx.checker.check_model(formatted_model)
 
 
 if __name__ == "__main__":

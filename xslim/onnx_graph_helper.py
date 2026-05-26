@@ -7,8 +7,10 @@ from collections import OrderedDict, deque
 from tempfile import TemporaryDirectory
 from typing import Dict, List, Optional, Sequence, Union
 
+import numpy as np
 import onnx
 import onnx_graphsurgeon as osg
+from onnx import helper, numpy_helper
 from onnxruntime.tools.onnx_model_utils import (get_optimization_level,
                                                 optimize_model)
 
@@ -259,6 +261,93 @@ def _deduplicate_node_names(onnx_model: onnx.ModelProto) -> onnx.ModelProto:
     return onnx_model
 
 
+def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelProto:
+    initializer_by_name = {initializer.name: initializer for initializer in onnx_model.graph.initializer}
+    value_info_by_name = {}
+    for value_info in list(onnx_model.graph.input) + list(onnx_model.graph.value_info) + list(onnx_model.graph.output):
+        value_info_by_name[value_info.name] = value_info
+    used_names = set(value_info_by_name) | set(initializer_by_name)
+    updated = False
+
+    def _make_unique_name(base_name: str) -> str:
+        """Return an unused tensor name, appending numeric suffixes on collision."""
+        name = base_name
+        suffix = 0
+        while name in used_names:
+            name = f"{base_name}_{suffix}"
+            suffix += 1
+        used_names.add(name)
+        return name
+
+    def _tensor_dtype(tensor_name: str) -> int:
+        """Infer an ONNX tensor dtype, falling back to FLOAT when unavailable."""
+        initializer = initializer_by_name.get(tensor_name)
+        if initializer is not None:
+            return initializer.data_type
+        value_info = value_info_by_name.get(tensor_name)
+        if value_info is not None and value_info.type.HasField("tensor_type"):
+            data_type = value_info.type.tensor_type.elem_type
+            if data_type != onnx.TensorProto.UNDEFINED:
+                return data_type
+        logger.warning(
+            f"Unable to infer dtype for Clip input {tensor_name}; defaulting to FLOAT. "
+            "This may cause incorrect bound values if the actual input has a different dtype."
+        )
+        return onnx.TensorProto.FLOAT
+
+    def _dtype_bound(data_type: int, bound_name: str) -> Union[bool, int, float]:
+        """Return the dtype minimum or maximum value for an ONNX tensor dtype."""
+        if data_type == onnx.TensorProto.BOOL:
+            return bound_name == "max"
+        np_dtype = helper.tensor_dtype_to_np_dtype(data_type)
+        if np.issubdtype(np_dtype, np.floating):
+            info = np.finfo(np_dtype)
+        else:
+            info = np.iinfo(np_dtype)
+        return getattr(info, bound_name).item()
+
+    def _is_empty_bound(input_name: str) -> bool:
+        """Return whether a Clip bound input is omitted or a zero-size initializer."""
+        if input_name == "":
+            return True
+        initializer = initializer_by_name.get(input_name)
+        if initializer is None:
+            return False
+        return numpy_helper.to_array(initializer).size == 0
+
+    def _set_bound_input(
+        node: onnx.NodeProto,
+        input_idx: int,
+        bound_name: str,
+        data_type: int,
+        graph: onnx.GraphProto,
+        initializers: Dict[str, onnx.TensorProto],
+    ) -> None:
+        """Create a scalar bound initializer and attach it to a Clip input."""
+        bound_initializer = helper.make_tensor(
+            name=_make_unique_name(f"{node.name or node.op_type}_{bound_name}"),
+            data_type=data_type,
+            dims=[],
+            vals=[_dtype_bound(data_type, bound_name)],
+        )
+        graph.initializer.append(bound_initializer)
+        initializers[bound_initializer.name] = bound_initializer
+        while len(node.input) <= input_idx:
+            node.input.append("")
+        node.input[input_idx] = bound_initializer.name
+
+    for node in onnx_model.graph.node:
+        if node.op_type != "Clip":
+            continue
+        data_type = _tensor_dtype(node.input[0])
+        for input_idx, bound_name in ((1, "min"), (2, "max")):
+            if input_idx >= len(node.input) or _is_empty_bound(node.input[input_idx]):
+                _set_bound_input(node, input_idx, bound_name, data_type, onnx_model.graph, initializer_by_name)
+                updated = True
+
+    return onnx_model
+
+
 def format_onnx_model(
     onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: Optional[int] = None
 ) -> onnx.ModelProto:
@@ -311,6 +400,7 @@ def format_onnx_model(
     except Exception as e:
         logger.warning("shape_inference error with {}, skipped".format(e))
 
+    onnx_model = _normalize_clip_optional_bounds(onnx_model)
     onnx_model = _deduplicate_node_names(onnx_model)
     return onnx_model
 

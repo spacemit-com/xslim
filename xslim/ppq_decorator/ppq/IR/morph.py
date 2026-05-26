@@ -280,9 +280,9 @@ class GraphFormatter(GraphCommandProcessor):
         """
 
         interested_ops = []
-        for _, operation in self.graph.operations.items():
-            if operation.type == "Clip" and ("min" in operation.attributes or "max" in operation.attributes):
-                interested_ops.append(operation)
+        for op in self.graph.operations.values():
+            if op.type == "Clip" and ("min" in op.attributes or "max" in op.attributes):
+                interested_ops.append(op)
         for op in interested_ops:
             assert isinstance(op, Operation)
             min = op.attributes.get("min", -2 << 30)
