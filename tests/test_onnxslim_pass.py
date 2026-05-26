@@ -296,6 +296,96 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
 
     @staticmethod
+    def _build_rmsnorm_pattern_model_with_axes_input():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 2, 4])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 2, 4])
+
+        axes = helper.make_tensor("axes", TensorProto.INT64, [1], [2])
+        exponent = helper.make_tensor("exponent", TensorProto.FLOAT, [], [2.0])
+        epsilon = helper.make_tensor("epsilon", TensorProto.FLOAT, [], [1e-5])
+        scale = helper.make_tensor(
+            "scale", TensorProto.FLOAT, [4], [1.1, 1.2, 1.3, 1.4]
+        )
+
+        nodes = [
+            helper.make_node(
+                "Pow",
+                ["x", "exponent"],
+                ["pow0"],
+                name="pow_0",
+            ),
+            helper.make_node(
+                "ReduceMean",
+                ["pow0", "axes"],
+                ["mean0"],
+                name="reduce_mean_0",
+                keepdims=1,
+            ),
+            helper.make_node(
+                "Add",
+                ["mean0", "epsilon"],
+                ["add0"],
+                name="add_0",
+            ),
+            helper.make_node("Sqrt", ["add0"], ["sqrt0"], name="sqrt_0"),
+            helper.make_node(
+                "Div",
+                ["x", "sqrt0"],
+                ["div0"],
+                name="div_0",
+            ),
+            helper.make_node(
+                "Mul",
+                ["div0", "scale"],
+                ["y"],
+                name="mul_0",
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "rmsnorm_axes_input_graph",
+            [x],
+            [y],
+            [axes, exponent, epsilon, scale],
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 24)]
+        )
+
+    @staticmethod
+    def _build_reciprocal_div_mul_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 2, 2])
+        y_in = helper.make_tensor_value_info("y_in", TensorProto.FLOAT, [1, 2, 2])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 2, 2])
+
+        one = helper.make_tensor("one", TensorProto.FLOAT, [], [1.0])
+
+        nodes = [
+            helper.make_node(
+                "Div",
+                ["one", "x"],
+                ["div0"],
+                name="div_0",
+            ),
+            helper.make_node(
+                "Mul",
+                ["div0", "y_in"],
+                ["y"],
+                name="mul_0",
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "reciprocal_div_mul_graph",
+            [x, y_in],
+            [y],
+            [one],
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+
+    @staticmethod
     def _build_yolo_decode_pattern_model():
         x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 16, 4])
         y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 18, 4])
@@ -832,6 +922,49 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(attrs["axis"], 2)
         self.assertAlmostEqual(attrs["epsilon"], 1e-5, places=7)
         self.assertEqual(layernorm_node.domain, "")
+
+    def test_optimize_onnx_model_fuses_rmsnorm_with_axes_input(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_rmsnorm_pattern_model_with_axes_input()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["RMSNormalization"],
+        )
+
+        rmsnorm_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in rmsnorm_node.attribute
+        }
+        self.assertEqual(attrs["axis"], 2)
+        self.assertAlmostEqual(attrs["epsilon"], 1e-5, places=7)
+        self.assertEqual(rmsnorm_node.domain, "")
+
+    def test_optimize_onnx_model_fuses_reciprocal_div_mul(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_reciprocal_div_mul_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["Div"],
+        )
+
+        div_node = optimized_model.graph.node[0]
+        self.assertEqual(list(div_node.input), ["y_in", "x"])
+        self.assertEqual(div_node.domain, "")
 
     def test_optimize_onnx_model_fuses_yolo_decode_pattern(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
