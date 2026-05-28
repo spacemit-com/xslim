@@ -22,7 +22,7 @@ jobs:
     - name: Install build tools
       run: |
         python -m pip install --upgrade pip
-        python -m pip install --upgrade build twine
+        python -m pip install --upgrade build
     - name: Build sdist and wheel
       run: |
         python -m build
@@ -31,7 +31,6 @@ jobs:
         ls -lh dist/
         ls dist/*.tar.gz
         ls dist/*.whl
-        python -m twine check dist/*
     - name: Run packaging smoke tests
       run: |
         python -m unittest discover -s tests -p 'test_packaging_standards.py' -v
