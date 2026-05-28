@@ -18,7 +18,7 @@ FLOAT32_MAX = np.finfo(np.float32).max
 
 
 def _load_onnxslim_pass_module():
-    repo_root = os.path.join(os.path.dirname(__file__), "..", "xslim")
+    repo_root = os.path.join(os.path.dirname(__file__), "..", "src", "xslim")
 
     package = types.ModuleType("xslim")
     package.__path__ = [repo_root]
@@ -43,7 +43,7 @@ def _load_onnxslim_pass_module():
 
 
 def _load_onnx_graph_helper_module():
-    repo_root = os.path.join(os.path.dirname(__file__), "..", "xslim")
+    repo_root = os.path.join(os.path.dirname(__file__), "..", "src", "xslim")
 
     package = types.ModuleType("xslim")
     package.__path__ = [repo_root]

@@ -32,7 +32,7 @@
 ## Installation
 
 ```bash
-pip install xslim
+python -m pip install xslim
 ```
 
 Or install from source:
@@ -40,16 +40,21 @@ Or install from source:
 ```bash
 git clone https://github.com/spacemit-com/xslim.git
 cd xslim
-pip install .
+python -m pip install .
 ```
 
 For local development, use an editable install:
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
-Build metadata is defined in `pyproject.toml`; `setup.py` is kept only as a legacy compatibility shim.
+Build metadata is defined in `pyproject.toml`, and the import package lives under the standard `src/` layout. To build source and wheel distributions locally:
+
+```bash
+python -m pip install --upgrade build
+python -m build
+```
 
 ## Quick Start
 

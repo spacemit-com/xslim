@@ -9,7 +9,7 @@ import onnx
 from onnx import TensorProto, helper, numpy_helper
 from onnxruntime.quantization.quant_utils import quantize_data as ort_quantize_data
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from xslim.quantizer.dynamic_quantizer import dynamic_quantize_onnx_model, dynamic_weight_only_quantize
 

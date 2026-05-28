@@ -9,11 +9,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 SETUP_PATH = REPO_ROOT / "setup.py"
 MANIFEST_PATH = REPO_ROOT / "MANIFEST.in"
+SRC_PATH = REPO_ROOT / "src"
 README_PATHS = [
     REPO_ROOT / "README.md",
     REPO_ROOT / "README_zh.md",
 ]
-MAIN_MODULE_PATH = REPO_ROOT / "xslim" / "__main__.py"
+MAIN_MODULE_PATH = SRC_PATH / "xslim" / "__main__.py"
 
 
 def _load_main_module():
@@ -38,6 +39,8 @@ class TestPackagingStandards(unittest.TestCase):
         self.assertIn('license-files = ["LICENSE"]', pyproject_text)
         self.assertIn('[project.scripts]', pyproject_text)
         self.assertIn('xslim = "xslim.__main__:main"', pyproject_text)
+        self.assertIn('package-dir = { "" = "src" }', pyproject_text)
+        self.assertIn('where = ["src"]', pyproject_text)
 
     def test_setup_py_is_legacy_compatibility_shim(self):
         setup_text = SETUP_PATH.read_text(encoding="utf-8")
@@ -60,8 +63,9 @@ class TestPackagingStandards(unittest.TestCase):
         for readme_path in README_PATHS:
             with self.subTest(readme=readme_path.name):
                 readme_text = readme_path.read_text(encoding="utf-8")
-                self.assertIn('pip install .', readme_text)
-                self.assertIn('pip install -e .', readme_text)
+                self.assertIn('python -m pip install .', readme_text)
+                self.assertIn('python -m pip install -e .', readme_text)
+                self.assertIn('python -m build', readme_text)
                 self.assertIn('xslim --config config.json', readme_text)
                 self.assertIn(
                     'python -m xslim --config config.json', readme_text

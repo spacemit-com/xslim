@@ -7,7 +7,7 @@ import torch
 from onnx import TensorProto, helper
 
 
-PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if PACKAGE_ROOT not in sys.path:
     sys.path.insert(0, PACKAGE_ROOT)
 

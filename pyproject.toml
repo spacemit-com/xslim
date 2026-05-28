@@ -39,8 +39,10 @@ xslim = "xslim.__main__:main"
 [tool.setuptools]
 include-package-data = true
 zip-safe = false
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["xslim", "xslim.*"]
 
 [tool.setuptools.dynamic]

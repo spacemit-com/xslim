@@ -22,7 +22,8 @@ jobs:
         python-version: "3.12"
     - name: Install build tools
       run: |
-        python -m pip install --upgrade pip setuptools wheel build
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade build
     - name: Build sdist and wheel
       run: |
         python -m build
@@ -34,9 +35,9 @@ jobs:
         ls dist/*.whl
     - name: Test install wheel
       run: |
-        pip install dist/*.whl --no-deps
+        python -m pip install dist/*.whl --no-deps
         # Verify the package is installed and metadata is accessible
-        pip show xslim
+        python -m pip show xslim
         python - <<'PY'
         from importlib.metadata import distribution
 

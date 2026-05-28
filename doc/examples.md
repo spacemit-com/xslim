@@ -2,7 +2,7 @@
 
 [中文版](examples_zh.md) | English
 
-Step-by-step examples for the most common XSlim quantization scenarios. All examples assume XSlim is installed (`pip install xslim`) and an ONNX model is available.
+Step-by-step examples for the most common XSlim quantization scenarios. All examples assume XSlim is installed (`python -m pip install xslim`) and an ONNX model is available.
 
 Ready-to-run versions of these examples can be found in the [samples](../samples/) directory.
 

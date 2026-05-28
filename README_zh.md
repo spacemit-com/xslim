@@ -32,7 +32,7 @@
 ## 安装
 
 ```bash
-pip install xslim
+python -m pip install xslim
 ```
 
 或从源码安装：
@@ -40,16 +40,21 @@ pip install xslim
 ```bash
 git clone https://github.com/spacemit-com/xslim.git
 cd xslim
-pip install .
+python -m pip install .
 ```
 
 本地开发建议使用可编辑安装：
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
-构建元数据统一定义在 `pyproject.toml` 中；`setup.py` 仅保留给旧工具链做兼容入口。
+构建元数据统一定义在 `pyproject.toml` 中，导入包位于标准的 `src/` 布局下。如需在本地构建源码包和 wheel：
+
+```bash
+python -m pip install --upgrade build
+python -m build
+```
 
 ## 快速开始
 

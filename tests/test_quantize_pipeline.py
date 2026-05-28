@@ -14,7 +14,7 @@ from onnx import TensorProto
 from onnx import helper
 from onnx.external_data_helper import convert_model_to_external_data
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import xslim
 
