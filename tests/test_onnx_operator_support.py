@@ -5,7 +5,7 @@ import sys
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
 from xslim.ppq_decorator.ppq.IR.base.opdef import Opset, Resize_Socket

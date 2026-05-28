@@ -2,7 +2,7 @@
 
 中文 | [English](examples.md)
 
-常见 XSlim 量化场景的分步示例。所有示例均假设您已安装 XSlim（`pip install xslim`）并已准备好 ONNX 模型。
+常见 XSlim 量化场景的分步示例。所有示例均假设您已安装 XSlim（`python -m pip install xslim`）并已准备好 ONNX 模型。
 
 可运行版本的示例请参阅 [samples](../samples/) 目录。
 

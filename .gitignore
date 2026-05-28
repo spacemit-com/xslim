@@ -10,5 +10,6 @@ __pycache__/
 /build
 /dist
 /xslim.egg-info
+/src/xslim.egg-info
 /samples/temp
 /tests/output

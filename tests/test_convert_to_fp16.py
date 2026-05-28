@@ -10,7 +10,7 @@ import onnx_graphsurgeon as osg
 from onnx import TensorProto, helper
 from onnxconverter_common import float16 as convert_float_to_float16
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from xslim.quantizer import convert_to_fp16 as convert_to_fp16_module
 
