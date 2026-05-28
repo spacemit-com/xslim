@@ -1164,6 +1164,35 @@ class TestOnnxSlimPass(unittest.TestCase):
             list(nodes_by_name["conv_weight_shape_concat"].input),
             ["one_vec", "reg_max_vec", "one_vec", "one_vec"],
         )
+        self.assertEqual(nodes_by_name["flat_weight_cast"].op_type, "CastLike")
+        self.assertEqual(
+            list(nodes_by_name["flat_weight_cast"].input),
+            ["flat_weight", "input"],
+        )
+        self.assertEqual(nodes_by_name["sub_const_cast"].op_type, "CastLike")
+        self.assertEqual(
+            list(nodes_by_name["sub_const_cast"].input),
+            ["sub_const", "input"],
+        )
+        self.assertEqual(nodes_by_name["add_const_cast"].op_type, "CastLike")
+        self.assertEqual(
+            list(nodes_by_name["add_const_cast"].input),
+            ["add_const", "input"],
+        )
+        self.assertEqual(nodes_by_name["mul_const_cast"].op_type, "CastLike")
+        self.assertEqual(
+            list(nodes_by_name["mul_const_cast"].input),
+            ["mul_const", "input"],
+        )
+        self.assertEqual(nodes_by_name["divisor_cast"].op_type, "CastLike")
+        self.assertEqual(
+            list(nodes_by_name["divisor_cast"].input),
+            ["divisor_raw", "input"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["conv_weight_reshape"].input),
+            ["flat_weight_typed", "conv_weight_shape"],
+        )
         self.assertEqual(
             list(nodes_by_name["bbox_output_shape_concat"].input),
             ["batch_dim_vec", "four_vec", "spatial_dim_vec"],
@@ -1176,8 +1205,25 @@ class TestOnnxSlimPass(unittest.TestCase):
             list(nodes_by_name["gather_spatial_dim"].input),
             ["bbox_shape", "shape_idx_2"],
         )
+        self.assertEqual(
+            list(nodes_by_name["bbox_sub"].input),
+            ["sub_const_typed", "bbox_slice_0"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_add"].input),
+            ["add_const_typed", "bbox_slice_1"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_div"].input),
+            ["bbox_sum", "divisor"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["bbox_scaled"].input),
+            ["bbox_concat", "mul_const_typed"],
+        )
         self.assertEqual(_constant_values("shape_idx_0_const"), [0])
         self.assertEqual(_constant_values("shape_idx_2_const"), [2])
+        self.assertEqual(_constant_values("divisor_const"), [2.0])
         self.assertEqual(
             helper.get_attribute_value(nodes_by_name["shape_idx_0_const"].attribute[0]).dims,
             [],
@@ -1211,7 +1257,7 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
         self.assertEqual(
             list(nodes_by_name["bbox_scaled"].input),
-            ["bbox_concat", "mul_const"],
+            ["bbox_concat", "mul_const_typed"],
         )
 
         transpose_attrs = {
