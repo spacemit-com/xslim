@@ -169,7 +169,37 @@ def build_yolo_decode_function(opset_version=MIN_ONNX_OPSET_VERSION):
             "slice_steps_const", "slice_steps", TensorProto.INT64, [1], [1]
         ),
         _make_tensor_constant_node(
-            "divisor_const", "divisor", TensorProto.FLOAT, [], [2.0]
+            "divisor_const", "divisor_raw", TensorProto.FLOAT, [], [2.0]
+        ),
+        helper.make_node(
+            "CastLike",
+            ["flat_weight", "input"],
+            ["flat_weight_typed"],
+            name="flat_weight_cast",
+        ),
+        helper.make_node(
+            "CastLike",
+            ["sub_const", "input"],
+            ["sub_const_typed"],
+            name="sub_const_cast",
+        ),
+        helper.make_node(
+            "CastLike",
+            ["add_const", "input"],
+            ["add_const_typed"],
+            name="add_const_cast",
+        ),
+        helper.make_node(
+            "CastLike",
+            ["mul_const", "input"],
+            ["mul_const_typed"],
+            name="mul_const_cast",
+        ),
+        helper.make_node(
+            "CastLike",
+            ["divisor_raw", "input"],
+            ["divisor"],
+            name="divisor_cast",
         ),
 
         helper.make_node(
@@ -290,7 +320,7 @@ def build_yolo_decode_function(opset_version=MIN_ONNX_OPSET_VERSION):
         ),
         helper.make_node(
             "Reshape",
-            ["flat_weight", "conv_weight_shape"],
+            ["flat_weight_typed", "conv_weight_shape"],
             ["conv_weight"],
             name="conv_weight_reshape",
         ),
@@ -340,13 +370,13 @@ def build_yolo_decode_function(opset_version=MIN_ONNX_OPSET_VERSION):
         ),
         helper.make_node(
             "Sub",
-            ["sub_const", "bbox_slice_0"],
+            ["sub_const_typed", "bbox_slice_0"],
             ["bbox_sub"],
             name="bbox_sub",
         ),
         helper.make_node(
             "Add",
-            ["add_const", "bbox_slice_1"],
+            ["add_const_typed", "bbox_slice_1"],
             ["bbox_add"],
             name="bbox_add",
         ),
@@ -377,7 +407,7 @@ def build_yolo_decode_function(opset_version=MIN_ONNX_OPSET_VERSION):
         ),
         helper.make_node(
             "Mul",
-            ["bbox_concat", "mul_const"],
+            ["bbox_concat", "mul_const_typed"],
             ["bbox_scaled"],
             name="bbox_scaled",
         ),
