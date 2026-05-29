@@ -2426,11 +2426,9 @@ def ReduceL2_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBacken
             return input_value
         axis = None
     if axis is None:
-        output = torch.sqrt(torch.sum(input_value * input_value))
+        output = torch.sqrt(torch.sum(input_value * input_value, dim=None, keepdim=keepdim))
     else:
         output = torch.sqrt(torch.sum(input_value * input_value, dim=axis, keepdim=keepdim))
-    if axis is None and keepdim:
-        output = output.reshape([1] * input_value.dim())
     return output
 
 
