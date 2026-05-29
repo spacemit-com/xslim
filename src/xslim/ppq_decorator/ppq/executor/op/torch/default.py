@@ -1778,13 +1778,36 @@ def ReduceMax_forward(
     return output
 
 
+def _normalize_reduce_axes(axes):
+    if isinstance(axes, (int, float)):
+        axes = [axes]
+    if isinstance(axes, list) and axes:
+        axes = tuple(int(axis) for axis in axes)
+    return axes
+
+
+def _get_reduce_axes_from_input(axis_value: torch.Tensor):
+    return _normalize_reduce_axes(axis_value.reshape(-1).tolist())
+
+
+
 def ReduceMean_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     if op.opset.onnx_opset_version() >= 18:
-        [input_value, _] = values
+        ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=2)
+        input_value, dim = values[0], op.attributes.get("axes", None)
+        if len(values) > 1:
+            dim = _get_reduce_axes_from_input(values[1])
+        noop_with_empty_axes = op.attributes.get("noop_with_empty_axes", 0)
     else:
         [input_value] = values
-    dim = op.attributes.get("axes", None)
+        dim = op.attributes.get("axes", None)
+        noop_with_empty_axes = 0
     keepdim = bool(op.attributes.get("keepdims", 1))
+    if dim == []:
+        if noop_with_empty_axes:
+            return input_value
+        dim = None
+    dim = _normalize_reduce_axes(dim)
     if len(input_value) == 0:
         output = input_value
     else:
@@ -2406,9 +2429,17 @@ def Softmax_forward(
 
 
 def ReduceL2_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
-    [input_value] = values
-    axis = op.attributes["axes"]
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=2)
+    input_value, axis = values[0], op.attributes.get("axes", None)
+    if len(values) > 1:
+        axis = _get_reduce_axes_from_input(values[1])
     keepdim = bool(op.attributes.get("keepdims", 1))
+    noop_with_empty_axes = op.attributes.get("noop_with_empty_axes", 0)
+    if axis == []:
+        if noop_with_empty_axes:
+            return input_value
+        axis = None
+    axis = _normalize_reduce_axes(axis)
     output = torch.norm(input_value, dim=axis, keepdim=keepdim)
     if axis is None and keepdim:
         output = output.reshape([1] * input_value.dim())

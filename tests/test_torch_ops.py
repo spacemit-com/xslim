@@ -9,7 +9,11 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from xslim.optimizer.fusion import FlattenGemmFusionPass
-from xslim.ppq_decorator.ppq.core import DataType, TargetPlatform
+from xslim.ppq_decorator.ppq.core import (DataType, QuantizationPolicy,
+                                          QuantizationProperty,
+                                          QuantizationStates, RoundingPolicy,
+                                          TargetPlatform,
+                                          TensorQuantizationConfig)
 from xslim.ppq_decorator.ppq.executor.op import (DEFAULT_BACKEND_TABLE,
                                                  TorchBackendContext)
 from xslim.ppq_decorator.ppq.executor.torch import TorchExecutor
@@ -158,6 +162,51 @@ class TestUnaryOps(unittest.TestCase):
         x = torch.tensor([1.0, 2.0, 4.0])
         result = DEFAULT_BACKEND_TABLE["Reciprocal"](op, [x], CTX)
         torch.testing.assert_close(result, 1.0 / x)
+
+
+class TestReductionOps(unittest.TestCase):
+    """Test reduction operator forward functions."""
+
+    def test_reduce_mean_with_axes_input(self):
+        op = make_op("reduce_mean", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.randn(1, 2048, 9, 9)
+        axes = torch.tensor([-1, -2], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceMean"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.mean(x, dim=(-1, -2), keepdim=True))
+
+    def test_reduce_mean_with_quantized_input(self):
+        op = make_op("reduce_mean_quantized", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.randn(1, 4, 3, 3)
+        quantized_x = torch.quantize_per_tensor(x, scale=0.05, zero_point=0, dtype=torch.qint8)
+        axes = torch.tensor([2, 3], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceMean"](op, [quantized_x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.mean(quantized_x.dequantize(), dim=(2, 3), keepdim=True))
+
+    def test_reduce_mean_flattens_axes_input(self):
+        op = make_op("reduce_mean_nested_axes", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.randn(2, 3, 4)
+        axes = torch.tensor([[1.0]], dtype=torch.float32)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceMean"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.mean(x, dim=(1,), keepdim=True))
+
+    def test_reduce_l2_with_axes_input(self):
+        op = make_op("reduce_l2", "ReduceL2", attributes={"keepdims": 1}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.tensor([[3.0, 4.0], [5.0, 12.0]])
+        axes = torch.tensor([1], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceL2"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.linalg.vector_norm(x, ord=2, dim=[1], keepdim=True))
 
 
 class TestTensorManipulationOps(unittest.TestCase):
@@ -424,6 +473,25 @@ class TestConvOps(unittest.TestCase):
 
 class TestTorchExecutorGraph(unittest.TestCase):
     """Test TorchExecutor with a minimal computation graph."""
+
+    def test_quantize_function_skips_none_optional_input(self):
+        executor = TorchExecutor(BaseGraph(name="none_input_graph"), device="cpu")
+        config = TensorQuantizationConfig(
+            policy=QuantizationPolicy(
+                QuantizationProperty.SYMMETRICAL
+                + QuantizationProperty.PER_TENSOR
+                + QuantizationProperty.LINEAR
+            ),
+            rounding=RoundingPolicy.ROUND_HALF_EVEN,
+            num_of_bits=8,
+            quant_min=-127,
+            quant_max=128,
+            scale=torch.tensor(1.0),
+            offset=torch.tensor(0.0),
+            state=QuantizationStates.ACTIVATED,
+        )
+
+        self.assertIsNone(executor.quantize_function(None, config))
 
     def _build_simple_graph(self):
         """Build: input -> Relu -> Add(with param) -> output."""
