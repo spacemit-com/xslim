@@ -19,6 +19,7 @@ from xslim.ppq_decorator.ppq.executor.op import (DEFAULT_BACKEND_TABLE,
 from xslim.ppq_decorator.ppq.executor.torch import TorchExecutor
 from xslim.ppq_decorator.ppq.IR import BaseGraph, Operation, Variable
 from xslim.ppq_decorator.ppq.IR.base.opdef import Opset
+from xslim.quantizer.xslim import XSlimQuantizer
 
 
 def make_op(name, op_type, attributes=None, num_inputs=1, num_outputs=1):
@@ -417,6 +418,40 @@ class TestReduceOps(unittest.TestCase):
         result = DEFAULT_BACKEND_TABLE["ReduceSum"](op, [x, axes], CTX)
         expected = torch.sum(x, dim=1, keepdim=True)
         torch.testing.assert_close(result, expected)
+
+
+class TestQuantizerConfig(unittest.TestCase):
+    """Test quantizer config generation for operator socket metadata."""
+
+    def test_reduce_axes_input_stays_fp32(self):
+        reduce_cases = [
+            ("ReduceL1", 18),
+            ("ReduceL2", 18),
+            ("ReduceLogSum", 18),
+            ("ReduceLogSumExp", 18),
+            ("ReduceMax", 20),
+            ("ReduceMean", 18),
+            ("ReduceMin", 20),
+            ("ReduceProd", 18),
+            ("ReduceSum", 18),
+            ("ReduceSumSquare", 18),
+        ]
+
+        for op_type, opset_version in reduce_cases:
+            with self.subTest(op_type=op_type, opset_version=opset_version):
+                operation = make_op("reduce", op_type, num_inputs=2)
+                operation.opset = Opset(domain="", version=opset_version)
+
+                config = XSlimQuantizer.create_default_quant_config(operation)
+
+                self.assertEqual(
+                    config.input_quantization_config[0].state,
+                    QuantizationStates.INITIAL,
+                )
+                self.assertEqual(
+                    config.input_quantization_config[1].state,
+                    QuantizationStates.FP32,
+                )
 
 
 class TestConvOps(unittest.TestCase):
