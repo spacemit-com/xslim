@@ -2406,10 +2406,29 @@ def Softmax_forward(
 
 
 def ReduceL2_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
-    [input_value] = values
-    axis = op.attributes["axes"]
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=2)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    input_value = values[0]
+    axis = values[1] if len(values) > 1 else op.attributes.get("axes", None)
+    if isinstance(axis, torch.Tensor):
+        axis = axis.detach().cpu()
+        if axis.numel() == 0:
+            axis = []
+        elif axis.dim() == 0:
+            axis = int(axis.item())
+        else:
+            axis = axis.tolist()
+    if isinstance(axis, tuple):
+        axis = list(axis)
     keepdim = bool(op.attributes.get("keepdims", 1))
-    output = torch.norm(input_value, dim=axis, keepdim=keepdim)
+    if axis == []:
+        if op.attributes.get("noop_with_empty_axes", 0):
+            return input_value
+        axis = None
+    if axis is None:
+        output = torch.sqrt(torch.sum(input_value * input_value))
+    else:
+        output = torch.sqrt(torch.sum(input_value * input_value, dim=axis, keepdim=keepdim))
     if axis is None and keepdim:
         output = output.reshape([1] * input_value.dim())
     return output
