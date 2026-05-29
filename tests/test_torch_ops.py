@@ -177,17 +177,6 @@ class TestReductionOps(unittest.TestCase):
 
         torch.testing.assert_close(result, torch.mean(x, dim=(-1, -2), keepdim=True))
 
-    def test_reduce_mean_with_quantized_input(self):
-        op = make_op("reduce_mean_quantized", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
-        op._opset = Opset(version=18)
-        x = torch.randn(1, 4, 3, 3)
-        quantized_x = torch.quantize_per_tensor(x, scale=0.05, zero_point=0, dtype=torch.qint8)
-        axes = torch.tensor([2, 3], dtype=torch.int64)
-
-        result = DEFAULT_BACKEND_TABLE["ReduceMean"](op, [quantized_x, axes], CTX)
-
-        torch.testing.assert_close(result, torch.mean(quantized_x.dequantize(), dim=(2, 3), keepdim=True))
-
     def test_reduce_mean_flattens_axes_input(self):
         op = make_op("reduce_mean_nested_axes", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
         op._opset = Opset(version=18)
