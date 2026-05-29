@@ -380,6 +380,22 @@ class TestReduceOps(unittest.TestCase):
         expected = torch.sum(x, dim=1, keepdim=True)
         torch.testing.assert_close(result, expected)
 
+    def test_reduce_l2_axes_input(self):
+        op = make_op("reduce_l2", "ReduceL2", attributes={"keepdims": 0}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.randn(2, 3, 4)
+        axes = torch.tensor([1, 2], dtype=torch.int64)
+        result = DEFAULT_BACKEND_TABLE["ReduceL2"](op, [x, axes], CTX)
+        expected = torch.sqrt(torch.sum(x * x, dim=(1, 2), keepdim=False))
+        torch.testing.assert_close(result, expected)
+
+    def test_reduce_l2_without_axes_reduces_all_dimensions(self):
+        op = make_op("reduce_l2_all", "ReduceL2", attributes={"keepdims": 1})
+        x = torch.randn(2, 3, 4)
+        result = DEFAULT_BACKEND_TABLE["ReduceL2"](op, [x], CTX)
+        expected = torch.sqrt(torch.sum(x * x)).reshape(1, 1, 1)
+        torch.testing.assert_close(result, expected)
+
 
 class TestConvOps(unittest.TestCase):
     """Test convolution operator forward functions."""
