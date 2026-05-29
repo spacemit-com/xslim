@@ -9,12 +9,17 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from xslim.optimizer.fusion import FlattenGemmFusionPass
-from xslim.ppq_decorator.ppq.core import DataType, TargetPlatform
+from xslim.ppq_decorator.ppq.core import (DataType, QuantizationPolicy,
+                                          QuantizationProperty,
+                                          QuantizationStates, RoundingPolicy,
+                                          TargetPlatform,
+                                          TensorQuantizationConfig)
 from xslim.ppq_decorator.ppq.executor.op import (DEFAULT_BACKEND_TABLE,
                                                  TorchBackendContext)
 from xslim.ppq_decorator.ppq.executor.torch import TorchExecutor
 from xslim.ppq_decorator.ppq.IR import BaseGraph, Operation, Variable
 from xslim.ppq_decorator.ppq.IR.base.opdef import Opset
+from xslim.quantizer.xslim import XSlimQuantizer
 
 
 def make_op(name, op_type, attributes=None, num_inputs=1, num_outputs=1):
@@ -158,6 +163,40 @@ class TestUnaryOps(unittest.TestCase):
         x = torch.tensor([1.0, 2.0, 4.0])
         result = DEFAULT_BACKEND_TABLE["Reciprocal"](op, [x], CTX)
         torch.testing.assert_close(result, 1.0 / x)
+
+
+class TestReductionOps(unittest.TestCase):
+    """Test reduction operator forward functions."""
+
+    def test_reduce_mean_with_axes_input(self):
+        op = make_op("reduce_mean", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.randn(1, 2048, 9, 9)
+        axes = torch.tensor([-1, -2], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceMean"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.mean(x, dim=(-1, -2), keepdim=True))
+
+    def test_reduce_mean_flattens_axes_input(self):
+        op = make_op("reduce_mean_nested_axes", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.randn(2, 3, 4)
+        axes = torch.tensor([[1.0]], dtype=torch.float32)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceMean"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.mean(x, dim=(1,), keepdim=True))
+
+    def test_reduce_l2_with_axes_input(self):
+        op = make_op("reduce_l2", "ReduceL2", attributes={"keepdims": 1}, num_inputs=2)
+        op._opset = Opset(version=18)
+        x = torch.tensor([[3.0, 4.0], [5.0, 12.0]])
+        axes = torch.tensor([1], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceL2"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.linalg.vector_norm(x, ord=2, dim=[1], keepdim=True))
 
 
 class TestTensorManipulationOps(unittest.TestCase):
@@ -381,6 +420,40 @@ class TestReduceOps(unittest.TestCase):
         torch.testing.assert_close(result, expected)
 
 
+class TestQuantizerConfig(unittest.TestCase):
+    """Test quantizer config generation for operator socket metadata."""
+
+    def test_reduce_axes_input_stays_fp32(self):
+        reduce_cases = [
+            ("ReduceL1", 18),
+            ("ReduceL2", 18),
+            ("ReduceLogSum", 18),
+            ("ReduceLogSumExp", 18),
+            ("ReduceMax", 20),
+            ("ReduceMean", 18),
+            ("ReduceMin", 20),
+            ("ReduceProd", 18),
+            ("ReduceSum", 18),
+            ("ReduceSumSquare", 18),
+        ]
+
+        for op_type, opset_version in reduce_cases:
+            with self.subTest(op_type=op_type, opset_version=opset_version):
+                operation = make_op("reduce", op_type, num_inputs=2)
+                operation.opset = Opset(domain="", version=opset_version)
+
+                config = XSlimQuantizer.create_default_quant_config(operation)
+
+                self.assertEqual(
+                    config.input_quantization_config[0].state,
+                    QuantizationStates.INITIAL,
+                )
+                self.assertEqual(
+                    config.input_quantization_config[1].state,
+                    QuantizationStates.FP32,
+                )
+
+
 class TestConvOps(unittest.TestCase):
     """Test convolution operator forward functions."""
 
@@ -424,6 +497,25 @@ class TestConvOps(unittest.TestCase):
 
 class TestTorchExecutorGraph(unittest.TestCase):
     """Test TorchExecutor with a minimal computation graph."""
+
+    def test_quantize_function_skips_none_optional_input(self):
+        executor = TorchExecutor(BaseGraph(name="none_input_graph"), device="cpu")
+        config = TensorQuantizationConfig(
+            policy=QuantizationPolicy(
+                QuantizationProperty.SYMMETRICAL
+                + QuantizationProperty.PER_TENSOR
+                + QuantizationProperty.LINEAR
+            ),
+            rounding=RoundingPolicy.ROUND_HALF_EVEN,
+            num_of_bits=8,
+            quant_min=-127,
+            quant_max=128,
+            scale=torch.tensor(1.0),
+            offset=torch.tensor(0.0),
+            state=QuantizationStates.ACTIVATED,
+        )
+
+        self.assertIsNone(executor.quantize_function(None, config))
 
     def _build_simple_graph(self):
         """Build: input -> Relu -> Add(with param) -> output."""

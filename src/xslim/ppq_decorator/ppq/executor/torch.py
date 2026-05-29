@@ -605,6 +605,8 @@ class TorchExecutor(BaseGraphExecutor, torch.nn.Module):
         self._runnable_graph(GraphDeployCommand(device=self._device))
 
     def quantize_function(self, tensor: torch.Tensor, config: TensorQuantizationConfig = None) -> torch.Tensor:
+        if tensor is None:
+            return tensor
         if config is None or not QuantizationStates.is_activated(config.state):
             return tensor
         elif config in self._delegates:
