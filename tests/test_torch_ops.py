@@ -517,9 +517,9 @@ class TestQuantizerConfig(unittest.TestCase):
         ]
         for op_type, num_inputs, expected_in_plat in socket_cases:
             with self.subTest(op_type=op_type):
-                operation = make_op(op_type.lower(), op_type, num_inputs=num_inputs)
-                operation.opset = Opset(domain="", version=18)
-                self.assertEqual(operation.socket.in_plat, expected_in_plat)
+                op = make_op(op_type.lower(), op_type, num_inputs=num_inputs)
+                op.opset = Opset(domain="", version=18)
+                self.assertEqual(op.socket.in_plat, expected_in_plat)
 
     def test_reduce_axes_input_stays_fp32(self):
         reduce_cases = [
