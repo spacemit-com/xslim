@@ -283,7 +283,7 @@ def Pad_Socket(op: OperationBase) -> OpSocket:
     """
     CEHCK_TYPE(op=op, t="Pad")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=13)
-    in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]
+    in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI, TargetPlatform.SOI]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
 
 
