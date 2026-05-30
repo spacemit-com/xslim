@@ -25,6 +25,7 @@
 - **JSON 驱动配置** — 简洁的声明式量化设定
 - **Python API 与命令行** — 可作为库调用或通过命令行使用
 - **自定义预处理** — 支持自定义预处理函数
+- **更完整的 ONNX 算子覆盖** — 支持在包含常见算术、激活、比较、规约、Dropout 以及 opset-24 `Pad` 形态的模型上运行 Graphwise Analysis 与量化
 - **自动 YOLO Decode 融合** — 将受支持的 YOLO 解码后处理子图融合为单个 `spacemit_functions.YoloDecode` 节点
 - **感知 ONNX Function 的导出链路** — 自动保留内嵌 `FunctionProto` 定义并补齐所需的自定义域导入
 - **基于 ONNX** — 构建在 ONNX 生态系统之上
@@ -113,6 +114,15 @@ xslim -i input.onnx -o output.onnx --opset 20
 xslim -i input.onnx -o output.onnx
 ```
 
+在无配置文件的动态量化和 FP16 转换流程中，可用逗号分隔的算子类型或名称排除指定算子：
+
+```bash
+xslim -i input.onnx -o output.onnx --dynq --ignore_op_types Softmax,LayerNormalization
+xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
+```
+
+静态 INT8 量化要求输入模型仍为浮点模型。若模型中已经包含 `QuantizeLinear` 或 `DequantizeLinear`，XSlim 会明确报错并停止，避免对已量化图再次量化。
+
 对于受支持的 YOLO 导出模型，无需额外开关：XSlim 会在模型精简阶段尝试把 decode 密集的后处理融合成 `spacemit_functions.YoloDecode`，并在导出模型时保留对应的 ONNX `FunctionProto`。
 
 ## 文档
@@ -131,7 +141,7 @@ xslim -i input.onnx -o output.onnx
 
 | 版本 | 主要更新 |
 | --- | --- |
-| 2.1.0 | 当前代码树中的开发版本；新增面向受支持 YOLO 导出模型的 `spacemit_functions.YoloDecode` 自动融合，量化/导出时保留自定义 ONNX `FunctionProto` 定义，并补强 opset 24 与自定义域相关处理覆盖 |
+| 2.1.0 | 当前代码树中的开发版本；新增面向受支持 YOLO 导出模型的 `spacemit_functions.YoloDecode` 自动融合，量化/导出时保留自定义 ONNX `FunctionProto` 定义，补强 opset 24 与自定义域相关处理覆盖，扩展 ONNX 算子执行与 socket 覆盖，支持标量输入及 axes 输入形式的规约算子，并拒绝对已包含 `QuantizeLinear` / `DequantizeLinear` 的模型执行静态重复量化 |
 | [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | 最新正式发布版本；为量化与转换流程新增可配置的默认 `ai.onnx` opset 转换能力 |
 | [2.0.13](https://github.com/spacemit-com/xslim/releases/tag/2.0.13) | 将默认 ONNX opset 升级到 24，统一算子 domain，并对齐 2.0.12 发布后的版本元数据 |
 | [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | 补全 README 更新日志与发布元数据，新增精度调优文档及 README 链接，引入 xslim-accuracy-tuning GitHub skill，补充 YOLO 截断后处理指导，并统一 input parameters 命名 |

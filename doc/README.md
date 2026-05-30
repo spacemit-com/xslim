@@ -14,4 +14,6 @@ Welcome to the XSlim documentation. This directory contains detailed guides for 
 
 XSlim is a Post-Training Quantization (PTQ) tool that converts ONNX models into quantized forms optimized for SpacemiT hardware. It supports INT8, FP16, and dynamic quantization, all driven by a simple JSON configuration file.
 
+The current documentation also covers 2.1.0 behavior for automatic YOLO decode fusion, ONNX Function preservation, expanded ONNX operator coverage, opset-24 `Pad`, scalar reduce tensors, axes-input reduce operators, and the static INT8 guard that rejects models already containing `QuantizeLinear` or `DequantizeLinear`.
+
 For a quick introduction, see the [project README](../README.md).

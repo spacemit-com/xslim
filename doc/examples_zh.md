@@ -342,6 +342,30 @@ quantized_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 
 ---
 
+## 9. 静态量化输入检查
+
+静态 INT8 量化应从原始浮点 ONNX 模型开始。若输入模型已经包含 `QuantizeLinear` 或 `DequantizeLinear` 等 ONNX 量化节点，XSlim 会拒绝该模型，避免重复量化。
+
+**推荐流程：**
+
+```bash
+# ✅ 从浮点模型执行静态 INT8 量化
+python -m xslim -c resnet18.json
+
+# ✅ 动态量化或 FP16 转换可显式运行，且不需要校准数据
+python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_dynq.onnx --dynq
+python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_fp16.onnx --fp16
+```
+
+如果在这些无配置文件转换模式中需要排除已知敏感算子，可传入逗号分隔的算子类型或名称：
+
+```bash
+python -m xslim -i input.onnx -o output.onnx --dynq --ignore_op_types Softmax,LayerNormalization
+python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
+```
+
+---
+
 ## 使用建议
 
 - **校准样本数量**：通常 100–300 个样本即可。更多样本可提高校准质量，但会增加耗时。
@@ -349,3 +373,4 @@ quantized_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 - **Transformer 模型**：建议使用 `precision_level: 1` 或 `2`，结合 `finetune_level: 2` 以获得最佳效果。
 - **YOLO 模型**：建议从 `precision_level: 1` 与 `finetune_level: 2` 起步。若输出模型中已经出现 `spacemit_functions.YoloDecode`，说明自动 decode 融合已生效；否则可考虑回退到 `truncate_var_names`。
 - **查看 Tensor 名称**：使用 [Netron](https://netron.app) 可视化 ONNX 计算图，找到用于 `custom_setting`、`truncate_var_names` 或验证 YOLO 融合结果的 Tensor / 节点名称。
+- **算子覆盖**：XSlim 2.1.0 增强了对 opset-24 `Pad`、标量规约输入、axes 输入形式规约算子、比较/逻辑算子以及现代 ONNX 导出常见激活/一元算子的支持。

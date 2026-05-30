@@ -25,6 +25,7 @@
 - **JSON-driven configuration** – simple, declarative quantization setup
 - **Python API & CLI** – use as a library or from the command line
 - **Custom preprocessing** – plug in your own preprocessing functions
+- **Expanded ONNX operator coverage** – run Graphwise Analysis and quantization on models that use common arithmetic, activation, comparison, reduction, dropout, and opset-24 `Pad` patterns
 - **Automatic YOLO decode fusion** – fuse supported YOLO decode subgraphs into a single `spacemit_functions.YoloDecode` node
 - **ONNX Function-aware export** – preserve embedded FunctionProto definitions and emit required custom-domain imports automatically
 - **ONNX-based workflow** – built on the ONNX ecosystem
@@ -113,6 +114,15 @@ xslim -i input.onnx -o output.onnx --opset 20
 xslim -i input.onnx -o output.onnx
 ```
 
+For config-free dynamic quantization and FP16 conversion, you can exclude operators with comma-separated names or types:
+
+```bash
+xslim -i input.onnx -o output.onnx --dynq --ignore_op_types Softmax,LayerNormalization
+xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
+```
+
+Static INT8 quantization expects a floating-point input model. If the model already contains `QuantizeLinear` or `DequantizeLinear`, XSlim stops with a clear error instead of quantizing an already-quantized graph again.
+
 For supported YOLO exports, no extra switch is required: XSlim will try to fuse decode-heavy post-processing into `spacemit_functions.YoloDecode` during simplification and keep the corresponding ONNX `FunctionProto` in the exported model.
 
 ## Documentation
@@ -131,7 +141,7 @@ For a full list of published versions, see the [Releases](https://github.com/spa
 
 | Version | Highlights |
 | --- | --- |
-| 2.1.0 | Current in-tree development version; add automatic `spacemit_functions.YoloDecode` fusion for supported YOLO exports, preserve custom ONNX `FunctionProto` definitions during quantization/export, and improve opset-24/custom-domain handling coverage |
+| 2.1.0 | Current in-tree development version; add automatic `spacemit_functions.YoloDecode` fusion for supported YOLO exports, preserve custom ONNX `FunctionProto` definitions during quantization/export, improve opset-24/custom-domain handling coverage, expand ONNX operator execution/socket coverage, support scalar and axes-input reduce kernels, and reject static re-quantization of models that already contain `QuantizeLinear` / `DequantizeLinear` |
 | [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | Latest published release; add configurable default `ai.onnx` opset conversion for quantization and conversion workflows |
 | [2.0.13](https://github.com/spacemit-com/xslim/releases/tag/2.0.13) | Upgrade the default ONNX opset to 24, standardize operator domains, and align version metadata with the 2.0.12 release |
 | [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | Complete README changelog/release metadata, add accuracy-tuning docs and README links, introduce the xslim-accuracy-tuning GitHub skill, add YOLO truncation guidance, and rename input parameters for consistency |

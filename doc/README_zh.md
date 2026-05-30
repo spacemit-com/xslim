@@ -14,4 +14,6 @@
 
 XSlim 是一款离线量化（PTQ）工具，可将 ONNX 模型转换为针对 SpacemiT 硬件优化的量化形式。它支持 INT8、FP16 和动态量化，所有操作均通过简洁的 JSON 配置文件驱动。
 
+当前文档也覆盖 2.1.0 行为，包括自动 YOLO decode 融合、ONNX Function 保留、更完整的 ONNX 算子覆盖、opset-24 `Pad`、标量规约 Tensor、axes 输入形式的规约算子，以及拒绝对已包含 `QuantizeLinear` 或 `DequantizeLinear` 的模型执行静态 INT8 重复量化的保护逻辑。
+
 快速入门请参阅[项目 README](../README_zh.md)。

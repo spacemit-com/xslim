@@ -342,6 +342,30 @@ quantized_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 
 ---
 
+## 9. Static Quantization Input Check
+
+Static INT8 quantization must start from the original floating-point ONNX model. If the input model already contains ONNX quantization nodes such as `QuantizeLinear` or `DequantizeLinear`, XSlim rejects the model instead of quantizing it again.
+
+**Recommended workflow:**
+
+```bash
+# ✅ Static INT8 from a floating-point model
+python -m xslim -c resnet18.json
+
+# ✅ Dynamic quantization or FP16 conversion can be run explicitly without calibration data
+python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_dynq.onnx --dynq
+python -m xslim -i models/mobilenet_v3_small.onnx -o output/mobilenet_fp16.onnx --fp16
+```
+
+If you need to exclude known-sensitive operators in these config-free conversion modes, pass comma-separated operator types or names:
+
+```bash
+python -m xslim -i input.onnx -o output.onnx --dynq --ignore_op_types Softmax,LayerNormalization
+python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
+```
+
+---
+
 ## Tips
 
 - **Calibration sample count**: 100–300 samples are usually sufficient. More samples improve calibration quality but increase runtime.
@@ -349,3 +373,4 @@ quantized_model = xslim.quantize_onnx_model("resnet18.json", onnx_model)
 - **Transformer models**: Use `precision_level: 1` or `2` combined with `finetune_level: 2` for best results.
 - **YOLO models**: Start with `precision_level: 1` and `finetune_level: 2`. If the output model contains `spacemit_functions.YoloDecode`, automatic decode fusion succeeded; otherwise consider `truncate_var_names` as a fallback.
 - **Inspecting tensor names**: Use [Netron](https://netron.app) to visualize the ONNX graph and find tensor names for `custom_setting`, `truncate_var_names`, or fused YOLO decode validation.
+- **Operator coverage**: XSlim 2.1.0 improves support for opset-24 `Pad`, scalar reduce inputs, axes-input reduce operators, comparison/logical operators, and common activation/unary operators used by modern ONNX exports.

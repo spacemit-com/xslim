@@ -449,6 +449,8 @@ SNR = 量化误差的能量 / 原始信号的能量。**SNR 越高，该 Tensor 
 | 量化后精度小幅下降 | `precision_level` 过低 | 尝试 `precision_level: 1` 或 `2` |
 | 量化后精度小幅下降 | 校准范围不准 | 尝试 `calibration_type: "percentile"` 或 `"kl"` |
 | YOLO 在 decode / 后处理附近精度明显下降 | decode 路径没有融合成功，或 bbox 与 conf 分支仍共享宽范围 concat | 先确认是否已经生成 `spacemit_functions.YoloDecode`；若没有，再用 `truncate_var_names` 截断后处理，让 YOLO 后处理保留浮点 |
+| 静态 INT8 在校准前失败并提示 `QuantizeLinear` / `DequantizeLinear` | 输入模型已经是量化模型 | 使用原始浮点 ONNX 模型；不要对已经量化过的模型再次执行静态 INT8 |
+| 图加载或分析阶段在某个 ONNX 算子处失败 | 导出模型使用了当前执行器或 socket 覆盖范围之外的算子 | 优先重新导出或精简模型；必要时围绕受影响区域使用 `ignore_op_types`、`ignore_op_names` 或 `custom_setting` |
 | Graphwise 报告中某层 SNR 极高 | 该层激活值范围异常 | 对该子图使用 `custom_setting`，尝试 `precision_level: 2` 或 `minmax` 校准 |
 | Graphwise 报告中多层 Cosine < 0.99 | 全局量化误差较高 | 提升 `finetune_level` 至 `2` 或 `3` |
 | INT8 精度无论如何都无法满足需求 | 模型对量化极为敏感 | 使用 `precision_level: 3`（动态量化）或 `4`（FP16） |
@@ -462,6 +464,12 @@ SNR = 量化误差的能量 / 原始信号的能量。**SNR 越高，该 Tensor 
 | Transformer 模型 INT8 | `precision_level: 1`, `finetune_level: 2`, `calibration_type: "default"` |
 | 无校准数据 | `precision_level: 3`（动态）或 `precision_level: 4`（FP16） |
 | 最快调优速度 | `precision_level: 0`, `finetune_level: 0`, `calibration_step: 100` |
+
+### 2.1.0 算子兼容性说明
+
+- 静态 INT8 会在输入模型已经包含 `QuantizeLinear` 或 `DequantizeLinear` 时提前停止，避免误对模型重复量化。
+- Graphwise Analysis 与校准阶段支持更多现代 ONNX 导出形态，包括 opset-24 `Pad`、规约算子的标量 Tensor 输入、通过输入 Tensor 传入 axes、`GreaterOrEqual`、`LessOrEqual`、`Xor`，以及 `Celu`、`Hardmax`、`Mish`、`Softsign`、`ThresholdedRelu`、`IsInf`、`IsNaN` 等常见激活/一元算子。
+- 若仍遇到不支持的算子，请优先尝试以更标准的 ONNX 图重新导出或精简模型；只有当该区域不影响量化关键路径时，再使用定向排除或子图精度覆盖。
 
 ---
 
