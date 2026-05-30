@@ -185,7 +185,7 @@ class OpSocket:
                     self.links.append(VLink(i, j))
 
 
-def CEHCK_TYPE(op: OperationBase, t: str):
+def CHECK_TYPE(op: OperationBase, t: str):
     pass
 
 
@@ -252,7 +252,7 @@ def Reshape_Socket(op: OperationBase) -> OpSocket:
         reshaped (differentiable) : T
             Reshaped data.
     """
-    CEHCK_TYPE(op=op, t="Reshape")
+    CHECK_TYPE(op=op, t="Reshape")
     CHECK_OPSET(op=op, min_version_supported=5, max_version_supported=13)
     return OpSocket(op=op, in_plat=[TargetPlatform.UNSPECIFIED, TargetPlatform.SOI], links=[VLink(in_idx=0, out_idx=0)])
 
@@ -281,7 +281,7 @@ def Pad_Socket(op: OperationBase) -> OpSocket:
         output (differentiable) : T
             Tensor after padding.
     """
-    CEHCK_TYPE(op=op, t="Pad")
+    CHECK_TYPE(op=op, t="Pad")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=24)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]
     if op.opset.onnx_opset_version() >= 24:
@@ -306,7 +306,7 @@ def Gather_Socket(op: OperationBase) -> OpSocket:
         output (differentiable) : T
             Tensor of rank q + (r - 1).
     """
-    CEHCK_TYPE(op=op, t="Gather")
+    CHECK_TYPE(op=op, t="Gather")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=13)
     return OpSocket(
         op=op, in_plat=[TargetPlatform.UNSPECIFIED, TargetPlatform.FP32], links=[VLink(in_idx=0, out_idx=0)]
@@ -341,7 +341,7 @@ def Resize_Socket(op: OperationBase) -> OpSocket:
         Y (differentiable) : T1
             N-D tensor after resizing
     """
-    CEHCK_TYPE(op=op, t="Resize")
+    CHECK_TYPE(op=op, t="Resize")
     CHECK_OPSET(op=op, min_version_supported=10, max_version_supported=19, strict_check=True)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI, TargetPlatform.SOI]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -363,7 +363,7 @@ def Split_Socket(op: OperationBase) -> OpSocket:
         outputs (variadic, differentiable) : T
             One or more outputs forming list of tensors after splitting
     """
-    CEHCK_TYPE(op=op, t="Split")
+    CHECK_TYPE(op=op, t="Split")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=13)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -389,7 +389,7 @@ def Topk_Socket(op: OperationBase) -> OpSocket:
             Tensor of shape [a_1, a_2, ..., a_{axis-1}, k, a_{axis+1}, ... a_n]
             containing the corresponding input tensor indices for the top K values.
     """
-    CEHCK_TYPE(op=op, t="TopK")
+    CHECK_TYPE(op=op, t="TopK")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=11)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI]
     out_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.FP32]
@@ -413,7 +413,7 @@ def Tile_Socket(op: OperationBase) -> OpSocket:
             Output tensor of the same dimensions and type as tensor input.
             output_dim[i] = input_dim[i] * repeats[i]
     """
-    CEHCK_TYPE(op=op, t="Tile")
+    CHECK_TYPE(op=op, t="Tile")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=13)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -434,7 +434,7 @@ def Expand_Socket(op: OperationBase) -> OpSocket:
         output (differentiable) : T
             Output tensor
     """
-    CEHCK_TYPE(op=op, t="Expand")
+    CHECK_TYPE(op=op, t="Expand")
     CHECK_OPSET(op=op, min_version_supported=8, max_version_supported=13)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -463,7 +463,7 @@ def RoiAlign_Socket(op: OperationBase) -> OpSocket:
             RoI pooled output, 4-D tensor of shape (num_rois, C, output_height, output_width).
             The r-th batch element Y[r-1] is a pooled feature map corresponding to the r-th RoI X[r-1].
     """
-    CEHCK_TYPE(op=op, t="RoiAlign")
+    CHECK_TYPE(op=op, t="RoiAlign")
     CHECK_OPSET(op=op, min_version_supported=10, max_version_supported=16)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.FP32, TargetPlatform.SOI]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -497,7 +497,7 @@ def Clip_Socket(op: OperationBase) -> OpSocket:
         output (differentiable) : T
             Output tensor with clipped input elements
     """
-    CEHCK_TYPE(op=op, t="Clip")
+    CHECK_TYPE(op=op, t="Clip")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=13)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.FP32, TargetPlatform.FP32]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -528,7 +528,7 @@ def ConstantOfShape_Socket(op: OperationBase) -> OpSocket:
             the value and datatype of the output tensor is taken from 'value'.If attribute 'value' is not specified,
             the value in the output defaults to 0, and the datatype defaults to float32.
     """
-    CEHCK_TYPE(op=op, t="ConstantOfShape")
+    CHECK_TYPE(op=op, t="ConstantOfShape")
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=13)
     in_plat = [TargetPlatform.SOI]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[])
@@ -551,7 +551,7 @@ def GatherElements_Socket(op: OperationBase) -> OpSocket:
         output (differentiable) : T
             Tensor of the same shape as indices.
     """
-    CEHCK_TYPE(op=op, t="GatherElements")
+    CHECK_TYPE(op=op, t="GatherElements")
     CHECK_OPSET(op=op, min_version_supported=11, max_version_supported=13)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.FP32]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -573,7 +573,7 @@ def GatherND_Socket(op: OperationBase) -> OpSocket:
         output (differentiable) : T
             Tensor of rank q + r - indices_shape[-1] - 1.
     """
-    CEHCK_TYPE(op=op, t="GatherND")
+    CHECK_TYPE(op=op, t="GatherND")
     CHECK_OPSET(op=op, min_version_supported=11, max_version_supported=13)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.FP32]
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
@@ -607,7 +607,7 @@ def NonMaxSuppression_Socket(op: OperationBase) -> OpSocket:
             selected indices from the boxes tensor. [num_selected_indices, 3],
             the selected index format is [batch_index, class_index, box_index].
     """
-    CEHCK_TYPE(op=op, t="NonMaxSuppression")
+    CHECK_TYPE(op=op, t="NonMaxSuppression")
     CHECK_OPSET(op=op, min_version_supported=10, max_version_supported=13)
     in_plat = [
         TargetPlatform.UNSPECIFIED,
