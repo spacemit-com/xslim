@@ -124,6 +124,28 @@ class TestActivationOps(unittest.TestCase):
         result = DEFAULT_BACKEND_TABLE["LeakyRelu"](op, [x], CTX)
         torch.testing.assert_close(result, torch.nn.functional.leaky_relu(x, 0.01))
 
+    def test_additional_activation_ops(self):
+        x = torch.tensor([-2.0, -0.5, 0.0, 0.5, 2.0])
+        cases = [
+            ("Celu", {"alpha": 0.75}, torch.nn.functional.celu(x, alpha=0.75)),
+            ("Mish", {}, x * torch.tanh(torch.nn.functional.softplus(x))),
+            ("Shrink", {"bias": 0.25, "lambd": 0.5}, torch.tensor([-1.75, 0.0, 0.0, 0.0, 1.75])),
+            ("Softsign", {}, x / (1 + torch.abs(x))),
+            ("ThresholdedRelu", {"alpha": 0.5}, torch.tensor([0.0, 0.0, 0.0, 0.0, 2.0])),
+        ]
+        for op_type, attributes, expected in cases:
+            with self.subTest(op_type=op_type):
+                op = make_op(op_type.lower(), op_type, attributes=attributes)
+                result = DEFAULT_BACKEND_TABLE[op_type](op, [x], CTX)
+                torch.testing.assert_close(result, expected)
+
+    def test_hardmax(self):
+        op = make_op("hardmax", "Hardmax", attributes={"axis": 1})
+        x = torch.tensor([[1.0, 3.0, 2.0], [4.0, 0.0, 5.0]])
+        result = DEFAULT_BACKEND_TABLE["Hardmax"](op, [x], CTX)
+        expected = torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        torch.testing.assert_close(result, expected)
+
 
 class TestUnaryOps(unittest.TestCase):
     """Test unary operator forward functions."""
@@ -164,6 +186,34 @@ class TestUnaryOps(unittest.TestCase):
         result = DEFAULT_BACKEND_TABLE["Reciprocal"](op, [x], CTX)
         torch.testing.assert_close(result, 1.0 / x)
 
+    def test_additional_unary_math_ops(self):
+        x = torch.tensor([1.25, 1.5, 2.0])
+        cases = [
+            ("Acos", torch.tensor([-0.5, 0.0, 0.5]), torch.acos(torch.tensor([-0.5, 0.0, 0.5]))),
+            ("Acosh", x, torch.acosh(x)),
+            ("Asin", torch.tensor([-0.5, 0.0, 0.5]), torch.asin(torch.tensor([-0.5, 0.0, 0.5]))),
+            ("Asinh", x, torch.asinh(x)),
+            ("Atan", x, torch.atan(x)),
+            ("Atanh", torch.tensor([-0.5, 0.0, 0.5]), torch.atanh(torch.tensor([-0.5, 0.0, 0.5]))),
+            ("Ceil", torch.tensor([-1.2, 0.2, 1.8]), torch.tensor([-1.0, 1.0, 2.0])),
+            ("Cosh", x, torch.cosh(x)),
+            ("Round", torch.tensor([-1.5, 0.6, 2.4]), torch.tensor([-2.0, 1.0, 2.0])),
+            ("Sign", torch.tensor([-3.0, 0.0, 2.0]), torch.tensor([-1.0, 0.0, 1.0])),
+            ("Sinh", x, torch.sinh(x)),
+        ]
+        for op_type, value, expected in cases:
+            with self.subTest(op_type=op_type):
+                op = make_op(op_type.lower(), op_type)
+                result = DEFAULT_BACKEND_TABLE[op_type](op, [value], CTX)
+                torch.testing.assert_close(result, expected)
+
+    def test_isinf_and_isnan(self):
+        x = torch.tensor([float("-inf"), -1.0, float("nan"), float("inf")])
+        isinf = DEFAULT_BACKEND_TABLE["IsInf"](make_op("isinf", "IsInf"), [x], CTX)
+        isnan = DEFAULT_BACKEND_TABLE["IsNaN"](make_op("isnan", "IsNaN"), [x], CTX)
+        torch.testing.assert_close(isinf, torch.tensor([True, False, False, True]))
+        torch.testing.assert_close(isnan, torch.tensor([False, False, True, False]))
+
 
 class TestReductionOps(unittest.TestCase):
     """Test reduction operator forward functions."""
@@ -197,6 +247,24 @@ class TestReductionOps(unittest.TestCase):
         result = DEFAULT_BACKEND_TABLE["ReduceL2"](op, [x, axes], CTX)
 
         torch.testing.assert_close(result, torch.linalg.vector_norm(x, ord=2, dim=[1], keepdim=True))
+
+    def test_additional_reduce_ops(self):
+        x = torch.tensor([[1.0, -2.0, 3.0], [4.0, -5.0, 6.0]])
+        axes = torch.tensor([1], dtype=torch.int64)
+        cases = [
+            ("ReduceL1", torch.sum(torch.abs(x), dim=1, keepdim=True)),
+            ("ReduceLogSum", torch.log(torch.sum(x, dim=1, keepdim=True))),
+            ("ReduceLogSumExp", torch.logsumexp(x, dim=1, keepdim=True)),
+            ("ReduceMin", torch.amin(x, dim=1, keepdim=True)),
+            ("ReduceProd", torch.prod(x, dim=1, keepdim=True)),
+            ("ReduceSumSquare", torch.sum(torch.square(x), dim=1, keepdim=True)),
+        ]
+        for op_type, expected in cases:
+            with self.subTest(op_type=op_type):
+                op = make_op(op_type.lower(), op_type, attributes={"keepdims": 1}, num_inputs=2)
+                op._opset = Opset(version=18)
+                result = DEFAULT_BACKEND_TABLE[op_type](op, [x, axes], CTX)
+                torch.testing.assert_close(result, expected)
 
 
 class TestTensorManipulationOps(unittest.TestCase):
@@ -386,6 +454,20 @@ class TestOtherOps(unittest.TestCase):
         result = DEFAULT_BACKEND_TABLE["Where"](op, [cond, a, b], CTX)
         torch.testing.assert_close(result, torch.where(cond, a, b))
 
+    def test_additional_logical_ops(self):
+        a = torch.tensor([1.0, 2.0, 3.0])
+        b = torch.tensor([2.0, 2.0, 1.0])
+        cases = [
+            ("GreaterOrEqual", [a, b], torch.ge(a, b)),
+            ("LessOrEqual", [a, b], torch.le(a, b)),
+            ("Xor", [a > 1, b > 1], torch.logical_xor(a > 1, b > 1)),
+        ]
+        for op_type, values, expected in cases:
+            with self.subTest(op_type=op_type):
+                op = make_op(op_type.lower(), op_type, num_inputs=2)
+                result = DEFAULT_BACKEND_TABLE[op_type](op, values, CTX)
+                torch.testing.assert_close(result, expected)
+
     def test_cast_to_float(self):
         op = make_op("cast", "Cast", attributes={"to": DataType.FP32})
         x = torch.tensor([1, 2, 3], dtype=torch.int32)
@@ -422,6 +504,22 @@ class TestReduceOps(unittest.TestCase):
 
 class TestQuantizerConfig(unittest.TestCase):
     """Test quantizer config generation for operator socket metadata."""
+
+    def test_new_operator_sockets_are_registered(self):
+        socket_cases = [
+            ("Celu", 1, [TargetPlatform.UNSPECIFIED]),
+            ("Mish", 1, [TargetPlatform.UNSPECIFIED]),
+            ("Softsign", 1, [TargetPlatform.UNSPECIFIED]),
+            ("ThresholdedRelu", 1, [TargetPlatform.UNSPECIFIED]),
+            ("QuantizeLinear", 3, [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]),
+            ("Dropout", 3, [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]),
+            ("IsNaN", 1, [TargetPlatform.UNSPECIFIED]),
+        ]
+        for op_type, num_inputs, expected_in_plat in socket_cases:
+            with self.subTest(op_type=op_type):
+                operation = make_op(op_type.lower(), op_type, num_inputs=num_inputs)
+                operation.opset = Opset(domain="", version=18)
+                self.assertEqual(operation.socket.in_plat, expected_in_plat)
 
     def test_reduce_axes_input_stays_fp32(self):
         reduce_cases = [

@@ -877,20 +877,56 @@ def Onehot_Socket(op: OperationBase) -> OpSocket:
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], out_plat=out_plat, links=[])
 
 
+def QuantizeLinear_Socket(op: OperationBase) -> OpSocket:
+    CHECK_OPSET(op=op, min_version_supported=10, max_version_supported=24)
+    in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]
+    return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
+
+
+def Dropout_Socket(op: OperationBase) -> OpSocket:
+    CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=22)
+    in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]
+    out_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.FP32]
+    return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], out_plat=out_plat[: op.num_of_output], links=[VLink(0, 0)])
+
+
+def NonQuantizedOutput_Socket(op: OperationBase) -> OpSocket:
+    out_plat = [TargetPlatform.FP32 for _ in range(op.num_of_output)]
+    return OpSocket(op=op, out_plat=out_plat, links=[])
+
+
 DEFAULT_SOCKET_TABLE = {
+    "Abs": DEFAULT_SOCKET_CREATOR,
+    "Acos": DEFAULT_SOCKET_CREATOR,
+    "Acosh": DEFAULT_SOCKET_CREATOR,
     "AdaptiveAvgPool2d": DEFAULT_SOCKET_CREATOR,
     "Add": DEFAULT_SOCKET_CREATOR,
     "ArgMax": DEFAULT_SOCKET_CREATOR,
+    "Asin": DEFAULT_SOCKET_CREATOR,
+    "Asinh": DEFAULT_SOCKET_CREATOR,
+    "Atan": DEFAULT_SOCKET_CREATOR,
+    "Atanh": DEFAULT_SOCKET_CREATOR,
+    "Attention": DEFAULT_SOCKET_CREATOR,
     "AveragePool": DEFAULT_SOCKET_CREATOR,
+    "BatchMatMul": DEFAULT_SOCKET_CREATOR,
     "BatchNormalization": DEFAULT_SOCKET_CREATOR,
     "Cast": DEFAULT_SOCKET_CREATOR,
+    "Ceil": DEFAULT_SOCKET_CREATOR,
+    "Celu": DEFAULT_SOCKET_CREATOR,
     "Clip": Clip_Socket,
     "Concat": DEFAULT_SOCKET_CREATOR,
     "Constant": DEFAULT_SOCKET_CREATOR,
     "ConstantOfShape": ConstantOfShape_Socket,
     "Conv": DEFAULT_SOCKET_CREATOR,
     "ConvTranspose": DEFAULT_SOCKET_CREATOR,
+    "Cos": DEFAULT_SOCKET_CREATOR,
+    "Cosh": DEFAULT_SOCKET_CREATOR,
+    "DequantizeLinear": QuantizeLinear_Socket,
     "Div": DEFAULT_SOCKET_CREATOR,
+    "Dropout": Dropout_Socket,
+    "DynamicQuantizeLinear": DEFAULT_SOCKET_CREATOR,
+    "Einsum": DEFAULT_SOCKET_CREATOR,
+    "Elu": DEFAULT_SOCKET_CREATOR,
     "Equal": Logical_Socket,
     "Exp": DEFAULT_SOCKET_CREATOR,
     "Expand": Expand_Socket,
@@ -905,21 +941,31 @@ DEFAULT_SOCKET_TABLE = {
     "GlobalAveragePool": DEFAULT_SOCKET_CREATOR,
     "GlobalMaxPool": DEFAULT_SOCKET_CREATOR,
     "Greater": Logical_Socket,
+    "Hardmax": DEFAULT_SOCKET_CREATOR,
+    "IsInf": NonQuantizedOutput_Socket,
+    "IsNaN": NonQuantizedOutput_Socket,
     "LayerNorm": DEFAULT_SOCKET_CREATOR,
+    "LayerNormalization": DEFAULT_SOCKET_CREATOR,
     "LeakyRelu": DEFAULT_SOCKET_CREATOR,
     "Less": Logical_Socket,
     "LogSoftmax": DEFAULT_SOCKET_CREATOR,
+    "LRN": DEFAULT_SOCKET_CREATOR,
+    "LSTM": DEFAULT_SOCKET_CREATOR,
     "MatMul": DEFAULT_SOCKET_CREATOR,
     "Max": DEFAULT_SOCKET_CREATOR,
     "MaxPool": DEFAULT_SOCKET_CREATOR,
     "Min": DEFAULT_SOCKET_CREATOR,
+    "Mish": DEFAULT_SOCKET_CREATOR,
+    "Mod": DEFAULT_SOCKET_CREATOR,
     "Mul": DEFAULT_SOCKET_CREATOR,
     "MultiHeadAttention": DEFAULT_SOCKET_CREATOR,
     "NonMaxSuppression": NonMaxSuppression_Socket,
     "NonZero": NonZero_Socket,
     "Not": DEFAULT_SOCKET_CREATOR,
     "Pad": Pad_Socket,
+    "PPQBiasFusedMatMul": DEFAULT_SOCKET_CREATOR,
     "PRelu": DEFAULT_SOCKET_CREATOR,
+    "QuantizeLinear": QuantizeLinear_Socket,
     "Range": Range_Socket,
     "ReduceL1": Reduce_Socket,
     "ReduceL2": Reduce_Socket,
@@ -934,16 +980,24 @@ DEFAULT_SOCKET_TABLE = {
     "Relu": DEFAULT_SOCKET_CREATOR,
     "Reshape": Reshape_Socket,
     "Resize": Resize_Socket,
+    "Round": DEFAULT_SOCKET_CREATOR,
     "ScatterElements": ScatterElements_Socket,
     "ScatterND": ScatterND_Socket,
+    "Selu": DEFAULT_SOCKET_CREATOR,
     "Shape": Shape_Socket,
     "Sigmoid": DEFAULT_SOCKET_CREATOR,
+    "Sign": DEFAULT_SOCKET_CREATOR,
+    "Sin": DEFAULT_SOCKET_CREATOR,
+    "Sinh": DEFAULT_SOCKET_CREATOR,
     "Slice": Slice_Socket,
+    "Softsign": DEFAULT_SOCKET_CREATOR,
     "Softmax": DEFAULT_SOCKET_CREATOR,
     "Softplus": DEFAULT_SOCKET_CREATOR,
     "Split": Split_Socket,
     "Squeeze": Squeeze_Socket,
     "Sub": DEFAULT_SOCKET_CREATOR,
+    "Sum": DEFAULT_SOCKET_CREATOR,
+    "Tan": DEFAULT_SOCKET_CREATOR,
     "Tile": Tile_Socket,
     "TopK": Topk_Socket,
     "Transpose": DEFAULT_SOCKET_CREATOR,
@@ -958,6 +1012,7 @@ DEFAULT_SOCKET_TABLE = {
     "DepthToSpace": DEFAULT_SOCKET_CREATOR,
     "Scale": DEFAULT_SOCKET_CREATOR,  # caffe op
     "Tanh": DEFAULT_SOCKET_CREATOR,
+    "ThresholdedRelu": DEFAULT_SOCKET_CREATOR,
     "Pow": DEFAULT_SOCKET_CREATOR,
     "Crop": DEFAULT_SOCKET_CREATOR,  # caffe op
     "ChannelShuffle": DEFAULT_SOCKET_CREATOR,  # caffe op
@@ -979,4 +1034,6 @@ DEFAULT_SOCKET_TABLE = {
     "Or": Logical_Socket,
     "And": Logical_Socket,
     "Erf": DEFAULT_SOCKET_CREATOR,
+    "skipLayerNormPlugin": DEFAULT_SOCKET_CREATOR,
+    "YoloDecode": DEFAULT_SOCKET_CREATOR,
 }
