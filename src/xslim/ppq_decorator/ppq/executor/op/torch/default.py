@@ -1786,7 +1786,7 @@ def ReduceMax_forward(
     [input_value] = values
     dim = op.attributes.get("axes", None)
     keepdim = bool(op.attributes.get("keepdims", 1))
-    if len(input_value) == 0:
+    if input_value.numel() == 0:
         output = input_value
     else:
         if dim is None:
@@ -1847,7 +1847,7 @@ def _reduce_prod(input_value: torch.Tensor, dim, keepdim: bool):
 
 def ReduceMin_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
-    if noop or len(input_value) == 0:
+    if noop or input_value.numel() == 0:
         return input_value
     if dim is None:
         return _reshape_reduce_all_output(torch.min(input_value), input_value, keepdim)
@@ -1856,7 +1856,7 @@ def ReduceMin_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBacke
 
 def ReduceProd_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
-    if noop or len(input_value) == 0:
+    if noop or input_value.numel() == 0:
         return input_value
     if dim is None:
         return _reshape_reduce_all_output(torch.prod(input_value), input_value, keepdim)
@@ -1865,7 +1865,7 @@ def ReduceProd_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBack
 
 def ReduceL1_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
-    if noop or len(input_value) == 0:
+    if noop or input_value.numel() == 0:
         return input_value
     if dim is None:
         return _reshape_reduce_all_output(torch.sum(torch.abs(input_value)), input_value, keepdim)
@@ -1874,7 +1874,7 @@ def ReduceL1_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBacken
 
 def ReduceSumSquare_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
-    if noop or len(input_value) == 0:
+    if noop or input_value.numel() == 0:
         return input_value
     square = torch.square(input_value)
     if dim is None:
@@ -1888,7 +1888,7 @@ def ReduceLogSum_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBa
 
 def ReduceLogSumExp_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
-    if noop or len(input_value) == 0:
+    if noop or input_value.numel() == 0:
         return input_value
     if dim is None:
         return _reshape_reduce_all_output(torch.logsumexp(input_value.reshape(-1), dim=0), input_value, keepdim)
@@ -1912,7 +1912,7 @@ def ReduceMean_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBack
             return input_value
         dim = None
     dim = _normalize_reduce_axes(dim)
-    if len(input_value) == 0:
+    if input_value.numel() == 0:
         output = input_value
     else:
         if dim is None:

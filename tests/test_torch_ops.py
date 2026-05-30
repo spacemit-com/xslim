@@ -266,6 +266,25 @@ class TestReductionOps(unittest.TestCase):
                 result = DEFAULT_BACKEND_TABLE[op_type](op, [x, axes], CTX)
                 torch.testing.assert_close(result, expected)
 
+    def test_reduce_ops_accept_scalar_input(self):
+        x = torch.tensor(2.0)
+        cases = [
+            ("ReduceL1", torch.sum(torch.abs(x))),
+            ("ReduceLogSum", torch.log(torch.sum(x))),
+            ("ReduceLogSumExp", torch.logsumexp(x.reshape(-1), dim=0)),
+            ("ReduceMax", torch.max(x)),
+            ("ReduceMean", torch.mean(x)),
+            ("ReduceMin", torch.min(x)),
+            ("ReduceProd", torch.prod(x)),
+            ("ReduceSumSquare", torch.sum(torch.square(x))),
+        ]
+        for op_type, expected in cases:
+            with self.subTest(op_type=op_type):
+                op = make_op(op_type.lower(), op_type)
+                op.opset = Opset(version=18)
+                result = DEFAULT_BACKEND_TABLE[op_type](op, [x], CTX)
+                torch.testing.assert_close(result, expected)
+
 
 class TestTensorManipulationOps(unittest.TestCase):
     """Test tensor manipulation operator forward functions."""
