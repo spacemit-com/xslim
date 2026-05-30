@@ -2,7 +2,7 @@
 
 [中文版](README_zh.md) | English
 
-[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![Version](https://img.shields.io/badge/version-2.1.1-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 
@@ -137,12 +137,13 @@ See the [samples](samples/) directory for ready-to-run examples covering ResNet-
 
 ## Changelog
 
-For a full list of published versions, see the [Releases](https://github.com/spacemit-com/xslim/releases) page. The summary below is synchronized with that release history; `2.1.0` is the current in-tree development version and has not been published yet.
+For a full list of published versions, see the [Releases](https://github.com/spacemit-com/xslim/releases) page. The summary below is synchronized with that release history; `2.1.1` is the current in-tree development version and has not been published yet.
 
 | Version | Highlights |
 | --- | --- |
-| 2.1.0 | Current in-tree development version; add automatic `spacemit_functions.YoloDecode` fusion for supported YOLO exports, preserve custom ONNX `FunctionProto` definitions during quantization/export, improve opset-24/custom-domain handling coverage, expand ONNX operator execution/socket coverage, support scalar and axes-input reduce kernels, and reject static re-quantization of models that already contain `QuantizeLinear` / `DequantizeLinear` |
-| [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | Latest published release; add configurable default `ai.onnx` opset conversion for quantization and conversion workflows |
+| 2.1.1 | Current in-tree development version after the 2.1.0 release |
+| [2.1.0](https://github.com/spacemit-com/xslim/releases/tag/2.1.0) | Latest published release; add automatic `spacemit_functions.YoloDecode` fusion for supported YOLO exports, preserve custom ONNX `FunctionProto` definitions during quantization/export, improve opset-24/custom-domain handling coverage, expand ONNX operator execution/socket coverage, support scalar and axes-input reduce kernels, and reject static re-quantization of models that already contain `QuantizeLinear` / `DequantizeLinear` |
+| [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | Add configurable default `ai.onnx` opset conversion for quantization and conversion workflows |
 | [2.0.13](https://github.com/spacemit-com/xslim/releases/tag/2.0.13) | Upgrade the default ONNX opset to 24, standardize operator domains, and align version metadata with the 2.0.12 release |
 | [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | Complete README changelog/release metadata, add accuracy-tuning docs and README links, introduce the xslim-accuracy-tuning GitHub skill, add YOLO truncation guidance, and rename input parameters for consistency |
 | [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | Fix Pad/missing-input handling, add Or/Einsum/Selu support, normalize Conv/ConvTranspose kernel shapes, and raise minimum Python to 3.9 |
