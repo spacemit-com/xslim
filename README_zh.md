@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-[![版本](https://img.shields.io/badge/版本-2.1.0-blue.svg)](https://github.com/spacemit-com/xslim/releases)
+[![版本](https://img.shields.io/badge/版本-2.1.1-blue.svg)](https://github.com/spacemit-com/xslim/releases)
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 
@@ -137,11 +137,11 @@ xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
 
 ## 更新日志
 
-完整的已发布版本记录请查阅 [Releases](https://github.com/spacemit-com/xslim/releases) 页面。下表已按该页面同步；`2.1.0` 是当前代码树中的开发版本，尚未正式发布。
+完整的已发布版本记录请查阅 [Releases](https://github.com/spacemit-com/xslim/releases) 页面。下表已按该页面同步；`2.1.1` 是当前代码树中的开发版本，尚未正式发布。
 
 | 版本 | 主要更新 |
 | --- | --- |
-| 2.1.0 | 当前代码树中的开发版本；新增面向受支持 YOLO 导出模型的 `spacemit_functions.YoloDecode` 自动融合，量化/导出时保留自定义 ONNX `FunctionProto` 定义，补强 opset 24 与自定义域相关处理覆盖，扩展 ONNX 算子执行与 socket 覆盖，支持标量输入及 axes 输入形式的规约算子，并拒绝对已包含 `QuantizeLinear` / `DequantizeLinear` 的模型执行静态重复量化 |
+| 2.1.1 | 当前代码树中的开发版本；新增面向受支持 YOLO 导出模型的 `spacemit_functions.YoloDecode` 自动融合，量化/导出时保留自定义 ONNX `FunctionProto` 定义，补强 opset 24 与自定义域相关处理覆盖，扩展 ONNX 算子执行与 socket 覆盖，支持标量输入及 axes 输入形式的规约算子，并拒绝对已包含 `QuantizeLinear` / `DequantizeLinear` 的模型执行静态重复量化 |
 | [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | 最新正式发布版本；为量化与转换流程新增可配置的默认 `ai.onnx` opset 转换能力 |
 | [2.0.13](https://github.com/spacemit-com/xslim/releases/tag/2.0.13) | 将默认 ONNX opset 升级到 24，统一算子 domain，并对齐 2.0.12 发布后的版本元数据 |
 | [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | 补全 README 更新日志与发布元数据，新增精度调优文档及 README 链接，引入 xslim-accuracy-tuning GitHub skill，补充 YOLO 截断后处理指导，并统一 input parameters 命名 |
