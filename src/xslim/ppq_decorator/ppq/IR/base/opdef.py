@@ -985,6 +985,7 @@ DEFAULT_SOCKET_TABLE = {
     "ScatterND": ScatterND_Socket,
     "Selu": DEFAULT_SOCKET_CREATOR,
     "Shape": Shape_Socket,
+    "Shrink": DEFAULT_SOCKET_CREATOR,
     "Sigmoid": DEFAULT_SOCKET_CREATOR,
     "Sign": DEFAULT_SOCKET_CREATOR,
     "Sin": DEFAULT_SOCKET_CREATOR,

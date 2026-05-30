@@ -4495,6 +4495,7 @@ DEFAULT_BACKEND_TABLE = {
     "ScatterElements": ScatterElements_forward,
     "ScatterND": ScatterND_forward,
     "Shape": Shape_forward,
+    "Shrink": Shrink_forward,
     "Sigmoid": UnaryEltwise_forward,
     "Sign": Sign_forward,
     "Sin": Sin_forward,
@@ -4540,7 +4541,6 @@ DEFAULT_BACKEND_TABLE = {
     "LSTM": LSTM_forward,
     "Selu": Selu_forward,
     "Sum": Sum_forward,
-    "Elu": Elu_forward,
     "Erf": Erf_forward,
     "Xor": Xor_forward,
 }
