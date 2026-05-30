@@ -22,6 +22,7 @@ python -m xslim -c mobilenet_v3_small.json
 python -m xslim -c resnet18_custom_preprocess.json
 python -m xslim -c bertsquad.json
 python -m xslim -c mobilenet_v3_small_fp16.json
+python -m xslim -c mobilenet_v3_small_dyn_quantize.json
 ```
 
 Or use the Python API (see `demo.py`):
@@ -42,3 +43,8 @@ xslim.quantize_onnx_model("resnet18.json")
 | `bertsquad.json` | INT8 quantization for BERT-SQuAD (numpy inputs) |
 | `mobilenet_v3_small_fp16.json` | FP16 conversion for MobileNet V3 Small |
 | `mobilenet_v3_small_dyn_quantize.json` | Dynamic quantization for MobileNet V3 Small |
+
+## Notes
+
+- Static INT8 examples expect floating-point ONNX inputs. If a model already contains `QuantizeLinear` or `DequantizeLinear`, use the original floating-point export instead.
+- XSlim 2.1.0 improves compatibility with modern ONNX exports, including opset-24 `Pad`, scalar reduce tensors, axes-input reduce operators, additional comparison/logical operators, and common activation/unary operators.

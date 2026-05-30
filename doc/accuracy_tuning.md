@@ -449,6 +449,8 @@ The following configuration combines multiple methods for a CNN model with high 
 | Small accuracy drop | `precision_level` too low | Try `precision_level: 1` or `2` |
 | Small accuracy drop | Inaccurate calibration range | Try `calibration_type: "percentile"` or `"kl"` |
 | YOLO accuracy drops around decode / post-processing | The decode path was not fused, or bbox and confidence branches still share a wide concat range | First confirm `spacemit_functions.YoloDecode` was generated; if not, split the graph with `truncate_var_names` and keep YOLO post-processing outside the quantized region |
+| Static INT8 fails before calibration and reports `QuantizeLinear` / `DequantizeLinear` | The input model is already quantized | Use the original floating-point ONNX model; do not run static INT8 on a previously quantized model |
+| Graph loading or analysis fails on a specific ONNX operator | The export uses an operator outside the current executor/socket coverage | Re-export or simplify the model if possible; otherwise use `ignore_op_types`, `ignore_op_names`, or `custom_setting` around the affected region |
 | Specific layer has very high SNR in report | Abnormal activation range in that layer | Use `custom_setting` for that subgraph with `precision_level: 2` or `minmax` calibration |
 | Many layers show Cosine < 0.99 | High global quantization error | Increase `finetune_level` to `2` or `3` |
 | INT8 accuracy unacceptably low regardless of tuning | Model is highly sensitive to quantization | Use `precision_level: 3` (dynamic) or `4` (FP16) |
@@ -462,6 +464,12 @@ The following configuration combines multiple methods for a CNN model with high 
 | Transformer INT8 | `precision_level: 1`, `finetune_level: 2`, `calibration_type: "default"` |
 | No calibration data | `precision_level: 3` (dynamic) or `precision_level: 4` (FP16) |
 | Fastest tuning iteration | `precision_level: 0`, `finetune_level: 0`, `calibration_step: 100` |
+
+### 2.1.0 Operator Compatibility Notes
+
+- Static INT8 now stops early when the input model already contains `QuantizeLinear` or `DequantizeLinear`; this prevents accidental re-quantization.
+- Graphwise Analysis and calibration support more modern ONNX exports, including opset-24 `Pad`, scalar tensors in reduce operators, axes supplied as reduce inputs, `GreaterOrEqual`, `LessOrEqual`, `Xor`, and common activation/unary operators such as `Celu`, `Hardmax`, `Mish`, `Softsign`, `ThresholdedRelu`, `IsInf`, and `IsNaN`.
+- If an unsupported operator remains, first try exporting with a more standard ONNX graph or simplifying the model; then use targeted exclusion or subgraph precision overrides only when the unsupported region is not critical to quantization.
 
 ---
 

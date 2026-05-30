@@ -49,6 +49,7 @@ Controls how calibration data is loaded and how quantization ranges are computed
 | Field | Type | Default | Options | Description |
 |---|---|---|---|---|
 | `calibration_step` | `int` | `500` | 10–1000 | Maximum number of calibration steps (dataloader iterations/batches); effective sample count ≈ `calibration_step × batch_size` |
+| `calibration_batch_size` | `int` | `1` | ≥ `1` | Number of samples loaded per calibration batch; effective sample count ≈ `calibration_step × calibration_batch_size` |
 | `calibration_device` | `string` | `cuda` | `cuda`, `cpu` | Inference device for calibration; auto-detected, falls back to `cpu` |
 | `calibration_type` | `string` | `default` | `default`, `kl`, `minmax`, `percentile`, `mse` | Observer algorithm for computing activation ranges |
 | `input_parameters` | `list` | **required** | — | Per-input settings, one entry per model input (see below) |
@@ -73,7 +74,7 @@ Each list entry corresponds to one model input **in the same order as the ONNX m
 |---|---|---|---|---|
 | `input_name` | `string` | Read from model | — | Input tensor name |
 | `input_shape` | `list[int]` | Read from model | — | Input shape; symbolic batch dimension defaults to `1` |
-| `dtype` | `string` | Read from model | Any ONNX tensor dtype | Input data type; by default read from the ONNX model (non-float types such as `int64` are supported; `img`/`raw` loaders interpret data as `float32`) |
+| `dtype` | `string` | `float32`, then read from model during graph loading when available | Any ONNX tensor dtype | Input data type. Non-float inputs such as `int64` are supported for `npy` calibration data; `img` and `raw` loaders interpret data as `float32` |
 | `file_type` | `string` | `img` | `img`, `npy`, `raw` | Calibration file format (see below) |
 | `color_format` | `string` | `bgr` | `rgb`, `bgr` | Color channel order for image inputs |
 | `mean_value` | `list[float]` | `null` | — | Per-channel mean subtracted during normalization |
@@ -240,6 +241,27 @@ XSlim preserves existing ONNX `FunctionProto` definitions from the input model a
 
 ---
 
+## Static Quantization Input Requirements
+
+Static INT8 quantization expects a floating-point ONNX input model. Models that already contain `QuantizeLinear` or `DequantizeLinear` are considered already quantized, so XSlim rejects them with a `ValueError` instead of quantizing the graph a second time.
+
+Use the original floating-point model as the input for static INT8. If you only need model simplification, dynamic quantization, or FP16 conversion, invoke the corresponding CLI mode explicitly.
+
+---
+
+## Operator Coverage Notes
+
+XSlim 2.1.0 expands the internal ONNX executor and quantization socket metadata used by analysis and calibration. The updated coverage includes:
+
+- opset-24 `Pad` with the optional `axes` input;
+- comparison and logical operators such as `GreaterOrEqual`, `LessOrEqual`, and `Xor`;
+- activation and unary operators such as `Celu`, `Hardmax`, `Mish`, `Softsign`, `ThresholdedRelu`, trigonometric, inverse-trigonometric, hyperbolic, `Round`, `Sign`, `IsInf`, and `IsNaN`;
+- additional reduce kernels such as `ReduceL1`, `ReduceLogSum`, `ReduceLogSumExp`, `ReduceMin`, `ReduceProd`, and `ReduceSumSquare`, including scalar tensors and axes supplied as inputs.
+
+When a model contains an unsupported ONNX operator, XSlim still reports it during graph loading, simplification, analysis, or quantization so you can decide whether to simplify/export the model differently or exclude the affected subgraph.
+
+---
+
 ## Complete Configuration Example
 
 ```json
@@ -249,6 +271,7 @@ XSlim preserves existing ONNX `FunctionProto` definitions from the input model a
         "working_dir": "./output"
     },
     "calibration_parameters": {
+        "calibration_batch_size": 1,
         "calibration_step": 200,
         "calibration_device": "cuda",
         "calibration_type": "default",
