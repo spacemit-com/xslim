@@ -18,7 +18,7 @@ from xslim.ppq_decorator.ppq.executor.op import (DEFAULT_BACKEND_TABLE,
                                                  TorchBackendContext)
 from xslim.ppq_decorator.ppq.executor.torch import TorchExecutor
 from xslim.ppq_decorator.ppq.IR import BaseGraph, Operation, Variable
-from xslim.ppq_decorator.ppq.IR.base.opdef import Opset
+from xslim.ppq_decorator.ppq.IR.base.opdef import DEFAULT_SOCKET_TABLE, Opset
 from xslim.quantizer.xslim import XSlimQuantizer
 
 
@@ -513,7 +513,6 @@ class TestQuantizerConfig(unittest.TestCase):
             ("Mish", 1, [TargetPlatform.UNSPECIFIED]),
             ("Softsign", 1, [TargetPlatform.UNSPECIFIED]),
             ("ThresholdedRelu", 1, [TargetPlatform.UNSPECIFIED]),
-            ("QuantizeLinear", 3, [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]),
             ("Dropout", 3, [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]),
             ("IsNaN", 1, [TargetPlatform.UNSPECIFIED]),
         ]
@@ -522,6 +521,14 @@ class TestQuantizerConfig(unittest.TestCase):
                 op = make_op(op_type.lower(), op_type, num_inputs=num_inputs)
                 op.opset = Opset(domain="", version=18)
                 self.assertEqual(op.socket.in_plat, expected_in_plat)
+
+    def test_quantize_linear_ops_use_default_socket(self):
+        for op_type in ("QuantizeLinear", "DequantizeLinear"):
+            with self.subTest(op_type=op_type):
+                op = make_op(op_type.lower(), op_type, num_inputs=3)
+                op.opset = Opset(domain="", version=18)
+                self.assertNotIn(op_type, DEFAULT_SOCKET_TABLE)
+                self.assertEqual(op.socket.in_plat, [TargetPlatform.UNSPECIFIED] * 3)
 
     def test_reduce_axes_input_stays_fp32(self):
         reduce_cases = [

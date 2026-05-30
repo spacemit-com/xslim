@@ -879,12 +879,6 @@ def Onehot_Socket(op: OperationBase) -> OpSocket:
     return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], out_plat=out_plat, links=[])
 
 
-def QuantizeLinear_Socket(op: OperationBase) -> OpSocket:
-    CHECK_OPSET(op=op, min_version_supported=10, max_version_supported=24)
-    in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]
-    return OpSocket(op=op, in_plat=in_plat[: op.num_of_input], links=[VLink(in_idx=0, out_idx=0)])
-
-
 def Dropout_Socket(op: OperationBase) -> OpSocket:
     CHECK_OPSET(op=op, min_version_supported=1, max_version_supported=22)
     in_plat = [TargetPlatform.UNSPECIFIED, TargetPlatform.SOI, TargetPlatform.SOI]
@@ -923,7 +917,6 @@ DEFAULT_SOCKET_TABLE = {
     "ConvTranspose": DEFAULT_SOCKET_CREATOR,
     "Cos": DEFAULT_SOCKET_CREATOR,
     "Cosh": DEFAULT_SOCKET_CREATOR,
-    "DequantizeLinear": QuantizeLinear_Socket,
     "Div": DEFAULT_SOCKET_CREATOR,
     "Dropout": Dropout_Socket,
     "DynamicQuantizeLinear": DEFAULT_SOCKET_CREATOR,
@@ -969,7 +962,6 @@ DEFAULT_SOCKET_TABLE = {
     "Pad": Pad_Socket,
     "PPQBiasFusedMatMul": DEFAULT_SOCKET_CREATOR,
     "PRelu": DEFAULT_SOCKET_CREATOR,
-    "QuantizeLinear": QuantizeLinear_Socket,
     "Range": Range_Socket,
     "ReduceL1": Reduce_Socket,
     "ReduceL2": Reduce_Socket,
