@@ -113,7 +113,7 @@ class TestActivationOps(unittest.TestCase):
 
     def test_softmax(self):
         op = make_op("softmax", "Softmax", attributes={"axis": -1})
-        op._opset = Opset(version=13)
+        op.opset = Opset(version=13)
         x = torch.tensor([[1.0, 2.0, 3.0]])
         result = DEFAULT_BACKEND_TABLE["Softmax"](op, [x], CTX)
         torch.testing.assert_close(result, torch.softmax(x, dim=-1))
@@ -220,7 +220,7 @@ class TestReductionOps(unittest.TestCase):
 
     def test_reduce_mean_with_axes_input(self):
         op = make_op("reduce_mean", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
-        op._opset = Opset(version=18)
+        op.opset = Opset(version=18)
         x = torch.randn(1, 2048, 9, 9)
         axes = torch.tensor([-1, -2], dtype=torch.int64)
 
@@ -230,7 +230,7 @@ class TestReductionOps(unittest.TestCase):
 
     def test_reduce_mean_flattens_axes_input(self):
         op = make_op("reduce_mean_nested_axes", "ReduceMean", attributes={"keepdims": 1}, num_inputs=2)
-        op._opset = Opset(version=18)
+        op.opset = Opset(version=18)
         x = torch.randn(2, 3, 4)
         axes = torch.tensor([[1.0]], dtype=torch.float32)
 
@@ -240,7 +240,7 @@ class TestReductionOps(unittest.TestCase):
 
     def test_reduce_l2_with_axes_input(self):
         op = make_op("reduce_l2", "ReduceL2", attributes={"keepdims": 1}, num_inputs=2)
-        op._opset = Opset(version=18)
+        op.opset = Opset(version=18)
         x = torch.tensor([[3.0, 4.0], [5.0, 12.0]])
         axes = torch.tensor([1], dtype=torch.int64)
 
@@ -262,7 +262,7 @@ class TestReductionOps(unittest.TestCase):
         for op_type, expected in cases:
             with self.subTest(op_type=op_type):
                 op = make_op(op_type.lower(), op_type, attributes={"keepdims": 1}, num_inputs=2)
-                op._opset = Opset(version=18)
+                op.opset = Opset(version=18)
                 result = DEFAULT_BACKEND_TABLE[op_type](op, [x, axes], CTX)
                 torch.testing.assert_close(result, expected)
 
@@ -299,7 +299,7 @@ class TestTensorManipulationOps(unittest.TestCase):
 
     def test_squeeze(self):
         op = make_op("squeeze", "Squeeze", num_inputs=2)
-        op._opset = Opset(version=13)
+        op.opset = Opset(version=13)
         x = torch.randn(1, 3, 1, 4)
         axes = torch.tensor([0], dtype=torch.int64)
         result = DEFAULT_BACKEND_TABLE["Squeeze"](op, [x, axes], CTX)
@@ -307,7 +307,7 @@ class TestTensorManipulationOps(unittest.TestCase):
 
     def test_unsqueeze(self):
         op = make_op("unsqueeze", "Unsqueeze", num_inputs=2)
-        op._opset = Opset(version=13)
+        op.opset = Opset(version=13)
         x = torch.randn(3, 4)
         axes = torch.tensor([0], dtype=torch.int64)
         result = DEFAULT_BACKEND_TABLE["Unsqueeze"](op, [x, axes], CTX)
@@ -486,7 +486,7 @@ class TestReduceOps(unittest.TestCase):
 
     def test_reduce_mean(self):
         op = make_op("reduce_mean", "ReduceMean", attributes={"axes": [1], "keepdims": 1})
-        op._opset = Opset(version=11)
+        op.opset = Opset(version=11)
         x = torch.randn(2, 3, 4)
         result = DEFAULT_BACKEND_TABLE["ReduceMean"](op, [x], CTX)
         expected = torch.mean(x, dim=1, keepdim=True)
@@ -494,7 +494,7 @@ class TestReduceOps(unittest.TestCase):
 
     def test_reduce_sum(self):
         op = make_op("reduce_sum", "ReduceSum", attributes={"keepdims": 1}, num_inputs=2)
-        op._opset = Opset(version=13)
+        op.opset = Opset(version=13)
         x = torch.randn(2, 3, 4)
         axes = torch.tensor([1], dtype=torch.int64)
         result = DEFAULT_BACKEND_TABLE["ReduceSum"](op, [x, axes], CTX)
