@@ -28,6 +28,23 @@ from .quantizer import (XSlimQuantizer, convert_to_fp16_onnx_model,
 from .xslim_setting import XSlimSetting, XSlimSettingFactory
 
 
+STATIC_QUANTIZATION_INPUT_UNSUPPORTED_OP_TYPES = {"QuantizeLinear", "DequantizeLinear"}
+
+
+def _check_static_quantization_input_model(onnx_model: onnx.ModelProto) -> None:
+    unsupported_nodes = [
+        node.name or (node.output[0] if node.output else "<unnamed>")
+        for node in onnx_model.graph.node
+        if node.op_type in STATIC_QUANTIZATION_INPUT_UNSUPPORTED_OP_TYPES
+    ]
+    if unsupported_nodes:
+        raise ValueError(
+            "Static quantization does not support input models that already contain "
+            "QuantizeLinear or DequantizeLinear nodes; quantized models cannot be quantized again. "
+            f"Found unsupported nodes: {', '.join(unsupported_nodes)}"
+        )
+
+
 def dispatch_graph(graph: BaseGraph, dispatcher: Union[str, GraphDispatcher] = "conservative") -> BaseGraph:
     quantizer = XSlimQuantizer(graph)
     if isinstance(dispatcher, str):
@@ -188,6 +205,7 @@ def quantize_onnx_model(
             target_onnx_opset,
         )
     else:
+        _check_static_quantization_input_model(ori_onnx_model)
         ppq_ir, truncate_left_graph, truncate_vars, saved_functions = xslim_load_onnx_graph(
             model_path,
             not config_setting.model_parameters.skip_onnxsim,

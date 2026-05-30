@@ -761,6 +761,13 @@ def Or_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendConte
     return a | b
 
 
+def Xor_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs) -> torch.Tensor:
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=2)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    a, b = values
+    return torch.logical_xor(a, b)
+
+
 def Eltwise_forward(
     op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs
 ) -> torch.Tensor:
@@ -1379,6 +1386,20 @@ def Less_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendCon
     return output
 
 
+def GreaterOrEqual_forward(
+    op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs
+) -> torch.Tensor:
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=2)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    return torch.ge(values[0], values[1])
+
+
+def LessOrEqual_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs) -> torch.Tensor:
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=2, max_num_of_input=2)
+    values = VALUE_TO_EXECUTING_DEVICE(op=op, ctx=ctx, values=values)
+    return torch.le(values[0], values[1])
+
+
 def Cast_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs) -> torch.Tensor:
     [input_value] = values
     new_data_type = DataType.to_torch(op.attributes["to"])
@@ -1765,7 +1786,7 @@ def ReduceMax_forward(
     [input_value] = values
     dim = op.attributes.get("axes", None)
     keepdim = bool(op.attributes.get("keepdims", 1))
-    if len(input_value) == 0:
+    if input_value.numel() == 0:
         output = input_value
     else:
         if dim is None:
@@ -1790,6 +1811,89 @@ def _get_reduce_axes_from_input(axis_value: torch.Tensor):
     return _normalize_reduce_axes(axis_value.reshape(-1).tolist())
 
 
+def _get_reduce_inputs(op: Operation, values: List[torch.Tensor], min_input_opset: int = 13):
+    if op.opset.onnx_opset_version() >= min_input_opset:
+        ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=2)
+        input_value, axes = values[0], op.attributes.get("axes", None)
+        if len(values) > 1:
+            axes = _get_reduce_axes_from_input(values[1])
+        noop_with_empty_axes = op.attributes.get("noop_with_empty_axes", 0)
+    else:
+        [input_value] = values
+        axes = op.attributes.get("axes", None)
+        noop_with_empty_axes = 0
+    axes = _normalize_reduce_axes(axes)
+    if axes == []:
+        if noop_with_empty_axes:
+            return input_value, axes, bool(op.attributes.get("keepdims", 1)), True
+        axes = None
+    return input_value, axes, bool(op.attributes.get("keepdims", 1)), False
+
+
+def _reshape_reduce_all_output(output: torch.Tensor, input_value: torch.Tensor, keepdim: bool):
+    if keepdim:
+        return output.reshape([1] * input_value.dim())
+    return output
+
+
+def _reduce_prod(input_value: torch.Tensor, dim, keepdim: bool):
+    if isinstance(dim, int):
+        dim = (dim,)
+    output = input_value
+    for axis in sorted(dim, reverse=True):
+        output = torch.prod(output, dim=axis, keepdim=keepdim)
+    return output
+
+
+def ReduceMin_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
+    if noop or input_value.numel() == 0:
+        return input_value
+    if dim is None:
+        return _reshape_reduce_all_output(torch.min(input_value), input_value, keepdim)
+    return torch.amin(input_value, dim=dim, keepdim=keepdim)
+
+
+def ReduceProd_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
+    if noop or input_value.numel() == 0:
+        return input_value
+    if dim is None:
+        return _reshape_reduce_all_output(torch.prod(input_value), input_value, keepdim)
+    return _reduce_prod(input_value, dim=dim, keepdim=keepdim)
+
+
+def ReduceL1_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
+    if noop or input_value.numel() == 0:
+        return input_value
+    if dim is None:
+        return _reshape_reduce_all_output(torch.sum(torch.abs(input_value)), input_value, keepdim)
+    return torch.sum(torch.abs(input_value), dim=dim, keepdim=keepdim)
+
+
+def ReduceSumSquare_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
+    if noop or input_value.numel() == 0:
+        return input_value
+    square = torch.square(input_value)
+    if dim is None:
+        return _reshape_reduce_all_output(torch.sum(square), input_value, keepdim)
+    return torch.sum(square, dim=dim, keepdim=keepdim)
+
+
+def ReduceLogSum_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    return torch.log(ReduceSum_forward(op, values, ctx, **kwargs))
+
+
+def ReduceLogSumExp_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    input_value, dim, keepdim, noop = _get_reduce_inputs(op, values, min_input_opset=18)
+    if noop or input_value.numel() == 0:
+        return input_value
+    if dim is None:
+        return _reshape_reduce_all_output(torch.logsumexp(input_value.reshape(-1), dim=0), input_value, keepdim)
+    return torch.logsumexp(input_value, dim=dim, keepdim=keepdim)
+
 
 def ReduceMean_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     if op.opset.onnx_opset_version() >= 18:
@@ -1808,7 +1912,7 @@ def ReduceMean_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBack
             return input_value
         dim = None
     dim = _normalize_reduce_axes(dim)
-    if len(input_value) == 0:
+    if input_value.numel() == 0:
         output = input_value
     else:
         if dim is None:
@@ -2859,10 +2963,124 @@ def Tanh_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendCon
     return output
 
 
+def Celu_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    alpha = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="alpha", default=1.0)
+    return F.celu(values[0], alpha=alpha)
+
+
+def Hardmax_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    x = values[0]
+    axis = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="axis", default=-1)
+    indices = torch.argmax(x, dim=axis, keepdim=True)
+    return torch.zeros_like(x).scatter_(axis, indices, 1)
+
+
+def Mish_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    x = values[0]
+    return x * torch.tanh(F.softplus(x))
+
+
+def Shrink_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    x = values[0]
+    bias = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="bias", default=0.0)
+    lambd = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="lambd", default=0.5)
+    return torch.where(x < -lambd, x + bias, torch.where(x > lambd, x - bias, torch.zeros_like(x)))
+
+
+def Softsign_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    x = values[0]
+    return x / (1 + torch.abs(x))
+
+
+def ThresholdedRelu_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    alpha = GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="alpha", default=1.0)
+    x = values[0]
+    return torch.where(x > alpha, x, torch.zeros_like(x))
+
+
 def Tan_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
     input_data = values[0]
     output = torch.tan(input_data)
     return output
+
+
+def Acos_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.acos(values[0])
+
+
+def Acosh_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.acosh(values[0])
+
+
+def Asin_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.asin(values[0])
+
+
+def Asinh_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.asinh(values[0])
+
+
+def Atan_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.atan(values[0])
+
+
+def Atanh_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.atanh(values[0])
+
+
+def Ceil_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.ceil(values[0])
+
+
+def Cosh_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.cosh(values[0])
+
+
+def IsInf_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    detect_negative = bool(GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="detect_negative", default=1))
+    detect_positive = bool(GET_ATTRIBUTE_FROM_OPERATION(op=op, attribute="detect_positive", default=1))
+    x = values[0]
+    output = torch.zeros_like(x, dtype=torch.bool)
+    if detect_negative:
+        output = output | torch.isneginf(x)
+    if detect_positive:
+        output = output | torch.isposinf(x)
+    return output
+
+
+def IsNaN_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.isnan(values[0])
+
+
+def Round_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.round(values[0])
+
+
+def Sign_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.sign(values[0])
+
+
+def Sinh_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
+    ASSERT_NUM_OF_INPUT(op=op, values=values, min_num_of_input=1, max_num_of_input=1)
+    return torch.sinh(values[0])
 
 
 def Pow_forward(op: Operation, values: List[torch.Tensor], ctx: TorchBackendContext = None, **kwargs):
@@ -4187,17 +4405,26 @@ def Dropout_Forward(op: Operation, values, ctx, **kwargs):
 DEFAULT_BACKEND_TABLE = {
     "QuantizeLinear": QuantizeLinear_Forward,
     "DequantizeLinear": DequantizeLinear_Forward,
+    "DynamicQuantizeLinear": DynamicQuantizeLinear_Forward,
     "LRN": LRN_Forward,
     "Dropout": Dropout_Forward,
     "Abs": Abs_forward,
+    "Acos": Acos_forward,
+    "Acosh": Acosh_forward,
     "AdaptiveAvgPool2d": AdaptiveAvgPool2d_forward,
     "And": And_forward,
     "Add": Add_forward,
     "ArgMax": ArgMax_forward,
+    "Asin": Asin_forward,
+    "Asinh": Asinh_forward,
+    "Atan": Atan_forward,
+    "Atanh": Atanh_forward,
     "Attention": Attention_forward,
     "AveragePool": AveragePool_forward,
     "BatchNormalization": BatchNormalization_forward,
     "Cast": Cast_forward,
+    "Ceil": Ceil_forward,
+    "Celu": Celu_forward,
     "Clip": Clip_forward,
     "Concat": Concat_forward,
     "Constant": Constant_forward,
@@ -4205,9 +4432,11 @@ DEFAULT_BACKEND_TABLE = {
     "Conv": Conv_forward,
     "ConvTranspose": ConvTranspose_forward,
     "Cos": Cos_forward,
+    "Cosh": Cosh_forward,
     "Div": Eltwise_forward,
     "Einsum": Einsum_forward,
     "Equal": Equal_forward,
+    "Elu": Elu_forward,
     "Exp": UnaryEltwise_forward,
     "Expand": Expand_forward,
     "Flatten": Flatten_forward,
@@ -4221,10 +4450,15 @@ DEFAULT_BACKEND_TABLE = {
     "GlobalAveragePool": AveragePool_forward,
     "GlobalMaxPool": MaxPool2d_forward,
     "Greater": Greater_forward,
+    "GreaterOrEqual": GreaterOrEqual_forward,
+    "Hardmax": Hardmax_forward,
+    "IsInf": IsInf_forward,
+    "IsNaN": IsNaN_forward,
     "LayerNorm": LayerNorm_forward,  # mmdepoly op
     "LayerNormalization": LayerNorm_forward,
     "LeakyRelu": LeakyRelu_forward,
     "Less": Less_forward,
+    "LessOrEqual": LessOrEqual_forward,
     "LogSoftmax": LogSoftmax_forward,
     "MatMul": MatMul_forward,
     "BatchMatMul": BatchMatMul_forward,
@@ -4232,6 +4466,7 @@ DEFAULT_BACKEND_TABLE = {
     "Max": Eltwise_forward,
     "MaxPool": MaxPool2d_forward,
     "Min": Eltwise_forward,
+    "Mish": Mish_forward,
     "Mod": Mod_forward,
     "Mul": Mul_forward,
     "MultiHeadAttention": MultiHeadAttention_forward,
@@ -4244,21 +4479,32 @@ DEFAULT_BACKEND_TABLE = {
     "PRelu": PRelu_forward,
     "Range": Range_forward,
     "ReduceL2": ReduceL2_forward,
+    "ReduceL1": ReduceL1_forward,
+    "ReduceLogSum": ReduceLogSum_forward,
+    "ReduceLogSumExp": ReduceLogSumExp_forward,
     "ReduceMax": ReduceMax_forward,
     "ReduceMean": ReduceMean_forward,
+    "ReduceMin": ReduceMin_forward,
+    "ReduceProd": ReduceProd_forward,
     "ReduceSum": ReduceSum_forward,
+    "ReduceSumSquare": ReduceSumSquare_forward,
     "Relu": UnaryEltwise_forward,
     "Reshape": Reshape_forward,
     "Resize": Resize_forward,
+    "Round": Round_forward,
     "ScatterElements": ScatterElements_forward,
     "ScatterND": ScatterND_forward,
     "Shape": Shape_forward,
+    "Shrink": Shrink_forward,
     "Sigmoid": UnaryEltwise_forward,
+    "Sign": Sign_forward,
     "Sin": Sin_forward,
+    "Sinh": Sinh_forward,
     "Slice": Slice_forward,
     "skipLayerNormPlugin": skipLayerNormPlugin_forward,
     "Softmax": Softmax_forward,
     "Softplus": Softplus_forward,
+    "Softsign": Softsign_forward,
     "Split": Split_forward,
     "Squeeze": Squeeze_forward,
     "Sub": Eltwise_forward,
@@ -4277,6 +4523,7 @@ DEFAULT_BACKEND_TABLE = {
     "Scale": Scale_forward,  # caffe op
     "Tanh": Tanh_forward,
     "Tan": Tan_forward,
+    "ThresholdedRelu": ThresholdedRelu_forward,
     "Pow": Pow_forward,
     "ChannelShuffle": ChannelShuffle_forward,  # caffe op
     "InstanceNormalization": InstanceNormalization_forward,
@@ -4294,6 +4541,6 @@ DEFAULT_BACKEND_TABLE = {
     "LSTM": LSTM_forward,
     "Selu": Selu_forward,
     "Sum": Sum_forward,
-    "Elu": Elu_forward,
     "Erf": Erf_forward,
+    "Xor": Xor_forward,
 }

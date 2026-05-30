@@ -8,7 +8,12 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from xslim.defs import MIN_ONNX_OPSET_VERSION, resolve_operator_domain
-from xslim.ppq_decorator.ppq.IR.base.opdef import Opset, Resize_Socket
+from xslim.ppq_decorator.ppq.IR.base.opdef import (
+    Opset,
+    Pad_Socket,
+    Resize_Socket,
+    TargetPlatform,
+)
 from xslim.ppq_decorator.ppq.parser.onnx_exporter import (AttentionExporter,
                                                           OOSExporter)
 
@@ -72,6 +77,46 @@ class TestOnnxOperatorSupport(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             Resize_Socket(resize_op)
+
+    def test_pad_socket_accepts_opset24_axes_input(self):
+        pad_op = mock.Mock()
+        pad_op.name = "pad"
+        pad_op.type = "Pad"
+        pad_op.num_of_input = 4
+        pad_op.num_of_output = 1
+        pad_op.opset = Opset("ai.onnx", MIN_ONNX_OPSET_VERSION)
+
+        socket = Pad_Socket(pad_op)
+
+        self.assertEqual(len(socket.in_plat), 4)
+        self.assertEqual(
+            socket.in_plat,
+            [
+                TargetPlatform.UNSPECIFIED,
+                TargetPlatform.SOI,
+                TargetPlatform.SOI,
+                TargetPlatform.SOI,
+            ],
+        )
+
+    def test_pad_socket_keeps_backward_compatibility_for_legacy_opset(self):
+        pad_op = mock.Mock()
+        pad_op.name = "pad"
+        pad_op.type = "Pad"
+        pad_op.num_of_input = 3
+        pad_op.num_of_output = 1
+        pad_op.opset = Opset("ai.onnx", 13)
+
+        socket = Pad_Socket(pad_op)
+
+        self.assertEqual(
+            socket.in_plat,
+            [
+                TargetPlatform.UNSPECIFIED,
+                TargetPlatform.SOI,
+                TargetPlatform.SOI,
+            ],
+        )
 
 
 if __name__ == "__main__":

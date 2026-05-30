@@ -37,6 +37,34 @@ class TestQuantizePipeline(unittest.TestCase):
         onnx.save(model, path)
 
     @classmethod
+    def _build_qdq_model(cls, path, opset_version):
+        x = helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])
+        y = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1])
+        scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
+        zero_point = helper.make_tensor("zero_point", TensorProto.UINT8, [1], [0])
+        quantize_node = helper.make_node(
+            "QuantizeLinear",
+            ["input", "scale", "zero_point"],
+            ["quantized"],
+            name="quantize",
+        )
+        dequantize_node = helper.make_node(
+            "DequantizeLinear",
+            ["quantized", "scale", "zero_point"],
+            ["output"],
+            name="dequantize",
+        )
+        graph = helper.make_graph(
+            [quantize_node, dequantize_node],
+            "qdq_graph",
+            [x],
+            [y],
+            [scale, zero_point],
+        )
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", opset_version)])
+        onnx.save(model, path)
+
+    @classmethod
     def _export_torchvision_model(cls, model, path):
         model.eval()
         with warnings.catch_warnings():
@@ -186,6 +214,20 @@ class TestQuantizePipeline(unittest.TestCase):
             self.assertEqual(default_opset, 20)
             self.assertTrue(os.path.exists(output_path))
             onnx.checker.check_model(model)
+
+    def test_static_quantize_pipeline_rejects_qdq_input_model(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            model_path = os.path.join(tempdir, "qdq.onnx")
+            output_path = os.path.join(tempdir, "qdq.static.onnx")
+            self._build_qdq_model(model_path, opset_version=18)
+
+            with self.assertRaisesRegex(ValueError, "QuantizeLinear or DequantizeLinear"):
+                xslim.quantize_onnx_model(
+                    self._build_config(model_path, precision_level=0),
+                    output_path=output_path,
+                )
+
+            self.assertFalse(os.path.exists(output_path))
 
 
 if __name__ == "__main__":
