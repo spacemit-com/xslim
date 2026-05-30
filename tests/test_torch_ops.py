@@ -508,6 +508,8 @@ class TestQuantizerConfig(unittest.TestCase):
     def test_new_operator_sockets_are_registered(self):
         socket_cases = [
             ("Celu", 1, [TargetPlatform.UNSPECIFIED]),
+            ("GreaterOrEqual", 2, [TargetPlatform.UNSPECIFIED, TargetPlatform.UNSPECIFIED]),
+            ("LessOrEqual", 2, [TargetPlatform.UNSPECIFIED, TargetPlatform.UNSPECIFIED]),
             ("Mish", 1, [TargetPlatform.UNSPECIFIED]),
             ("Softsign", 1, [TargetPlatform.UNSPECIFIED]),
             ("ThresholdedRelu", 1, [TargetPlatform.UNSPECIFIED]),
