@@ -802,6 +802,132 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
         return onnx.shape_inference.infer_shapes(model)
 
+    @staticmethod
+    def _build_slice_sibling_non_split_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 64, 40, 40])
+        first_out = helper.make_tensor_value_info("first_out", TensorProto.FLOAT, [1, 16, 40, 40])
+        second_out = helper.make_tensor_value_info("second_out", TensorProto.FLOAT, [1, 32, 40, 40])
+
+        first_starts = helper.make_tensor("first_starts", TensorProto.INT64, [1], [0])
+        first_ends = helper.make_tensor("first_ends", TensorProto.INT64, [1], [16])
+        second_starts = helper.make_tensor("second_starts", TensorProto.INT64, [1], [32])
+        second_ends = helper.make_tensor("second_ends", TensorProto.INT64, [1], [64])
+        axes = helper.make_tensor("slice_axes_partial", TensorProto.INT64, [1], [1])
+
+        nodes = [
+            helper.make_node(
+                "Slice",
+                ["x", "first_starts", "first_ends", "slice_axes_partial"],
+                ["first_out"],
+                name="slice_first",
+            ),
+            helper.make_node(
+                "Slice",
+                ["x", "second_starts", "second_ends", "slice_axes_partial"],
+                ["second_out"],
+                name="slice_second",
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "slice_sibling_non_split_pattern_graph",
+            [x],
+            [first_out, second_out],
+            [first_starts, first_ends, second_starts, second_ends, axes],
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
+    def _build_slice_sibling_split_consumer_model(with_steps=False):
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 64, 40, 40])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 64, 40, 40])
+
+        left_starts = helper.make_tensor("left_consumer_starts", TensorProto.INT64, [1], [0])
+        left_ends = helper.make_tensor("left_consumer_ends", TensorProto.INT64, [1], [32])
+        right_starts = helper.make_tensor("right_consumer_starts", TensorProto.INT64, [1], [32])
+        right_ends = helper.make_tensor("right_consumer_ends", TensorProto.INT64, [1], [64])
+        axes = helper.make_tensor("consumer_slice_axes", TensorProto.INT64, [1], [1])
+        steps = helper.make_tensor("consumer_slice_steps", TensorProto.INT64, [1], [1])
+        conv_weight = helper.make_tensor(
+            "consumer_conv_weight", TensorProto.FLOAT, [32, 32, 1, 1], [0.1] * (32 * 32)
+        )
+
+        left_out = helper.make_tensor_value_info("left_consumer_out", TensorProto.FLOAT, [1, 32, 40, 40])
+        right_out = helper.make_tensor_value_info("right_consumer_out", TensorProto.FLOAT, [1, 32, 40, 40])
+        conv_out = helper.make_tensor_value_info("conv_out", TensorProto.FLOAT, [1, 32, 40, 40])
+
+        left_slice_inputs = [
+            "x",
+            "left_consumer_starts",
+            "left_consumer_ends",
+            "consumer_slice_axes",
+        ]
+        right_slice_inputs = [
+            "x",
+            "right_consumer_starts",
+            "right_consumer_ends",
+            "consumer_slice_axes",
+        ]
+        initializers = [
+            left_starts,
+            left_ends,
+            right_starts,
+            right_ends,
+            axes,
+            conv_weight,
+        ]
+        graph_name = "slice_sibling_split_consumer_graph"
+
+        if with_steps:
+            left_slice_inputs.append("consumer_slice_steps")
+            right_slice_inputs.append("consumer_slice_steps")
+            initializers.append(steps)
+            graph_name = "slice_sibling_split_consumer_steps_graph"
+
+        nodes = [
+            helper.make_node(
+                "Slice",
+                left_slice_inputs,
+                ["left_consumer_out"],
+                name="slice_left_consumer",
+            ),
+            helper.make_node(
+                "Slice",
+                right_slice_inputs,
+                ["right_consumer_out"],
+                name="slice_right_consumer",
+            ),
+            helper.make_node(
+                "Conv",
+                ["left_consumer_out", "consumer_conv_weight"],
+                ["conv_out"],
+                name="consumer_conv",
+                pads=[0, 0, 0, 0],
+            ),
+            helper.make_node(
+                "Concat",
+                ["conv_out", "right_consumer_out"],
+                ["y"],
+                name="consumer_concat",
+                axis=1,
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            graph_name,
+            [x],
+            [y],
+            initializers,
+            value_info=[left_out, right_out, conv_out],
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
     def test_infer_onnx_model_restores_shape_info_for_float16_model(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_add_model()
@@ -1126,6 +1252,112 @@ class TestOnnxSlimPass(unittest.TestCase):
                     initializers["add_0_v_bias"], [0.2, 1.3]
                 )
             )
+        )
+
+    def test_optimize_onnx_model_fuses_sibling_slices_to_split(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_slice_sibling_split_consumer_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        nodes_by_name = {node.name: node for node in optimized_model.graph.node}
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["Split", "Conv", "Concat"],
+        )
+
+        split_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in split_node.attribute
+        }
+        initializers = {
+            initializer.name: onnx.numpy_helper.to_array(initializer).tolist()
+            for initializer in optimized_model.graph.initializer
+        }
+
+        self.assertEqual(split_node.name, "slice_left_consumer_split")
+        self.assertEqual(
+            list(split_node.input), ["x", "slice_left_consumer_split_sizes"]
+        )
+        self.assertEqual(
+            list(split_node.output), ["left_consumer_out", "right_consumer_out"]
+        )
+        self.assertEqual(attrs["axis"], 1)
+        self.assertEqual(
+            initializers["slice_left_consumer_split_sizes"], [32, 32]
+        )
+        self.assertEqual(
+            list(nodes_by_name["consumer_conv"].input),
+            ["left_consumer_out", "consumer_conv_weight"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["consumer_concat"].input),
+            ["conv_out", "right_consumer_out"],
+        )
+
+    def test_optimize_onnx_model_fuses_sibling_slices_to_split_with_steps(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_slice_sibling_split_consumer_model(with_steps=True)
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        nodes_by_name = {node.name: node for node in optimized_model.graph.node}
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["Split", "Conv", "Concat"],
+        )
+
+        split_node = optimized_model.graph.node[0]
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in split_node.attribute
+        }
+        initializers = {
+            initializer.name: onnx.numpy_helper.to_array(initializer).tolist()
+            for initializer in optimized_model.graph.initializer
+        }
+
+        self.assertEqual(
+            list(split_node.input), ["x", "slice_left_consumer_split_sizes"]
+        )
+        self.assertEqual(
+            list(split_node.output), ["left_consumer_out", "right_consumer_out"]
+        )
+        self.assertEqual(attrs["axis"], 1)
+        self.assertEqual(
+            initializers["slice_left_consumer_split_sizes"], [32, 32]
+        )
+        self.assertEqual(
+            list(nodes_by_name["consumer_conv"].input),
+            ["left_consumer_out", "consumer_conv_weight"],
+        )
+        self.assertEqual(
+            list(nodes_by_name["consumer_concat"].input),
+            ["conv_out", "right_consumer_out"],
+        )
+
+    def test_optimize_onnx_model_keeps_non_partitioned_sibling_slices(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_slice_sibling_non_split_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            ["Slice", "Slice"],
         )
 
     def test_build_yolo_decode_function_uses_dynamic_bbox_reshape_shape(self):
