@@ -86,6 +86,30 @@ def _get_constant_int_values(tensor):
     return [int(value) for value in values.tolist()]
 
 
+def _get_split_sizes(split_node, axis_dim):
+    if len(split_node.inputs) > 1:
+        split_sizes = _get_constant_int_values(split_node.inputs[1])
+        if split_sizes is None:
+            return None
+    else:
+        split_sizes = split_node.attrs.get("split")
+        if split_sizes is None:
+            if len(split_node.outputs) == 0 or axis_dim % len(split_node.outputs) != 0:
+                return None
+            split_sizes = [axis_dim // len(split_node.outputs)] * len(split_node.outputs)
+        else:
+            split_sizes = [int(size) for size in split_sizes]
+
+    if len(split_sizes) != len(split_node.outputs):
+        return None
+    if any(size <= 0 for size in split_sizes):
+        return None
+    if sum(split_sizes) != axis_dim:
+        return None
+
+    return split_sizes
+
+
 def _normalize_axis(axis, rank):
     normalized_axis = int(axis)
     if normalized_axis < 0:
@@ -316,6 +340,8 @@ class MatMulReshapeTransposeSplitQKVSqueezePatternMatcher(PatternMatcher):
             return {}
 
         reshape_shape = [int(dim) for dim in reshape_shape.tolist()]
+        if any(dim <= 0 for dim in reshape_shape):
+            return {}
         if reshape_shape[2] != 3:
             return {}
 
@@ -331,10 +357,8 @@ class MatMulReshapeTransposeSplitQKVSqueezePatternMatcher(PatternMatcher):
         if split_axis != 0:
             return {}
 
-        split_sizes = None
-        if len(split_node.inputs) > 1:
-            split_sizes = _get_constant_int_values(split_node.inputs[1])
-        if split_sizes is not None and split_sizes != [1, 1, 1]:
+        split_sizes = _get_split_sizes(split_node, reshape_shape[2])
+        if split_sizes != [1, 1, 1]:
             return {}
 
         if len(reshape_node.outputs) != 1 or len(transpose_node.outputs) != 1:
@@ -456,6 +480,8 @@ class MatMulReshapeTransposeSplitQKVSqueezePatternMatcher(PatternMatcher):
             }
 
             branch_output.inputs.clear()
+            squeeze_node.inputs.clear()
+            squeeze_node.outputs.clear()
             new_ops[f"{transpose_node.name}_{name_suffix}"] = {
                 "op": "Transpose",
                 "inputs": [branch_reshape_output],
