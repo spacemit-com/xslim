@@ -7,10 +7,55 @@ import numpy as np
 from onnxconverter_common import float16 as convert_float_to_float16
 from xslim.logger import logger
 import onnx_graphsurgeon as osg
-from ..onnx_graph_helper import format_onnx_model
+from ..onnx_graph_helper import format_onnx_model, is_large_model
 from ..onnxslim_pass import infer_onnx_model
 from xslim.defs import MIN_ONNX_OPSET_VERSION, XQUANT_CONFIG
 from datetime import datetime
+import os
+import tempfile
+from onnx.shape_inference import infer_shapes_path
+
+
+def _convert_float16_large_model(onnx_model, op_block_list, node_block_list):
+    """Convert a >2GB model to fp16 without tripping the protobuf 2GB limit.
+
+    onnxconverter_common's in-memory convert_float_to_float16 runs onnx shape
+    inference internally (SerializeToString), which for >2GB models silently
+    returns an EMPTY model. We instead run disk-based shape inference
+    (infer_shapes_path handles any size), then call the converter with
+    disable_shape_infer=True so it does pure in-memory numpy casting and never
+    serializes.
+    """
+    logger.info("large model detected, converting to fp16 via disk shape inference.")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src_path = os.path.join(tmpdir, "fp32.onnx")
+        inferred_path = os.path.join(tmpdir, "fp32_inferred.onnx")
+        # Save with external data so the on-disk proto stays <2GB.
+        onnx.save(
+            onnx_model,
+            src_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location="fp32.weights",
+            size_threshold=0,
+            convert_attribute=True,
+        )
+        try:
+            infer_shapes_path(src_path, inferred_path)
+            model = onnx.load(inferred_path)
+            disable_shape_infer = True
+        except Exception as e:
+            logger.warning("disk shape inference failed ({}), proceeding without it.".format(e))
+            model = onnx_model
+            disable_shape_infer = True
+
+    return convert_float_to_float16.convert_float_to_float16(
+        model,
+        keep_io_types=True,
+        disable_shape_infer=disable_shape_infer,
+        op_block_list=op_block_list,
+        node_block_list=node_block_list,
+    )
 
 
 def legalize_fp16_graph(osg_graph: osg.Graph):
@@ -115,15 +160,19 @@ def convert_to_fp16_onnx_model(
                                "Range",
                                "CumSum"}
 
+    _op_block_list = list(default_ignore_op_types or set(ignore_op_types_list))
     try:
-        model_fp16 = convert_float_to_float16.convert_float_to_float16(
-            model_opt,
-            keep_io_types=True,
-            disable_shape_infer=False,
-            op_block_list=list(
-                default_ignore_op_types or set(ignore_op_types_list)),
-            node_block_list=ignore_node_names_list,
-        )
+        if is_large_model(model_opt):
+            model_fp16 = _convert_float16_large_model(
+                model_opt, _op_block_list, ignore_node_names_list)
+        else:
+            model_fp16 = convert_float_to_float16.convert_float_to_float16(
+                model_opt,
+                keep_io_types=True,
+                disable_shape_infer=False,
+                op_block_list=_op_block_list,
+                node_block_list=ignore_node_names_list,
+            )
     except Exception as e:
         logger.info(f"FP16 Convert Failed!: {e}")
         raise
