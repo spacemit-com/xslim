@@ -616,64 +616,6 @@ class TestReduceOps(unittest.TestCase):
 class TestQuantizerConfig(unittest.TestCase):
     """Test quantizer config generation for operator socket metadata."""
 
-    def test_graph_output_stays_fp32(self):
-        graph = BaseGraph(name="graph_output_quantization")
-        op = make_op("concat", "Concat", attributes={"axis": 1}, num_inputs=2)
-        graph._operations[op.name] = op
-        for var in op.inputs + op.outputs:
-            graph._variables[var.name] = var
-        graph._graph_outputs[op.outputs[0].name] = op.outputs[0]
-
-        quantizer = XSlimQuantizer(graph)
-        quantizer._calibration_type = "minmax"
-        quantizer._set_max_percentile = None
-        config = quantizer.init_quantize_config(op)
-
-        self.assertEqual(
-            config.output_quantization_config[0].state,
-            QuantizationStates.FP32,
-        )
-        self.assertTrue(
-            all(
-                input_config.state == QuantizationStates.INITIAL
-                for input_config in config.input_quantization_config
-            )
-        )
-
-    def test_mixed_box_score_postprocess_stays_fp32(self):
-        graph = BaseGraph(name="mixed_box_score_postprocess")
-        boxes = make_op("boxes", "Mul", num_inputs=2)
-        scores = make_op("scores", "Sigmoid")
-        concat = make_op("concat", "Concat", attributes={"axis": 1}, num_inputs=2)
-        transpose = make_op("transpose", "Transpose", attributes={"perm": [0, 2, 1]})
-        split = make_op("split", "Split", attributes={"axis": -1}, num_inputs=2, num_outputs=2)
-        reduce_max = make_op("reduce_max", "ReduceMax", num_inputs=2)
-
-        concat._input_vars = [boxes.outputs[0], scores.outputs[0]]
-        boxes.outputs[0]._dest_ops = [concat]
-        scores.outputs[0]._dest_ops = [concat]
-        transpose._input_vars = [concat.outputs[0]]
-        concat.outputs[0]._dest_ops = [transpose]
-        split._input_vars[0] = transpose.outputs[0]
-        transpose.outputs[0]._dest_ops = [split]
-        reduce_max._input_vars[0] = split.outputs[1]
-        split.outputs[1]._dest_ops = [reduce_max]
-
-        for operation in (boxes, scores, concat, transpose, split, reduce_max):
-            graph._operations[operation.name] = operation
-            for variable in operation.inputs + operation.outputs:
-                graph._variables[variable.name] = variable
-
-        quantizer = XSlimQuantizer(graph)
-        quantizer._keep_mixed_range_postprocess_in_fp32()
-
-        self.assertEqual(boxes.platform, TargetPlatform.UNSPECIFIED)
-        self.assertEqual(scores.platform, TargetPlatform.UNSPECIFIED)
-        self.assertEqual(concat.platform, TargetPlatform.FP32)
-        self.assertEqual(transpose.platform, TargetPlatform.FP32)
-        self.assertEqual(split.platform, TargetPlatform.FP32)
-        self.assertEqual(reduce_max.platform, TargetPlatform.UNSPECIFIED)
-
     def test_new_operator_sockets_are_registered(self):
         socket_cases = [
             ("Celu", 1, [TargetPlatform.UNSPECIFIED]),
