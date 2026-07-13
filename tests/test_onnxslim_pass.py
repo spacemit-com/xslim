@@ -296,6 +296,93 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
 
     @staticmethod
+    def _build_layernorm_mul_square_pattern_model():
+        """Channel-axis LayerNorm decomposed with Mul(sub, sub) self-square."""
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4, 2, 3])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4, 2, 3])
+
+        axes = helper.make_tensor("axes", TensorProto.INT64, [1], [1])
+        epsilon = helper.make_tensor("epsilon", TensorProto.FLOAT, [], [1e-5])
+        scale = helper.make_tensor(
+            "scale", TensorProto.FLOAT, [1, 4, 1, 1], [1.1, 1.2, 1.3, 1.4]
+        )
+        bias = helper.make_tensor(
+            "bias", TensorProto.FLOAT, [1, 4, 1, 1], [0.1, -0.2, 0.3, -0.4]
+        )
+
+        nodes = [
+            helper.make_node(
+                "ReduceMean", ["x", "axes"], ["mean0"],
+                name="reduce_mean_0", keepdims=1,
+            ),
+            helper.make_node("Sub", ["x", "mean0"], ["sub0"], name="sub_0"),
+            helper.make_node("Mul", ["sub0", "sub0"], ["sq0"], name="mul_sq"),
+            helper.make_node(
+                "ReduceMean", ["sq0", "axes"], ["mean1"],
+                name="reduce_mean_1", keepdims=1,
+            ),
+            helper.make_node("Add", ["mean1", "epsilon"], ["add0"], name="add_0"),
+            helper.make_node("Sqrt", ["add0"], ["sqrt0"], name="sqrt_0"),
+            helper.make_node("Div", ["sub0", "sqrt0"], ["div0"], name="div_0"),
+            helper.make_node("Mul", ["div0", "scale"], ["mul0"], name="mul_0"),
+            helper.make_node("Add", ["mul0", "bias"], ["y"], name="add_1"),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "layernorm_mul_square_graph",
+            [x],
+            [y],
+            [axes, epsilon, scale, bias],
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 24)]
+        )
+
+    @staticmethod
+    def _build_layernorm_pow_channel_pattern_model():
+        """Channel-axis LayerNorm decomposed with Pow(sub, 2) variance."""
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4, 2, 3])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4, 2, 3])
+
+        axes = helper.make_tensor("axes", TensorProto.INT64, [1], [1])
+        exponent = helper.make_tensor("exponent", TensorProto.FLOAT, [], [2.0])
+        epsilon = helper.make_tensor("epsilon", TensorProto.FLOAT, [], [1e-5])
+        scale = helper.make_tensor(
+            "scale", TensorProto.FLOAT, [1, 4, 1, 1], [1.1, 1.2, 1.3, 1.4]
+        )
+        bias = helper.make_tensor(
+            "bias", TensorProto.FLOAT, [1, 4, 1, 1], [0.1, -0.2, 0.3, -0.4]
+        )
+
+        nodes = [
+            helper.make_node(
+                "ReduceMean", ["x", "axes"], ["mean0"],
+                name="reduce_mean_0", keepdims=1,
+            ),
+            helper.make_node("Sub", ["x", "mean0"], ["sub0"], name="sub_0"),
+            helper.make_node("Pow", ["sub0", "exponent"], ["sq0"], name="pow_0"),
+            helper.make_node(
+                "ReduceMean", ["sq0", "axes"], ["mean1"],
+                name="reduce_mean_1", keepdims=1,
+            ),
+            helper.make_node("Add", ["mean1", "epsilon"], ["add0"], name="add_0"),
+            helper.make_node("Sqrt", ["add0"], ["sqrt0"], name="sqrt_0"),
+            helper.make_node("Div", ["sub0", "sqrt0"], ["div0"], name="div_0"),
+            helper.make_node("Mul", ["div0", "scale"], ["mul0"], name="mul_0"),
+            helper.make_node("Add", ["mul0", "bias"], ["y"], name="add_1"),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "layernorm_pow_channel_graph",
+            [x],
+            [y],
+            [axes, exponent, epsilon, scale, bias],
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 24)]
+        )
+
+    @staticmethod
     def _build_rmsnorm_pattern_model_with_axes_input():
         x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 2, 4])
         y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 2, 4])
@@ -1250,6 +1337,96 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(attrs["axis"], 2)
         self.assertAlmostEqual(attrs["epsilon"], 1e-5, places=7)
         self.assertEqual(layernorm_node.domain, "")
+
+    def test_optimize_onnx_model_fuses_layernorm_mul_square_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_layernorm_mul_square_pattern_model()
+
+        # Reference output before fusion.
+        import onnxruntime as ort
+
+        rng = np.random.default_rng(0)
+        feed = {"x": rng.standard_normal([1, 4, 2, 3]).astype(np.float32)}
+        so = ort.SessionOptions()
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        ref = ort.InferenceSession(
+            model.SerializeToString(), so, providers=["CPUExecutionProvider"]
+        ).run(None, feed)[0]
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(optimized_model)
+
+        onnx.checker.check_model(optimized_model)
+        op_types = [node.op_type for node in optimized_model.graph.node]
+        # The decomposed small ops must collapse into a single LayerNormalization
+        # (wrapped in Transpose because the norm axis is the channel axis).
+        self.assertEqual(op_types.count("LayerNormalization"), 1)
+        self.assertNotIn("ReduceMean", op_types)
+        self.assertNotIn("Sqrt", op_types)
+        self.assertNotIn("Div", op_types)
+
+        layernorm_node = next(
+            node for node in optimized_model.graph.node
+            if node.op_type == "LayerNormalization"
+        )
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in layernorm_node.attribute
+        }
+        self.assertEqual(attrs["axis"], -1)
+        self.assertAlmostEqual(attrs["epsilon"], 1e-5, places=6)
+
+        out = ort.InferenceSession(
+            optimized_model.SerializeToString(), so,
+            providers=["CPUExecutionProvider"],
+        ).run(None, feed)[0]
+        np.testing.assert_allclose(out, ref, rtol=1e-4, atol=1e-5)
+
+    def test_optimize_onnx_model_fuses_layernorm_pow_channel_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_layernorm_pow_channel_pattern_model()
+
+        # Reference output before fusion.
+        import onnxruntime as ort
+
+        rng = np.random.default_rng(0)
+        feed = {"x": rng.standard_normal([1, 4, 2, 3]).astype(np.float32)}
+        so = ort.SessionOptions()
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        ref = ort.InferenceSession(
+            model.SerializeToString(), so, providers=["CPUExecutionProvider"]
+        ).run(None, feed)[0]
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(optimized_model)
+
+        onnx.checker.check_model(optimized_model)
+        op_types = [node.op_type for node in optimized_model.graph.node]
+        # Pow-form channel-axis LayerNorm must also collapse into a single
+        # LayerNormalization wrapped in Transpose (previously Case0 bailed on
+        # non-1-D scale and left the small ops in place).
+        self.assertEqual(op_types.count("LayerNormalization"), 1)
+        self.assertNotIn("ReduceMean", op_types)
+        self.assertNotIn("Pow", op_types)
+        self.assertNotIn("Sqrt", op_types)
+        self.assertNotIn("Div", op_types)
+
+        layernorm_node = next(
+            node for node in optimized_model.graph.node
+            if node.op_type == "LayerNormalization"
+        )
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in layernorm_node.attribute
+        }
+        self.assertEqual(attrs["axis"], -1)
+        self.assertAlmostEqual(attrs["epsilon"], 1e-5, places=6)
+
+        out = ort.InferenceSession(
+            optimized_model.SerializeToString(), so,
+            providers=["CPUExecutionProvider"],
+        ).run(None, feed)[0]
+        np.testing.assert_allclose(out, ref, rtol=1e-4, atol=1e-5)
 
     def test_optimize_onnx_model_fuses_rmsnorm_with_axes_input(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
