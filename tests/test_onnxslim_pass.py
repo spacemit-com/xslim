@@ -803,6 +803,80 @@ class TestOnnxSlimPass(unittest.TestCase):
         return onnx.shape_inference.infer_shapes(model)
 
     @staticmethod
+    def _build_matmul_reshape_transpose_split_squeeze_qkv_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 2, 4])
+        q_out = helper.make_tensor_value_info("q_out", TensorProto.FLOAT, [1, 2, 2, 2])
+        k_out = helper.make_tensor_value_info("k_out", TensorProto.FLOAT, [1, 2, 2, 2])
+        v_out = helper.make_tensor_value_info("v_out", TensorProto.FLOAT, [1, 2, 2, 2])
+
+        weight_values = [
+            1.0, 2.0, 3.0, 4.0, 101.0, 102.0, 103.0, 104.0, 201.0, 202.0, 203.0, 204.0,
+            5.0, 6.0, 7.0, 8.0, 105.0, 106.0, 107.0, 108.0, 205.0, 206.0, 207.0, 208.0,
+            9.0, 10.0, 11.0, 12.0, 109.0, 110.0, 111.0, 112.0, 209.0, 210.0, 211.0, 212.0,
+            13.0, 14.0, 15.0, 16.0, 113.0, 114.0, 115.0, 116.0, 213.0, 214.0, 215.0, 216.0,
+        ]
+        bias_values = [
+            0.1, 0.2, 0.3, 0.4,
+            1.1, 1.2, 1.3, 1.4,
+            2.1, 2.2, 2.3, 2.4,
+        ]
+
+        weight = helper.make_tensor(
+            "weight", TensorProto.FLOAT, [4, 12], weight_values
+        )
+        bias = helper.make_tensor(
+            "bias", TensorProto.FLOAT, [12], bias_values
+        )
+        reshape_shape = helper.make_tensor(
+            "reshape_shape", TensorProto.INT64, [5], [1, 2, 3, 2, 2]
+        )
+        split_sizes = helper.make_tensor(
+            "split_sizes", TensorProto.INT64, [3], [1, 1, 1]
+        )
+        squeeze_axes = helper.make_tensor(
+            "squeeze_axes", TensorProto.INT64, [1], [0]
+        )
+
+        nodes = [
+            helper.make_node("MatMul", ["x", "weight"], ["matmul_out"], name="matmul_0"),
+            helper.make_node("Add", ["bias", "matmul_out"], ["add_out"], name="add_0"),
+            helper.make_node(
+                "Reshape",
+                ["add_out", "reshape_shape"],
+                ["reshape_out"],
+                name="reshape_0",
+            ),
+            helper.make_node(
+                "Transpose",
+                ["reshape_out"],
+                ["transpose_out"],
+                name="transpose_0",
+                perm=[2, 0, 3, 1, 4],
+            ),
+            helper.make_node(
+                "Split",
+                ["transpose_out", "split_sizes"],
+                ["q_split", "k_split", "v_split"],
+                name="split_0",
+                axis=0,
+            ),
+            helper.make_node("Squeeze", ["q_split", "squeeze_axes"], ["q_out"], name="squeeze_0"),
+            helper.make_node("Squeeze", ["k_split", "squeeze_axes"], ["k_out"], name="squeeze_1"),
+            helper.make_node("Squeeze", ["v_split", "squeeze_axes"], ["v_out"], name="squeeze_2"),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "matmul_reshape_transpose_split_squeeze_qkv_pattern_graph",
+            [x],
+            [q_out, k_out, v_out],
+            [weight, bias, reshape_shape, split_sizes, squeeze_axes],
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 23)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
     def _build_slice_sibling_non_split_pattern_model():
         x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 64, 40, 40])
         first_out = helper.make_tensor_value_info("first_out", TensorProto.FLOAT, [1, 16, 40, 40])
@@ -922,6 +996,134 @@ class TestOnnxSlimPass(unittest.TestCase):
             [y],
             initializers,
             value_info=[left_out, right_out, conv_out],
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
+    def _build_single_consumer_split_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 5, 2])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 3, 2])
+        split_sizes = helper.make_tensor(
+            "single_consumer_split_sizes", TensorProto.INT64, [2], [2, 3]
+        )
+
+        first_split_out = helper.make_tensor_value_info(
+            "first_split_out", TensorProto.FLOAT, [1, 2, 2]
+        )
+        second_split_out = helper.make_tensor_value_info(
+            "second_split_out", TensorProto.FLOAT, [1, 3, 2]
+        )
+        tanh_out = helper.make_tensor_value_info(
+            "single_consumer_tanh_out", TensorProto.FLOAT, [1, 3, 2]
+        )
+        sigmoid_out = helper.make_tensor_value_info(
+            "single_consumer_sigmoid_out", TensorProto.FLOAT, [1, 3, 2]
+        )
+
+        nodes = [
+            helper.make_node(
+                "Split",
+                ["x", "single_consumer_split_sizes"],
+                ["first_split_out", "second_split_out"],
+                name="single_consumer_split",
+                axis=1,
+            ),
+            helper.make_node(
+                "Tanh",
+                ["second_split_out"],
+                ["single_consumer_tanh_out"],
+                name="single_consumer_tanh",
+            ),
+            helper.make_node(
+                "Sigmoid",
+                ["second_split_out"],
+                ["single_consumer_sigmoid_out"],
+                name="single_consumer_sigmoid",
+            ),
+            helper.make_node(
+                "Add",
+                ["single_consumer_tanh_out", "single_consumer_sigmoid_out"],
+                ["y"],
+                name="single_consumer_add",
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "single_consumer_split_graph",
+            [x],
+            [y],
+            [split_sizes],
+            value_info=[first_split_out, second_split_out, tanh_out, sigmoid_out],
+        )
+        model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 13)]
+        )
+        return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
+    def _build_multi_consumer_split_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 5, 2])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 5, 2])
+        split_sizes = helper.make_tensor(
+            "multi_consumer_split_sizes", TensorProto.INT64, [2], [2, 3]
+        )
+
+        first_split_out = helper.make_tensor_value_info(
+            "first_multi_split_out", TensorProto.FLOAT, [1, 2, 2]
+        )
+        second_split_out = helper.make_tensor_value_info(
+            "second_multi_split_out", TensorProto.FLOAT, [1, 3, 2]
+        )
+        first_tanh_out = helper.make_tensor_value_info(
+            "first_tanh_out", TensorProto.FLOAT, [1, 2, 2]
+        )
+        second_tanh_out = helper.make_tensor_value_info(
+            "second_tanh_out", TensorProto.FLOAT, [1, 3, 2]
+        )
+
+        nodes = [
+            helper.make_node(
+                "Split",
+                ["x", "multi_consumer_split_sizes"],
+                ["first_multi_split_out", "second_multi_split_out"],
+                name="multi_consumer_split",
+                axis=1,
+            ),
+            helper.make_node(
+                "Tanh",
+                ["first_multi_split_out"],
+                ["first_tanh_out"],
+                name="first_tanh",
+            ),
+            helper.make_node(
+                "Tanh",
+                ["second_multi_split_out"],
+                ["second_tanh_out"],
+                name="second_tanh",
+            ),
+            helper.make_node(
+                "Concat",
+                ["first_tanh_out", "second_tanh_out"],
+                ["y"],
+                name="multi_consumer_concat",
+                axis=1,
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "multi_consumer_split_graph",
+            [x],
+            [y],
+            [split_sizes],
+            value_info=[
+                first_split_out,
+                second_split_out,
+                first_tanh_out,
+                second_tanh_out,
+            ],
         )
         model = helper.make_model(
             graph, opset_imports=[helper.make_opsetid("", 13)]
@@ -1254,6 +1456,91 @@ class TestOnnxSlimPass(unittest.TestCase):
             )
         )
 
+    def test_optimize_onnx_model_fuses_matmul_reshape_transpose_split_squeeze_qkv_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_matmul_reshape_transpose_split_squeeze_qkv_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertEqual(
+            [node.op_type for node in optimized_model.graph.node],
+            [
+                "MatMul", "MatMul", "MatMul",
+                "Add", "Add", "Add",
+                "Reshape", "Reshape", "Reshape",
+                "Transpose", "Transpose", "Transpose",
+            ],
+        )
+        self.assertEqual(
+            [node.name for node in optimized_model.graph.node],
+            [
+                "matmul_0_q", "matmul_0_k", "matmul_0_v",
+                "add_0_q", "add_0_k", "add_0_v",
+                "reshape_0_q", "reshape_0_k", "reshape_0_v",
+                "transpose_0_q", "transpose_0_k", "transpose_0_v",
+            ],
+        )
+
+        initializers = {
+            initializer.name: onnx.numpy_helper.to_array(initializer).tolist()
+            for initializer in optimized_model.graph.initializer
+        }
+        self.assertEqual(
+            initializers["matmul_0_q_weight"],
+            [
+                [1.0, 2.0, 3.0, 4.0],
+                [5.0, 6.0, 7.0, 8.0],
+                [9.0, 10.0, 11.0, 12.0],
+                [13.0, 14.0, 15.0, 16.0],
+            ],
+        )
+        self.assertEqual(
+            initializers["matmul_0_k_weight"],
+            [
+                [101.0, 102.0, 103.0, 104.0],
+                [105.0, 106.0, 107.0, 108.0],
+                [109.0, 110.0, 111.0, 112.0],
+                [113.0, 114.0, 115.0, 116.0],
+            ],
+        )
+        self.assertEqual(
+            initializers["matmul_0_v_weight"],
+            [
+                [201.0, 202.0, 203.0, 204.0],
+                [205.0, 206.0, 207.0, 208.0],
+                [209.0, 210.0, 211.0, 212.0],
+                [213.0, 214.0, 215.0, 216.0],
+            ],
+        )
+        self.assertTrue(
+            np.allclose(initializers["add_0_q_bias"], [0.1, 0.2, 0.3, 0.4])
+        )
+        self.assertTrue(
+            np.allclose(initializers["add_0_k_bias"], [1.1, 1.2, 1.3, 1.4])
+        )
+        self.assertTrue(
+            np.allclose(initializers["add_0_v_bias"], [2.1, 2.2, 2.3, 2.4])
+        )
+        reshape_shape_inputs = [
+            node.input[1]
+            for node in optimized_model.graph.node
+            if node.op_type == "Reshape"
+        ]
+        self.assertEqual(len(reshape_shape_inputs), 3)
+        for reshape_shape_input in reshape_shape_inputs:
+            self.assertEqual(initializers[reshape_shape_input], [1, 2, 2, 2])
+
+        transpose_attrs = [
+            {attr.name: helper.get_attribute_value(attr) for attr in node.attribute}
+            for node in optimized_model.graph.node
+            if node.op_type == "Transpose"
+        ]
+        self.assertEqual(transpose_attrs, [{"perm": [0, 2, 1, 3]}] * 3)
+
     def test_optimize_onnx_model_fuses_sibling_slices_to_split(self):
         onnxslim_pass_module = _load_onnxslim_pass_module()
         model = self._build_slice_sibling_split_consumer_model()
@@ -1358,6 +1645,51 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(
             [node.op_type for node in optimized_model.graph.node],
             ["Slice", "Slice"],
+        )
+
+    def test_optimize_onnx_model_rewrites_single_live_output_split_to_slice(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_single_consumer_split_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertNotIn(
+            "Split", [node.op_type for node in optimized_model.graph.node]
+        )
+
+        slice_nodes = [
+            node for node in optimized_model.graph.node
+            if node.op_type == "Slice"
+        ]
+        self.assertEqual(len(slice_nodes), 1)
+
+        slice_node = slice_nodes[0]
+        initializers = {
+            initializer.name: onnx.numpy_helper.to_array(initializer).tolist()
+            for initializer in optimized_model.graph.initializer
+        }
+        self.assertEqual(list(slice_node.input[:1]), ["x"])
+        self.assertEqual(initializers[slice_node.input[1]], [2])
+        self.assertEqual(initializers[slice_node.input[2]], [5])
+        self.assertEqual(initializers[slice_node.input[3]], [1])
+        self.assertEqual(initializers[slice_node.input[4]], [1])
+
+    def test_optimize_onnx_model_keeps_multi_consumer_split(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_multi_consumer_split_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        optimized_model = onnxslim_pass_module.infer_onnx_model(
+            optimized_model
+        )
+
+        onnx.checker.check_model(optimized_model)
+        self.assertIn(
+            "Split", [node.op_type for node in optimized_model.graph.node]
         )
 
     def test_build_yolo_decode_function_uses_dynamic_bbox_reshape_shape(self):
