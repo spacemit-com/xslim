@@ -162,10 +162,11 @@ def _rewrite_slice_to_split(anchor_slice):
     )
 
     for slice_node in slice_group["nodes"]:
-        if slice_node in data_input.outputs:
-            data_input.outputs.remove(slice_node)
-
-        slice_node.inputs.clear()
+        # Keep the old Slice nodes connected to their input until the fusion
+        # pass has finished finding matches. Disconnecting them here can make
+        # an upstream multi-output Split look like it has only one consumer,
+        # causing FusionSingleConsumerSplitToSlice to remove that producer in
+        # the same pass. Graph cleanup will remove these output-less nodes.
         slice_node.outputs.clear()
 
     return {

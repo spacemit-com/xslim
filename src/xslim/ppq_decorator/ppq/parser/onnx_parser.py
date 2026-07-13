@@ -4,7 +4,8 @@ import onnx
 from onnx import helper, numpy_helper
 from xslim.defs import GLOBAL_FUNCTIONS_MAPPING, MIN_ONNX_OPSET_VERSION
 
-from ..core import DEFAULT_OPSET_DOMAIN, GRAPH_OPSET_ATTRIB, NetworkFramework, is_file_exist
+from ..core import (DEFAULT_OPSET_DOMAIN, GRAPH_OPSET_ATTRIB, DataType,
+                    NetworkFramework, is_file_exist)
 from ..IR import BaseGraph, GraphBuilder, Operation, Opset, Variable
 
 
@@ -107,8 +108,10 @@ class OnnxParser(GraphBuilder):
                     # The attribute of 'Constant' node is a value, needs to convert to numpy array
                     value = numpy_helper.to_array(value).copy()
                 if op.type == "Cast":
-                    # The attribute of 'Cast' node is data type (represented in int), need to convert to numpy data type
-                    value = helper.tensor_dtype_to_np_dtype(value)
+                    # Cast execution uses PPQ's internal DataType enum.
+                    value = DataType.convert_from_numpy(
+                        helper.tensor_dtype_to_np_dtype(value)
+                    )
                 op.attributes[key] = value
 
         graph_initializers = []
