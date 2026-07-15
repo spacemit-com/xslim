@@ -12,6 +12,7 @@ from .padpool import *
 from .qkv_split import *
 from .reciprocal_div import *
 from .slice_fusion import *
+from .split_to_slice import *
 from .yolo_decode import *
 
 # from .swish import *
