@@ -2100,10 +2100,10 @@ class TestOnnxSlimPass(unittest.TestCase):
                 model, sim_en=False
             )
 
-        conv_transpose_node = formatted_model.graph.node[0]
+        convtranspose_node = formatted_model.graph.node[0]
         attrs = {
             attr.name: helper.get_attribute_value(attr)
-            for attr in conv_transpose_node.attribute
+            for attr in convtranspose_node.attribute
         }
         self.assertEqual(list(attrs["kernel_shape"]), [3, 3])
 
@@ -2236,6 +2236,145 @@ class TestOnnxSlimPass(unittest.TestCase):
         self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[1]]).item(), FLOAT32_MIN)
         self.assertEqual(numpy_helper.to_array(initializers[clip_node.input[2]]).item(), 6.0)
         onnx.checker.check_model(formatted_model)
+
+
+    @staticmethod
+    def _build_window_partition_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 14, 14, 96])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [196, 96])
+        shape_before = numpy_helper.from_array(
+            np.asarray([1, 2, 7, 2, 7, 96], dtype=np.int64),
+            name="wp_shape_before_transpose",
+        )
+        shape_after = numpy_helper.from_array(
+            np.asarray([-1, 96], dtype=np.int64),
+            name="wp_shape_after_transpose",
+        )
+        nodes = [
+            helper.make_node(
+                "Reshape",
+                ["x", "wp_shape_before_transpose"],
+                ["wp_reshape0_out"],
+                name="wp_reshape_0",
+            ),
+            helper.make_node(
+                "Transpose",
+                ["wp_reshape0_out"],
+                ["wp_transpose_out"],
+                name="wp_transpose",
+                perm=[0, 1, 3, 2, 4, 5],
+            ),
+            helper.make_node(
+                "Reshape",
+                ["wp_transpose_out", "wp_shape_after_transpose"],
+                ["y"],
+                name="wp_reshape_1",
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "window_partition_graph",
+            [x],
+            [y],
+            [shape_before, shape_after],
+            value_info=[
+                helper.make_tensor_value_info(
+                    "wp_reshape0_out", TensorProto.FLOAT, [1, 2, 7, 2, 7, 96]
+                ),
+                helper.make_tensor_value_info(
+                    "wp_transpose_out", TensorProto.FLOAT, [1, 2, 2, 7, 7, 96]
+                ),
+            ],
+        )
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+        return onnx.shape_inference.infer_shapes(model)
+
+    @staticmethod
+    def _build_window_reverse_pattern_model():
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [196, 96])
+        y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 196, 96])
+        shape_before = numpy_helper.from_array(
+            np.asarray([1, 2, 2, 7, 7, -1], dtype=np.int64),
+            name="wr_shape_before_transpose",
+        )
+        shape_after = numpy_helper.from_array(
+            np.asarray([1, 196, 96], dtype=np.int64),
+            name="wr_shape_after_transpose",
+        )
+        nodes = [
+            helper.make_node(
+                "Reshape",
+                ["x", "wr_shape_before_transpose"],
+                ["wr_reshape0_out"],
+                name="wr_reshape_0",
+            ),
+            helper.make_node(
+                "Transpose",
+                ["wr_reshape0_out"],
+                ["wr_transpose_out"],
+                name="wr_transpose",
+                perm=[0, 1, 3, 2, 4, 5],
+            ),
+            helper.make_node(
+                "Reshape",
+                ["wr_transpose_out", "wr_shape_after_transpose"],
+                ["y"],
+                name="wr_reshape_1",
+            ),
+        ]
+        graph = helper.make_graph(
+            nodes,
+            "window_reverse_graph",
+            [x],
+            [y],
+            [shape_before, shape_after],
+            value_info=[
+                helper.make_tensor_value_info(
+                    "wr_reshape0_out", TensorProto.FLOAT, [1, 2, 2, 7, 7, 96]
+                ),
+                helper.make_tensor_value_info(
+                    "wr_transpose_out", TensorProto.FLOAT, [1, 2, 7, 2, 7, 96]
+                ),
+            ],
+        )
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+        return onnx.shape_inference.infer_shapes(model)
+
+    def test_optimize_onnx_model_fuses_window_partition_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_window_partition_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        onnx.checker.check_model(optimized_model)
+
+        nodes_by_name = {node.name: node for node in optimized_model.graph.node}
+        self.assertIn("WindowPartition_wp_reshape_0", nodes_by_name)
+        self.assertEqual(
+            nodes_by_name["WindowPartition_wp_reshape_0"].op_type,
+            "WindowPartition",
+        )
+        self.assertEqual(
+            nodes_by_name["WindowPartition_wp_reshape_0"].domain,
+            "spacemit_functions",
+        )
+
+    def test_optimize_onnx_model_fuses_window_reverse_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_window_reverse_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        onnx.checker.check_model(optimized_model)
+
+        nodes_by_name = {node.name: node for node in optimized_model.graph.node}
+        self.assertIn("WindowReverse_wr_reshape_0", nodes_by_name)
+        self.assertEqual(
+            nodes_by_name["WindowReverse_wr_reshape_0"].op_type,
+            "WindowReverse",
+        )
+        self.assertEqual(
+            nodes_by_name["WindowReverse_wr_reshape_0"].domain,
+            "spacemit_functions",
+        )
 
 
 if __name__ == "__main__":
