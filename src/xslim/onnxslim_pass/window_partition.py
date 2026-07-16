@@ -178,7 +178,7 @@ def fuse_window_partition(onnx_model: onnx.ModelProto) -> onnx.ModelProto:
 
         fused_node = osg.Node(
             op=WINDOW_PARTITION_OP_TYPE,
-            name= fused_name, 
+            name=fused_name,
             domain=WINDOW_PARTITION_DOMAIN,
             attrs={
                 "window_size": int(window_h),
