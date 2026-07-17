@@ -17,8 +17,8 @@ from xslim.logger import logger
 from . import CalibrationCollect, XSlimDataset
 from .analyse import statistical_analyse
 from .defs import XQUANT_CONFIG
-from .onnx_graph_helper import (format_onnx_model, merge_onnx_model,
-                                truncate_onnx_model)
+from .onnx_graph_helper import (format_onnx_model, is_large_model,
+                                merge_onnx_model, truncate_onnx_model)
 from .optimizer import GraphLegalized
 from .ppq_decorator import (DISPATCHER_TABLE, BaseGraph, GraphDispatcher,
                             OnnxParser, ONNXRUNTIMExporter, TargetPlatform,
@@ -279,7 +279,22 @@ def quantize_onnx_model(
 
     quant_onnx_model.metadata_props.extend(ori_onnx_model.metadata_props)
     quant_onnx_model.ir_version = max(9, ori_onnx_model.ir_version)
-    onnx.save(quant_onnx_model, os.path.join(working_dir, "{}.onnx".format(output_prefix)))
+    _out_path = os.path.join(working_dir, "{}.onnx".format(output_prefix))
+    if is_large_model(quant_onnx_model):
+        # Serialized model would exceed the 2GB protobuf limit; store weights
+        # as external data alongside the .onnx graph file.
+        logger.info("large output model, saving weights as external data.")
+        onnx.save(
+            quant_onnx_model,
+            _out_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location="{}.onnx.data".format(output_prefix),
+            size_threshold=1024,
+            convert_attribute=True,
+        )
+    else:
+        onnx.save(quant_onnx_model, _out_path)
 
     logger.info("quantization eplased time {:.2f} s".format(time.time() - time_start))
     return quant_onnx_model

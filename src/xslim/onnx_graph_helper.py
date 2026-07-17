@@ -20,6 +20,47 @@ from xslim.logger import logger
 from .onnxslim_pass import infer_onnx_model, optimize_onnx_model
 
 
+# protobuf single-message hard limit is 2GB. Models whose serialized size
+# approaches this cannot go through in-memory onnx APIs (SerializeToString,
+# version_converter, infer_shapes, convert_float_to_float16 with shape infer),
+# which either raise obscure errors or silently return an empty model.
+# We use a conservative threshold so intermediate growth (e.g. shape info)
+# does not push a borderline model over the edge.
+LARGE_MODEL_THRESHOLD = 1_000_000_000  # ~1.0GB
+
+
+def estimate_model_size(onnx_model: onnx.ModelProto) -> int:
+    """Estimate the in-memory serialized size (bytes) of a model, including the
+    raw bytes of any external-data initializers, WITHOUT serializing it (which
+    would itself fail for >2GB models)."""
+    total = 0
+    for init in onnx_model.graph.initializer:
+        # raw_data held in-memory
+        if init.raw_data:
+            total += len(init.raw_data)
+        # external-data initializers: read declared length
+        elif init.data_location == onnx.TensorProto.EXTERNAL:
+            for kv in init.external_data:
+                if kv.key == "length":
+                    try:
+                        total += int(kv.value)
+                    except (TypeError, ValueError):
+                        pass
+        else:
+            # typed fields (float_data etc.) - rough estimate
+            for field in ("float_data", "int32_data", "int64_data",
+                          "double_data", "uint64_data"):
+                vals = getattr(init, field, None)
+                if vals:
+                    total += len(vals) * 8
+    return total
+
+
+def is_large_model(onnx_model: onnx.ModelProto,
+                   threshold: int = LARGE_MODEL_THRESHOLD) -> bool:
+    return estimate_model_size(onnx_model) >= threshold
+
+
 def get_onnx_opset(onnx_model: onnx.ModelProto) -> Dict[str, int]:
     opset_dict = {}
     for opset in onnx_model.opset_import:
@@ -348,6 +389,49 @@ def _normalize_clip_optional_bounds(onnx_model: onnx.ModelProto) -> onnx.ModelPr
     return onnx_model
 
 
+def safe_convert_version(onnx_model: onnx.ModelProto, target_version: int) -> onnx.ModelProto:
+    """opset version conversion that works for models of any size.
+
+    onnx.version_converter.convert_version() serializes the model to a protobuf
+    string internally (C++ side), which fails for models >2GB with a misleading
+    "IR version may be too old" error. Since the version converter only rewrites
+    the graph structure / opset (never the weight tensors), we can convert on a
+    weight-stripped copy of the model: move all initializer data out to external
+    references and unload it from memory so the proto stays tiny, run the
+    converter, then restore the original weights by name.
+    """
+    if not is_large_model(onnx_model):
+        return onnx.version_converter.convert_version(onnx_model, target_version)
+
+    logger.info(
+        "large model detected (~{:.2f}GB), converting opset via weight-stripped graph.".format(
+            estimate_model_size(onnx_model) / 1e9
+        )
+    )
+
+    with TemporaryDirectory() as tmpdir:
+        stripped_path = os.path.join(tmpdir, "graph_only.onnx")
+        # Serialize with all tensors pushed to a single external file. This keeps
+        # the ModelProto small enough to serialize (graph structure only).
+        onnx.save(
+            onnx_model,
+            stripped_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location="graph_only.weights",
+            size_threshold=0,
+            convert_attribute=True,
+        )
+        # Load WITHOUT external data: proto carries only graph + external refs.
+        graph_only = onnx.load(stripped_path, load_external_data=False)
+        converted = onnx.version_converter.convert_version(graph_only, target_version)
+        # Pull every weight (including any initializers the converter itself
+        # materialized) back into memory before the temp dir is removed, so the
+        # returned model is fully self-contained with no dangling external refs.
+        onnx.load_external_data_for_model(converted, tmpdir)
+    return converted
+
+
 def format_onnx_model(
     onnx_model: onnx.ModelProto, sim_en: bool = True, min_onnx_version: Optional[int] = None
 ) -> onnx.ModelProto:
@@ -380,13 +464,11 @@ def format_onnx_model(
     if target_onnx_version is None and ai_onnx_version < required_onnx_version:
         logger.warning("convert ai.onnx version {} to {}...".format(
             ai_onnx_version, required_onnx_version))
-        onnx_model = onnx.version_converter.convert_version(
-            onnx_model, required_onnx_version)
+        onnx_model = safe_convert_version(onnx_model, required_onnx_version)
     elif target_onnx_version is not None and ai_onnx_version != target_onnx_version:
         logger.warning("convert ai.onnx version {} to {}...".format(
             ai_onnx_version, target_onnx_version))
-        onnx_model = onnx.version_converter.convert_version(
-            onnx_model, target_onnx_version)
+        onnx_model = safe_convert_version(onnx_model, target_onnx_version)
 
     if sim_en:
         logger.info("simplify onnx model...")
