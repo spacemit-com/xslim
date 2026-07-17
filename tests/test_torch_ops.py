@@ -4,7 +4,9 @@ import os
 import sys
 import unittest
 
+import onnx
 import torch
+from onnx import TensorProto, helper
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -19,6 +21,7 @@ from xslim.ppq_decorator.ppq.executor.op import (DEFAULT_BACKEND_TABLE,
 from xslim.ppq_decorator.ppq.executor.torch import TorchExecutor
 from xslim.ppq_decorator.ppq.IR import BaseGraph, Operation, Variable
 from xslim.ppq_decorator.ppq.IR.base.opdef import DEFAULT_SOCKET_TABLE, Opset
+from xslim.ppq_decorator.ppq.parser.onnx_parser import OnnxParser
 from xslim.quantizer.xslim import XSlimQuantizer
 
 
@@ -241,12 +244,83 @@ class TestReductionOps(unittest.TestCase):
     def test_reduce_l2_with_axes_input(self):
         op = make_op("reduce_l2", "ReduceL2", attributes={"keepdims": 1}, num_inputs=2)
         op.opset = Opset(version=18)
-        x = torch.tensor([[3.0, 4.0], [5.0, 12.0]])
-        axes = torch.tensor([1], dtype=torch.int64)
+        x = torch.arange(1.0, 49.0).reshape(2, 2, 3, 4)
+        axes = torch.tensor([1, 2, 3], dtype=torch.int64)
 
         result = DEFAULT_BACKEND_TABLE["ReduceL2"](op, [x, axes], CTX)
 
-        torch.testing.assert_close(result, torch.linalg.vector_norm(x, ord=2, dim=[1], keepdim=True))
+        torch.testing.assert_close(
+            result,
+            torch.linalg.vector_norm(x, ord=2, dim=(1, 2, 3), keepdim=True),
+        )
+
+    def test_reduce_max_with_axes_input(self):
+        op = make_op("reduce_max", "ReduceMax", attributes={"keepdims": 1}, num_inputs=2)
+        op.opset = Opset(version=18)
+        x = torch.tensor(
+            [[[1.0, 5.0], [4.0, 3.0]], [[2.0, 0.0], [6.0, 1.0]]]
+        )
+        axes = torch.tensor([1, 2], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceMax"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.amax(x, dim=(1, 2), keepdim=True))
+
+    def test_reduce_max_noop_with_empty_axes(self):
+        op = make_op(
+            "reduce_max_noop",
+            "ReduceMax",
+            attributes={"keepdims": 1, "noop_with_empty_axes": 1},
+            num_inputs=2,
+        )
+        op.opset = Opset(version=18)
+        x = torch.randn(2, 3)
+        axes = torch.tensor([], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceMax"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, x)
+
+    def test_reduce_ops_noop_with_omitted_axes(self):
+        x = torch.tensor([[-2.0, 3.0], [4.0, 5.0]])
+        cases = [
+            ("ReduceL1", torch.abs(x)),
+            ("ReduceL2", torch.abs(x)),
+            ("ReduceLogSum", torch.log(x)),
+            ("ReduceLogSumExp", x),
+            ("ReduceMax", x),
+            ("ReduceMean", x),
+            ("ReduceMin", x),
+            ("ReduceProd", x),
+            ("ReduceSum", x),
+            ("ReduceSumSquare", torch.square(x)),
+        ]
+        for op_type, expected in cases:
+            with self.subTest(op_type=op_type):
+                op = make_op(
+                    op_type.lower(),
+                    op_type,
+                    attributes={"noop_with_empty_axes": 1},
+                    num_inputs=2,
+                )
+                op.opset = Opset(version=13 if op_type == "ReduceSum" else 18)
+                result = DEFAULT_BACKEND_TABLE[op_type](op, [x], CTX)
+                torch.testing.assert_close(result, expected, equal_nan=True)
+
+    def test_reduce_prod_with_multiple_negative_axes(self):
+        op = make_op(
+            "reduce_prod",
+            "ReduceProd",
+            attributes={"keepdims": 0},
+            num_inputs=2,
+        )
+        op.opset = Opset(version=18)
+        x = torch.arange(1.0, 25.0).reshape(2, 3, 4)
+        axes = torch.tensor([-1, -2], dtype=torch.int64)
+
+        result = DEFAULT_BACKEND_TABLE["ReduceProd"](op, [x, axes], CTX)
+
+        torch.testing.assert_close(result, torch.prod(x.reshape(2, -1), dim=1))
 
     def test_additional_reduce_ops(self):
         x = torch.tensor([[1.0, -2.0, 3.0], [4.0, -5.0, 6.0]])
@@ -493,6 +567,24 @@ class TestOtherOps(unittest.TestCase):
         result = DEFAULT_BACKEND_TABLE["Cast"](op, [x], CTX)
         self.assertEqual(result.dtype, torch.float32)
 
+    def test_parsed_onnx_cast_uses_internal_data_type(self):
+        x_info = helper.make_tensor_value_info("x", TensorProto.INT64, [3])
+        y_info = helper.make_tensor_value_info("y", TensorProto.FLOAT, [3])
+        cast = helper.make_node(
+            "Cast", ["x"], ["y"], name="cast", to=TensorProto.FLOAT
+        )
+        model = helper.make_model(
+            helper.make_graph([cast], "cast_graph", [x_info], [y_info]),
+            opset_imports=[helper.make_opsetid("", 18)],
+        )
+
+        graph = OnnxParser().build(model)
+        self.assertEqual(graph.operations["cast"].attributes["to"], DataType.FP32)
+        result = TorchExecutor(graph=graph, device="cpu").forward(
+            torch.tensor([1, 2, 3], dtype=torch.int64)
+        )[0]
+        self.assertEqual(result.dtype, torch.float32)
+
     def test_constant_of_shape(self):
         op = make_op("const_shape", "ConstantOfShape", attributes={"value": torch.tensor([0.0])})
         shape = torch.tensor([2, 3], dtype=torch.int64)
@@ -555,9 +647,9 @@ class TestQuantizerConfig(unittest.TestCase):
             ("ReduceL2", 18),
             ("ReduceLogSum", 18),
             ("ReduceLogSumExp", 18),
-            ("ReduceMax", 20),
+            ("ReduceMax", 18),
             ("ReduceMean", 18),
-            ("ReduceMin", 20),
+            ("ReduceMin", 18),
             ("ReduceProd", 18),
             ("ReduceSum", 18),
             ("ReduceSumSquare", 18),
