@@ -26,7 +26,7 @@ from .onnxslim_pass import infer_onnx_model, optimize_onnx_model
 # which either raise obscure errors or silently return an empty model.
 # We use a conservative threshold so intermediate growth (e.g. shape info)
 # does not push a borderline model over the edge.
-LARGE_MODEL_THRESHOLD = 1_800_000_000  # ~1.8GB
+LARGE_MODEL_THRESHOLD = 1_000_000_000  # ~1.0GB
 
 
 def estimate_model_size(onnx_model: onnx.ModelProto) -> int:
