@@ -137,7 +137,7 @@ See the [samples](samples/) directory for ready-to-run examples covering ResNet-
 
 ## Changelog
 
-For a full list of published versions, see the [Releases](https://github.com/spacemit-com/xslim/releases) page. The summary below is synchronized with that release history; `2.1.1` is the current in-tree development version and has not been published yet.
+For a full list of published versions, see the [Releases](https://github.com/spacemit-com/xslim/releases) page.
 
 ## Contributing
 
