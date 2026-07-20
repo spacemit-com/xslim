@@ -139,20 +139,6 @@ See the [samples](samples/) directory for ready-to-run examples covering ResNet-
 
 For a full list of published versions, see the [Releases](https://github.com/spacemit-com/xslim/releases) page. The summary below is synchronized with that release history; `2.1.1` is the current in-tree development version and has not been published yet.
 
-| Version | Highlights |
-| --- | --- |
-| 2.1.1 | Current in-tree development version after the 2.1.0 release |
-| [2.1.0](https://github.com/spacemit-com/xslim/releases/tag/2.1.0) | Latest published release; add automatic `spacemit_functions.YoloDecode` fusion for supported YOLO exports, preserve custom ONNX `FunctionProto` definitions during quantization/export, improve opset-24/custom-domain handling coverage, expand ONNX operator execution/socket coverage, support scalar and axes-input reduce kernels, and reject static re-quantization of models that already contain `QuantizeLinear` / `DequantizeLinear` |
-| [2.0.14](https://github.com/spacemit-com/xslim/releases/tag/2.0.14) | Add configurable default `ai.onnx` opset conversion for quantization and conversion workflows |
-| [2.0.13](https://github.com/spacemit-com/xslim/releases/tag/2.0.13) | Upgrade the default ONNX opset to 24, standardize operator domains, and align version metadata with the 2.0.12 release |
-| [2.0.12](https://github.com/spacemit-com/xslim/releases/tag/2.0.12) | Complete README changelog/release metadata, add accuracy-tuning docs and README links, introduce the xslim-accuracy-tuning GitHub skill, add YOLO truncation guidance, and rename input parameters for consistency |
-| [2.0.11](https://github.com/spacemit-com/xslim/releases/tag/2.0.11) | Fix Pad/missing-input handling, add Or/Einsum/Selu support, normalize Conv/ConvTranspose kernel shapes, and raise minimum Python to 3.9 |
-| [2.0.10](https://github.com/spacemit-com/xslim/releases/tag/2.0.10) | Align release metadata, improve CI/test coverage, normalize missing default ONNX opset before dynamic quantization, and refine shape inference handling |
-| [2.0.9](https://github.com/spacemit-com/xslim/releases/tag/2.0.9) | Add documentation, preserve tensor dtype metadata during FP16 conversion, and restore compatibility with onnxslim 0.1.87 |
-| [2.0.8](https://github.com/spacemit-com/xslim/releases/tag/2.0.8) | Improve packaging/CI, add torch executor operator coverage, add PyPI publish workflow, and centralize version metadata |
-| [2.0.7](https://github.com/spacemit-com/xslim/releases/tag/2.0.7) | Fix FP16 conversion bug on complex models |
-| [2.0.6](https://github.com/spacemit-com/xslim/releases/tag/2.0.6) | Fix metadata props deletion; default CLI behavior changed to model simplification (use `--dynq` for dynamic quantization) |
-
 ## Contributing
 
 Contributions are welcome! Please open an [issue](https://github.com/spacemit-com/xslim/issues) or submit a [pull request](https://github.com/spacemit-com/xslim/pulls).
