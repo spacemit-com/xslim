@@ -120,6 +120,10 @@ class XSlimQuantizer:
         self._set_max_percentile = xslim_setting.quantization_parameters.max_percentile
         self._calibration_type = xslim_setting.calibration_parameters.calibration_type
 
+        # Get ignore lists from settings
+        ignore_op_types = set(xslim_setting.quantization_parameters.ignore_op_types)
+        ignore_op_names = set(xslim_setting.quantization_parameters.ignore_op_names)
+
         executor.load_graph(self._graph)
         executor.tracing_operation_meta(inputs=inputs)
         # step - 1, prequant pipeline:
@@ -134,6 +138,16 @@ class XSlimQuantizer:
         executor.tracing_operation_meta(inputs=inputs)
 
         for op_name, operation in self._graph.operations.items():
+            # Skip if operator type is in ignore list
+            if operation.type in ignore_op_types:
+                operation.platform = TargetPlatform.FP32
+                continue
+
+            # Skip if operator name is in ignore list
+            if op_name in ignore_op_names:
+                operation.platform = TargetPlatform.FP32
+                continue
+
             if operation.platform == TargetPlatform.UNSPECIFIED:
                 if operation.type in self.quant_operation_types:
                     operation.platform = self.target_platform
