@@ -59,6 +59,40 @@ def test_convert_model_with_schema_less_operator():
     onnx.shape_inference.infer_shapes(probe, strict_mode=True, check_type=True)
 
 
+def _make_ms_gelu_model():
+    """Small graph with a com.microsoft.Gelu carrying its private 'approximate' attribute."""
+    X = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 4])
+    Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, [1, 4])
+    nodes = [
+        helper.make_node("Gelu", ["X"], ["g"], name="ms_gelu", domain="com.microsoft", approximate="tanh"),
+        helper.make_node("Mul", ["g", "g"], ["Y"], name="sq"),
+    ]
+    graph = helper.make_graph(nodes, "ms_gelu_model", [X], [Y])
+    model = helper.make_model(
+        graph, opset_imports=[helper.make_opsetid("", 21), helper.make_opsetid("com.microsoft", 1)]
+    )
+    model.ir_version = 10
+    return model
+
+
+def test_microsoft_gelu_moves_to_default_domain():
+    """com.microsoft.Gelu becomes ai.onnx Gelu and drops the non-standard attribute."""
+    model = _make_ms_gelu_model()
+    fp16_model = convert_to_fp16_onnx_model(model, [], [], sim_en=True, target_onnx_opset=24)
+    gelu = [n for n in fp16_model.graph.node if n.op_type == "Gelu"]
+    assert len(gelu) == 1
+    assert gelu[0].domain == ""
+    # The private attribute is replaced by the ai.onnx one (erf-based form).
+    assert {a.name: a.s for a in gelu[0].attribute if a.type == onnx.AttributeProto.STRING} == {"approximate": b"none"}
+    # No com.microsoft.Gelu is left behind.
+    assert not [n for n in fp16_model.graph.node if n.domain == "com.microsoft" and n.op_type == "Gelu"]
+    # The graph passes strict type checking.
+    probe = onnx.ModelProto()
+    probe.CopyFrom(fp16_model)
+    del probe.graph.value_info[:]
+    onnx.shape_inference.infer_shapes(probe, strict_mode=True, check_type=True)
+
+
 def test_convert_keeps_numerics():
     """The fp16 model stays numerically close to fp32 on the CPU execution provider."""
     ort = __import__("pytest").importorskip("onnxruntime")

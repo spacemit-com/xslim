@@ -14,7 +14,8 @@ them, which breaks ``--fp16`` conversion in two ways:
 This module handles both cases without touching the model's operators:
 
 * an operator that is already part of the ai.onnx standard at a higher opset
-  (``RotaryEmbedding``, ai.onnx >= 23) is converted to the ai.onnx domain;
+  (``RotaryEmbedding``, ai.onnx >= 23; ``Gelu``, ai.onnx >= 20) is converted to the ai.onnx
+  domain;
 * an operator that has no ai.onnx equivalent (``SimplifiedLayerNormalization``,
   ``SkipSimplifiedLayerNormalization``) is described by an *extension schema* that is
   registered with ONNX, so type/shape inference behaves normally and the operator keeps
@@ -62,11 +63,18 @@ _EXTENSION_SCHEMAS = {
 }
 
 # Microsoft private operators that are ai.onnx standard from a given opset on: they are
-# moved to the ai.onnx domain. ``inputs`` permutes the Microsoft input order into the
-# ai.onnx input order.
+# moved to the ai.onnx domain. ``inputs`` selects the inputs in ai.onnx order, where the
+# sentinel :data:`_POSITION_IDS` stands for the synthesized position tensor; ``attributes``
+# replaces the attribute set, for the operators whose signature is fixed and therefore has
+# no equivalent ai.onnx attribute.
+_POSITION_IDS = "@position_ids"
+
 _MS_OPERATORS_IN_AI_ONNX = {
     # Microsoft order (X, position_ids, cos_cache, sin_cache) -> ai.onnx (X, cos, sin, pos)
-    "RotaryEmbedding": {"inputs": [0, 2, 3, 1], "opset": 23},
+    "RotaryEmbedding": {"inputs": [0, 2, 3, _POSITION_IDS], "opset": 23},
+    # ai.onnx Gelu is the erf-based activation, like the com.microsoft one; pin
+    # approximate="none" so the mapping stays explicit (ai.onnx also offers "tanh").
+    "Gelu": {"inputs": [0], "attributes": {"approximate": "none"}},
 }
 
 _EXTENSION_SCHEMAS_REGISTERED = False
@@ -115,11 +123,13 @@ def convert_microsoft_ops_to_ai_onnx(
 ) -> int:
     """Convert Microsoft private operators that ai.onnx standardised to the default domain.
 
-    Currently only ``RotaryEmbedding`` (ai.onnx >= 23). The ai.onnx signature takes
-    ``(X, cos_cache, sin_cache, position_ids)`` while the Microsoft one takes
-    ``(X, position_ids, cos_cache, sin_cache)`` and a 1D ``position_ids``; the extra nodes
-    needed by the ai.onnx form (a 2D ``arange`` position tensor and ``num_heads``) are
-    synthesized from the shapes.
+    ``RotaryEmbedding`` (ai.onnx >= 23) and ``Gelu`` (ai.onnx >= 20). The ai.onnx
+    ``RotaryEmbedding`` takes ``(X, cos_cache, sin_cache, position_ids)`` while the
+    Microsoft one takes ``(X, position_ids, cos_cache, sin_cache)`` and a 1D
+    ``position_ids``; the extra nodes needed by the ai.onnx form (a 2D ``arange`` position
+    tensor and ``num_heads``) are synthesized from the shapes. ``Gelu`` takes only the
+    input tensor in both domains; the Microsoft schema has no attribute, so the ai.onnx
+    ``approximate`` is pinned to ``"none"`` (the erf-based form both domains implement).
 
     ``shapes`` is the tensor-shape map of the pre-conversion model (see
     :func:`tensor_shapes`): the simplify passes strip the ``value_info`` used to size
@@ -130,13 +140,28 @@ def convert_microsoft_ops_to_ai_onnx(
         return 0
 
     shapes = shapes if shapes is not None else _shape_map(onnx_model)
-    position_tensor = _make_position_ids(nodes[0].input[0], onnx_model)
+    rotary_nodes = [n for n in nodes if n.op_type == "RotaryEmbedding"]
+    if rotary_nodes:
+        position_ids = _make_position_ids(rotary_nodes[0].input[0], onnx_model)
+        replacements = {str(_POSITION_IDS): position_ids}
+    else:
+        replacements = {}
 
     for node in nodes:
-        x, _position_ids, cos_cache, sin_cache = node.input
-        node.input[:] = [x, cos_cache, sin_cache, position_tensor]
+        spec = _MS_OPERATORS_IN_AI_ONNX[node.op_type]
+        for key, value in spec.get("attributes", {}).items():
+            attribute = next((a for a in node.attribute if a.name == key), None)
+            if attribute is None:
+                node.attribute.append(onnx_helper.make_attribute(key, value))
+            elif attribute.type == onnx.AttributeProto.STRING:
+                attribute.s = value.encode()
+            else:
+                attribute.CopyFrom(onnx_helper.make_attribute(key, value))
+        inputs = [node.input[i] if isinstance(i, int) else replacements[i] for i in spec["inputs"]]
+        node.input[:] = inputs
         node.domain = ""
-        if "num_heads" not in {a.name for a in node.attribute}:
+        if node.op_type == "RotaryEmbedding" and "num_heads" not in {a.name for a in node.attribute}:
+            x, cos_cache = node.input[0], node.input[1]
             x_shape, cos_shape = shapes.get(x), shapes.get(cos_cache)
             if x_shape and cos_shape and x_shape[-1] and cos_shape[-1]:
                 node.attribute.append(onnx_helper.make_attribute("num_heads", x_shape[-1] // (2 * cos_shape[-1])))
