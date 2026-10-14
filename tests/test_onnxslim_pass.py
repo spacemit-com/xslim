@@ -2377,5 +2377,135 @@ class TestOnnxSlimPass(unittest.TestCase):
         )
 
 
+    @staticmethod
+    def _build_patch_embedding_pattern_model(input_shape=(1, 3, 224, 224)):
+        x = helper.make_tensor_value_info("x", TensorProto.FLOAT, list(input_shape))
+        batch_dim, _, input_h, input_w = input_shape
+        patch_h = input_h // 16 if isinstance(input_h, int) else None
+        patch_w = input_w // 16 if isinstance(input_w, int) else None
+        num_patches = (
+            patch_h * patch_w
+            if isinstance(patch_h, int) and isinstance(patch_w, int)
+            else None
+        )
+        y = helper.make_tensor_value_info(
+            "y", TensorProto.FLOAT, [batch_dim, num_patches, 768]
+        )
+        weight = numpy_helper.from_array(
+            np.ones((768, 3, 16, 16), dtype=np.float32), name="proj.weight"
+        )
+        bias = numpy_helper.from_array(
+            np.zeros((768,), dtype=np.float32), name="proj.bias"
+        )
+        shape = numpy_helper.from_array(
+            np.asarray([0, 768, -1], dtype=np.int64), name="reshape_shape"
+        )
+        nodes = [
+            helper.make_node(
+                "Conv",
+                ["x", "proj.weight", "proj.bias"],
+                ["conv_out"],
+                name="Conv_0",
+                kernel_shape=[16, 16],
+                strides=[16, 16],
+                pads=[0, 0, 0, 0],
+                dilations=[1, 1],
+                group=1,
+            ),
+            helper.make_node(
+                "Reshape",
+                ["conv_out", "reshape_shape"],
+                ["reshape_out"],
+                name="Reshape_1",
+            ),
+            helper.make_node(
+                "Transpose",
+                ["reshape_out"],
+                ["y"],
+                name="Transpose_2",
+                perm=[0, 2, 1],
+            ),
+        ]
+        value_info = [
+            helper.make_tensor_value_info(
+                "reshape_out", TensorProto.FLOAT, [batch_dim, 768, num_patches]
+            )
+        ]
+        if patch_h is not None and patch_w is not None:
+            value_info.insert(
+                0,
+                helper.make_tensor_value_info(
+                    "conv_out", TensorProto.FLOAT, [batch_dim, 768, patch_h, patch_w]
+                ),
+            )
+
+        graph = helper.make_graph(
+            nodes,
+            "patch_embedding_graph",
+            [x],
+            [y],
+            [weight, bias, shape],
+            value_info=value_info,
+        )
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+        return onnx.shape_inference.infer_shapes(model)
+
+    def test_optimize_onnx_model_fuses_patch_embedding_pattern(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_patch_embedding_pattern_model()
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        onnx.checker.check_model(optimized_model)
+
+        nodes_by_name = {node.name: node for node in optimized_model.graph.node}
+        self.assertIn("Conv_0", nodes_by_name)
+        self.assertEqual(nodes_by_name["Conv_0"].op_type, "PatchEmbedding")
+        self.assertEqual(nodes_by_name["Conv_0"].domain, "spacemit_functions")
+        self.assertEqual(
+            list(nodes_by_name["Conv_0"].input),
+            ["x", "proj.weight", "proj.bias", "reshape_shape"],
+        )
+        self.assertEqual(list(nodes_by_name["Conv_0"].output), ["y"])
+        attrs = {
+            attr.name: helper.get_attribute_value(attr)
+            for attr in nodes_by_name["Conv_0"].attribute
+        }
+        self.assertEqual(list(attrs["kernel_shape"]), [16, 16])
+        self.assertEqual(list(attrs["strides"]), [16, 16])
+        self.assertEqual(list(attrs["pads"]), [0, 0, 0, 0])
+        self.assertEqual(list(attrs["dilations"]), [1, 1])
+        self.assertEqual(attrs["group"], 1)
+        self.assertEqual(list(attrs["perm"]), [0, 2, 1])
+        self.assertEqual(attrs["embed_dim"], 768)
+        self.assertEqual(attrs["in_chans"], 3)
+        self.assertEqual(attrs["has_bias"], 1)
+        self.assertFalse(any(node.name == "Reshape_1" for node in optimized_model.graph.node))
+        self.assertFalse(any(node.name == "Transpose_2" for node in optimized_model.graph.node))
+        custom_opsets = {
+            opset.domain: opset.version for opset in optimized_model.opset_import
+        }
+        self.assertEqual(custom_opsets.get("spacemit_functions"), 1)
+
+    def test_optimize_onnx_model_fuses_patch_embedding_pattern_with_dynamic_input_shape(self):
+        onnxslim_pass_module = _load_onnxslim_pass_module()
+        model = self._build_patch_embedding_pattern_model(
+            input_shape=("batch", 3, "height", "width")
+        )
+
+        optimized_model = onnxslim_pass_module.optimize_onnx_model(model)
+        onnx.checker.check_model(optimized_model)
+
+        nodes_by_name = {node.name: node for node in optimized_model.graph.node}
+        self.assertIn("Conv_0", nodes_by_name)
+        self.assertEqual(nodes_by_name["Conv_0"].op_type, "PatchEmbedding")
+        self.assertEqual(nodes_by_name["Conv_0"].domain, "spacemit_functions")
+        self.assertEqual(
+            list(nodes_by_name["Conv_0"].input),
+            ["x", "proj.weight", "proj.bias", "reshape_shape"],
+        )
+        self.assertFalse(any(node.name == "Reshape_1" for node in optimized_model.graph.node))
+        self.assertFalse(any(node.name == "Transpose_2" for node in optimized_model.graph.node))
+
+
 if __name__ == "__main__":
     unittest.main()
