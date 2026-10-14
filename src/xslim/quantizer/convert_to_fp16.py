@@ -10,6 +10,9 @@ import onnx_graphsurgeon as osg
 from ..onnx_graph_helper import format_onnx_model, is_large_model
 from ..onnxslim_pass import infer_onnx_model
 from xslim.defs import MIN_ONNX_OPSET_VERSION, XQUANT_CONFIG
+from .fp16_legalize import (convert_microsoft_ops_to_ai_onnx,
+                            register_extension_op_schemas,
+                            repair_fp16_dtype_mismatches, tensor_shapes)
 from datetime import datetime
 import os
 import tempfile
@@ -132,7 +135,19 @@ def convert_to_fp16_onnx_model(
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(
             type(file_or_model)))
 
+    # A schema-less Microsoft operator (e.g. SimplifiedLayerNormalization) otherwise makes
+    # version_converter raise IndexError. Register extension schemas for the known ones so
+    # they get a dtype contract without changing their name or domain.
+    register_extension_op_schemas()
+    # Capture the tensor shapes before format_onnx_model strips value_info; they are needed
+    # to size the num_heads attribute of a rotated-embedding operator.
+    original_shapes = tensor_shapes(onnx_model)
     model_opt = format_onnx_model(onnx_model, sim_en, target_onnx_opset)
+
+    # Microsoft operators that ai.onnx standardised at a higher opset (e.g.
+    # RotaryEmbedding) are converted to the ai.onnx domain, so inference works and the fp16
+    # converter casts them like any standard operator.
+    convert_microsoft_ops_to_ai_onnx(model_opt, shapes=original_shapes)
 
     logger.info("convert onnx model to fp16.")
 
@@ -161,6 +176,7 @@ def convert_to_fp16_onnx_model(
                                "CumSum"}
 
     _op_block_list = list(default_ignore_op_types or set(ignore_op_types_list))
+
     try:
         if is_large_model(model_opt):
             model_fp16 = _convert_float16_large_model(
@@ -173,17 +189,22 @@ def convert_to_fp16_onnx_model(
                 op_block_list=_op_block_list,
                 node_block_list=ignore_node_names_list,
             )
+
+        # Repair the fp32/fp16 mixing the converter left behind.
+        repair_fp16_dtype_mismatches(model_fp16)
+
+        model_fp16 = format_onnx_model(model_fp16, True, target_onnx_opset)
+
+        osg_graph = osg.import_onnx(model_fp16)
+        osg_graph = legalize_fp16_graph(osg_graph)
+        model_fp16 = osg.export_onnx(osg_graph)
+
+        # The simplify passes above re-derive dtypes; repair any residual mismatch. This
+        # MUST be the last step: another format_onnx_model after it would re-break dtypes.
+        repair_fp16_dtype_mismatches(model_fp16)
     except Exception as e:
         logger.info(f"FP16 Convert Failed!: {e}")
         raise
-
-    model_fp16 = format_onnx_model(model_fp16, True, target_onnx_opset)
-
-    osg_graph = osg.import_onnx(model_fp16)
-    osg_graph = legalize_fp16_graph(osg_graph)
-    model_fp16 = osg.export_onnx(osg_graph)
-
-    model_fp16 = format_onnx_model(model_fp16, True, target_onnx_opset)
 
     model_fp16.producer_name = "xslim"
     export_time = model_fp16.metadata_props.add()
