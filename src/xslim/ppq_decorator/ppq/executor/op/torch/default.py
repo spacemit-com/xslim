@@ -3178,6 +3178,14 @@ def GridSample_forward(
     align_corners = bool(op.attributes.get("align_corners", 0))
     mode = op.attributes.get("mode", "bilinear")
     padding_mode = op.attributes.get("padding_mode", "zeros")
+    # Decode bytes attributes to strings for PyTorch compatibility
+    if isinstance(mode, bytes):
+        mode = mode.decode('utf-8')
+    if isinstance(padding_mode, bytes):
+        padding_mode = padding_mode.decode('utf-8')
+    # ONNX uses 'linear' for 2D, 'cubic' for 3D; PyTorch uses 'bilinear'/'bicubic'
+    mode_map = {'linear': 'bilinear', 'cubic': 'bicubic'}
+    mode = mode_map.get(mode, mode)
     output = F.grid_sample(value, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
     return output
 
