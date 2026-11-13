@@ -141,7 +141,10 @@ For a full list of published versions, see the [Releases](https://github.com/spa
 
 ## Contributing
 
-Contributions are welcome! Please open an [issue](https://github.com/spacemit-com/xslim/issues) or submit a [pull request](https://github.com/spacemit-com/xslim/pulls).
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for
+branch naming, PR titles, code style and verification requirements, then open an
+[issue](https://github.com/spacemit-com/xslim/issues) or submit a
+[pull request](https://github.com/spacemit-com/xslim/pulls).
 
 ## License
 
