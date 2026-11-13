@@ -13,3 +13,6 @@ __pycache__/
 /src/xslim.egg-info
 /samples/temp
 /tests/output
+/.agents/workspace/
+/.agents/history/
+/.claude/

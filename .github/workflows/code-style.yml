@@ -26,3 +26,6 @@ jobs:
     - name: Run Ruff style check
       run: |
         ruff check .
+    - name: Check agent harness
+      run: |
+        python scripts/check_agent_harness.py
