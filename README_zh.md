@@ -141,7 +141,9 @@ xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
 
 ## 参与贡献
 
-欢迎贡献！请提交 [Issue](https://github.com/spacemit-com/xslim/issues) 或发起 [Pull Request](https://github.com/spacemit-com/xslim/pulls)。
+欢迎贡献！请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解分支命名、PR 标题、代码风格和验证要求，
+然后提交 [Issue](https://github.com/spacemit-com/xslim/issues) 或发起
+[Pull Request](https://github.com/spacemit-com/xslim/pulls)。
 
 ## 许可证
 

@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 AGENTS = ROOT / "AGENTS.md"
 CLAUDE = ROOT / "CLAUDE.md"
+CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 AGENTS_DIR = ROOT / ".agents"
 PROMPTS_DIR = AGENTS_DIR / "prompts"
 ROLES_DIR = AGENTS_DIR / "agents"
@@ -139,6 +140,8 @@ def check_skills(agents_text: str) -> None:
 
 def check_references() -> None:
     candidates = [AGENTS, CLAUDE, *sorted(AGENTS_DIR.rglob("*.md"))]
+    if CONTRIBUTING.is_file():
+        candidates.append(CONTRIBUTING)
     pattern = re.compile(r"\.agents/[A-Za-z0-9_./-]+")
     for path in candidates:
         text = read(path)
