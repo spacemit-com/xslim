@@ -14,7 +14,7 @@ tools: read, grep, find, ls, bash
 4. 输出可复现的评估记录，并把代码层缺陷交给 `quantizer-developer` / `onnx-pass-developer`
 
 ## 必读依据
-- `.github/skills/xslim-accuracy-tuning/SKILL.md` 及其 `references/`（策略选择、预处理与校准、
+- `.agents/skills/xslim-accuracy-tuning/SKILL.md` 及其 `references/`（策略选择、预处理与校准、
   precision/finetune、Graphwise Analysis、定向调优、脚本化）
 - `doc/accuracy_tuning.md` + `doc/accuracy_tuning_zh.md`
 - `doc/configuration.md` + `doc/configuration_zh.md`（`input_parameters`、`calibration_parameters`、

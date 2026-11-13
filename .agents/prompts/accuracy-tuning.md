@@ -9,13 +9,13 @@ argument-hint: "<模型或精度问题>"
 
 ## Phase 0: 分级
 - conversational（问策略、参数含义、报告怎么读）：直接回答，引用
-  `.github/skills/xslim-accuracy-tuning/SKILL.md` 与 `doc/accuracy_tuning.md` / `_zh`。
+  `.agents/skills/xslim-accuracy-tuning/SKILL.md` 与 `doc/accuracy_tuning.md` / `_zh`。
 - standard（有模型和数据，需要诊断/调优）：执行 Phase 1–3。
 - substantial（判断为代码缺陷或需要改量化实现）：Phase 3 结束后按「代码缺陷升级」处理。
 
 ## Phase 1: 基线与证据（先做，不可跳过）
 single 委派 `accuracy-analyst`：
-1. 读 `.github/skills/xslim-accuracy-tuning/SKILL.md`，按需加载 `references/`。
+1. 读 `.agents/skills/xslim-accuracy-tuning/SKILL.md`，按需加载 `references/`。
 2. 确认模型、精度变体、校准/验证数据集、样本数、预处理、指标、容差与运行命令。
 3. 测量原模型与量化模型基线，写入 `<run-dir>/eval.md`。
 **没有真实数据或无法测量时，明确声明并停止下结论，不用随机数据代替。**

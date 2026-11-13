@@ -21,7 +21,7 @@ Given a user ONNX model path, the script:
 ## Recommended Invocation
 
 ```bash
-python /absolute/path/to/.github/skills/xslim-accuracy-tuning/scripts/bootstrap_xslim_project.py \
+python /absolute/path/to/.agents/skills/xslim-accuracy-tuning/scripts/bootstrap_xslim_project.py \
   --model /path/to/model.onnx \
   --output-dir /path/to/generated_project \
   --mode int8

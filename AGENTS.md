@@ -232,11 +232,9 @@ No runtime in this repo auto-discovers `.agents/skills/`; read
   config schema and large-model handling.
 - `workspace-cleanup` — archive important local history, preserve dirty-worktree
   recovery, and clean scoped run directories.
-
-The accuracy-tuning skill lives in the GitHub-facing catalog and is used as-is:
-`.github/skills/xslim-accuracy-tuning/SKILL.md` (references under
-`.github/skills/xslim-accuracy-tuning/references/`). Do not duplicate it under
-`.agents/`.
+- `xslim-accuracy-tuning` — accuracy diagnosis and tuning: strategy selection,
+  preprocessing and calibration checks, `precision_level` / `finetune_level`,
+  Graphwise Analysis, and targeted fixes.
 
 ### Orchestration prompts (`.agents/prompts/`)
 These are prompt files, not registered commands. Hand the prompt text to an agent
@@ -256,7 +254,7 @@ change.
   `.agents/skills/quantization-dev/SKILL.md`.
 - Accuracy drop, precision-level choice, Graphwise Analysis, calibration data:
   `.agents/prompts/accuracy-tuning.md`, then
-  `.github/skills/xslim-accuracy-tuning/SKILL.md`.
+  `.agents/skills/xslim-accuracy-tuning/SKILL.md`.
 - Review of a change: `.agents/prompts/code-review.md` (delegates `qa-inspector`,
   evidence-based PASS/FAIL).
 - Workspace/history cleanup: `.agents/skills/workspace-cleanup/SKILL.md`.

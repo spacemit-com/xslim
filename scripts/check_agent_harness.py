@@ -25,7 +25,6 @@ ROLES_DIR = AGENTS_DIR / "agents"
 SKILLS_DIR = AGENTS_DIR / "skills"
 RUN_DOC = AGENTS_DIR / "shared" / "run.md"
 DELEGATION_DOC = AGENTS_DIR / "shared" / "delegation.md"
-EXTERNAL_ACCURACY_SKILL = ROOT / ".github" / "skills" / "xslim-accuracy-tuning" / "SKILL.md"
 
 PREFIXES = ("pass", "quant", "acc", "review", "maint")
 ARTIFACTS = ("scout.md", "design.md", "impl.md", "eval.md", "review.md", "handoff.md")
@@ -68,8 +67,6 @@ def check_required_files() -> None:
             fail(f"missing required harness file: {rel(path)}")
     if CLAUDE.is_file() and "@AGENTS.md" not in read(CLAUDE):
         fail("CLAUDE.md must import AGENTS.md with '@AGENTS.md'")
-    if not EXTERNAL_ACCURACY_SKILL.is_file():
-        fail(f"missing external accuracy skill: {rel(EXTERNAL_ACCURACY_SKILL)}")
 
 
 def check_prompts(agents_text: str, run_text: str) -> list[str]:
@@ -134,8 +131,6 @@ def check_skills(agents_text: str) -> None:
             fail(f"{rel(path)}: frontmatter name '{fields['name']}' does not match directory name")
         if f"`{skill_name}`" not in agents_text:
             fail(f"{rel(path)}: skill is not listed in AGENTS.md")
-    if rel(EXTERNAL_ACCURACY_SKILL) not in agents_text:
-        fail("AGENTS.md does not reference the external accuracy-tuning skill")
 
 
 def check_references() -> None:

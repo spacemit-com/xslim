@@ -1,5 +1,5 @@
 ---
-name: XSlim Accuracy Tuning
+name: xslim-accuracy-tuning
 description: This skill should be used when the user asks to "调优 xslim 精度", "优化量化精度", "分析量化后精度下降", "解读 Graphwise Analysis 报告", "设置 precision_level", "设置 finetune_level", "improve XSlim quantization accuracy", "tune XSlim accuracy", "interpret XSlim Graphwise Analysis", or "fix accuracy drop after quantization".
 version: 0.1.0
 ---

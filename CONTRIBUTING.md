@@ -177,7 +177,7 @@ Choose the verification scope from the actual impact of the change:
 - Follow [AGENTS.md](AGENTS.md) Rule 5 for model and data evidence. The accuracy
   workflow is described in the
   [accuracy-tuning prompt](.agents/prompts/accuracy-tuning.md) and the
-  [xslim-accuracy-tuning skill](.github/skills/xslim-accuracy-tuning/SKILL.md).
+  [xslim-accuracy-tuning skill](.agents/skills/xslim-accuracy-tuning/SKILL.md).
 
 ## Documentation and repository content
 
