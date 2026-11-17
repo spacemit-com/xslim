@@ -8,12 +8,15 @@ from unittest.mock import patch
 import numpy as np
 import onnx
 import onnxruntime as ort
+import torch
 from onnx import TensorProto, helper, numpy_helper
 
 import xslim
 from xslim.precision_strategy import build_precision_plan, record_quantized_layout, validate_export_layout
-from xslim.ppq_decorator import OnnxParser
+from xslim.optimizer import GraphLegalized
+from xslim.ppq_decorator import OnnxParser, ONNXRUNTIMExporter, TorchExecutor
 from xslim.quantizer.xslim import XSlimQuantizer
+from xslim.xslim_pipeline import dispatch_graph
 from xslim.xslim_setting import XSlimSettingFactory
 
 
@@ -27,6 +30,35 @@ def floating_model():
                                helper.make_tensor_value_info("side.out", TensorProto.FLOAT, [1, 4])],
                               [numpy_helper.from_array(np.eye(4, dtype=np.float32), "weight")])
     return helper.make_model(graph, opset_imports=[helper.make_opsetid("", 18)], ir_version=10)
+
+
+def activation_model(kind):
+    nodes = [helper.make_node("MatMul", ["x", "w"], ["mid"], name="mm"),
+             helper.make_node(kind, ["mid"], ["y"], name="act")]
+    graph = helper.make_graph(nodes, "activation-plan",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 2])],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 2])],
+        [numpy_helper.from_array(np.eye(2, dtype=np.float32), "w")])
+    return helper.make_model(graph, opset_imports=[helper.make_opsetid("", 18)], ir_version=9)
+
+
+def quantized_activation(kind, strategy, level=0):
+    source = activation_model(kind)
+    graph = OnnxParser().build(copy.deepcopy(source))
+    GraphLegalized(graph)()
+    graph = dispatch_graph(graph)
+    setting = XSlimSettingFactory.from_json({
+        "strategy_parameters": strategy,
+        "quantization_parameters": {"precision_level": level},
+        "calibration_parameters": {"calibration_device": "cpu", "calibration_type": "minmax",
+            "calibration_step": 10,
+            "input_parameters": [{"input_name": "x", "input_shape": [1, 2], "file_type": "npy"}]}})
+    quantizer = XSlimQuantizer(graph)
+    batches = [{"x": torch.tensor([[0.33, -0.71]])} for _ in range(10)]
+    quantizer.quantize(inputs=batches[0], calib_dataloader=batches,
+        executor=TorchExecutor(graph=graph, device="cpu"), xslim_setting=setting,
+        calib_steps=10, collate_fn=lambda batch: batch, precision_source_model=source)
+    return quantizer.precision_plan, quantizer._graph
 
 
 class PrecisionPlanTests(unittest.TestCase):
@@ -125,6 +157,98 @@ class PrecisionPlanTests(unittest.TestCase):
 
 
 class PrecisionExportTests(unittest.TestCase):
+
+    def test_real_fusion_internal_activation_provenance(self):
+        plan, graph = quantized_activation("Relu", {"default_precision": "int8"})
+        record_quantized_layout(plan, graph)
+        exported = ONNXRUNTIMExporter().export(graph, remove_activation=False)
+        self.assertTrue(any(group["members"] == ["act", "mm"] for group in plan.groups))
+        self.assertFalse(any(socket["side"] == "input" and socket["index"] == 0
+                             for socket in plan.decisions["act"].quantized_activation_sockets))
+        self.assertTrue(validate_export_layout(plan, exported)["verified"])
+        sample = {"x": np.array([[0.33, -0.71]], dtype=np.float32)}
+        good = ort.InferenceSession(exported.SerializeToString(), providers=["CPUExecutionProvider"])
+        expected = good.run(None, sample)[0]
+        for reroute in ("graph_input", "other_producer"):
+            with self.subTest(reroute=reroute):
+                bad = copy.deepcopy(exported)
+                if reroute == "graph_input":
+                    bad.graph.input.append(helper.make_tensor_value_info("other", TensorProto.FLOAT, [1, 2]))
+                    feeds = {**sample, "other": np.array([[-1., 1.]], dtype=np.float32)}
+                else:
+                    # A legal same-shape branch must not substitute for the fused producer.
+                    bad.graph.node.insert(0, helper.make_node("Neg", ["x"], ["other"], name="other_branch"))
+                    feeds = sample
+                next(node for node in bad.graph.node if node.name == "act").input[0] = "other"
+                onnx.checker.check_model(bad, full_check=True)
+                session = ort.InferenceSession(bad.SerializeToString(), providers=["CPUExecutionProvider"])
+                self.assertFalse(np.allclose(expected, session.run(None, feeds)[0]))
+                with self.assertRaisesRegex(ValueError, "activation provenance"):
+                    validate_export_layout(plan, bad)
+
+    def test_real_refinement_respects_effective_allowed_precisions(self):
+        plan, graph = quantized_activation("Sigmoid", {"allowed_precisions": ["int8"]}, level=2)
+        self.assertEqual(plan.decisions["act"].precision, "int8")
+        with self.assertRaisesRegex(ValueError, "allowed_precisions"):
+            record_quantized_layout(plan, graph)
+        self.assertFalse(plan.layout_recorded)
+        self.assertEqual(plan.decisions["act"].precision, "int8")
+
+        plan, graph = quantized_activation("Sigmoid", {"allowed_precisions": ["int8", "fp32"],
+                                                     "node_precisions": {"mm": "int8"}}, level=2)
+        record_quantized_layout(plan, graph)
+        self.assertEqual(plan.decisions["act"].planned_precision, "int8")
+        self.assertEqual(plan.decisions["act"].precision, "fp32")
+        exported = ONNXRUNTIMExporter().export(graph, remove_activation=False)
+        self.assertTrue(validate_export_layout(plan, exported)["verified"])
+        # A restored plan with a narrower allowed set must also fail at validation.
+        restricted = copy.deepcopy(plan)
+        restricted.allowed_precisions = ["int8"]
+        with self.assertRaisesRegex(ValueError, "allowed_precisions"):
+            validate_export_layout(restricted, exported)
+
+        forced, graph = quantized_activation("Sigmoid", {"allowed_precisions": ["int8"],
+                                                       "default_precision": "int8"}, level=2)
+        record_quantized_layout(forced, graph)
+        self.assertTrue(all(decision.precision == "int8" for decision in forced.decisions.values()))
+        exported = ONNXRUNTIMExporter().export(graph, remove_activation=False)
+        self.assertTrue(validate_export_layout(forced, exported)["verified"])
+
+    def test_real_auto_int8_only_groups_cannot_promote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(19)
+            paths = []
+            for index in range(10):
+                path = root / f"{index}.npy"
+                np.save(path, rng.uniform(0.1, 1.5, size=(1, 2)).astype(np.float32))
+                paths.append(str(path))
+            (root / "data.list").write_text("\n".join(paths))
+            config = {
+                "model_parameters": {"working_dir": str(root), "output_prefix": "int8-only",
+                                     "skip_onnxsim": True, "opset": 18},
+                "calibration_parameters": {"calibration_device": "cpu", "calibration_type": "minmax",
+                    "calibration_step": 10, "input_parameters": [{"input_name": "x", "input_shape": [1, 2],
+                        "file_type": "npy", "data_list_path": str(root / "data.list")}]},
+                "quantization_parameters": {"precision_level": 0, "finetune_level": 0, "analysis_enable": False},
+                "strategy_parameters": {"mode": "auto_mixed", "allowed_precisions": ["int8"],
+                    "max_trials": 6, "max_adjust_groups": 3, "cosine_similarity_min": 1.0, "score_steps": 4}}
+            xslim.quantize_onnx_model(config, activation_model("Relu"))
+            report = json.loads((root / "int8-only_auto_mixed_report.json").read_text())
+            self.assertTrue(report["final_check"]["verified"], report)
+            self.assertEqual(report["stop_reason"], "no_improvement")
+            self.assertEqual(report["adjusted_groups"], [])
+            self.assertEqual([attempt["purpose"] for attempt in report["attempts"]], ["baseline", "final"])
+            self.assertTrue(report["plan"]["groups"])
+            self.assertTrue(all(not group["promotable"] for group in report["plan"]["groups"]))
+            self.assertTrue(all(d["precision"] == "int8" for d in report["plan"]["decisions"].values()))
+            from xslim.candidate_runner import plan_from_dict
+            plan = plan_from_dict(report["plan"])
+            with self.assertRaisesRegex(ValueError, "allowed_precisions"):
+                plan.promote_group(plan.groups[0]["id"])
+            derived = plan.with_precisions({})
+            self.assertTrue(all(not group["promotable"] for group in derived.groups))
+
     def test_real_mixed_export_metadata_report_and_tamper(self):
         model = floating_model()
         helper.set_model_props(model, {"parent-acceptance": "2026-11-17", "xslim_version": "source-version"})

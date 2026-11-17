@@ -270,6 +270,7 @@ def apply_precision_plan(plan, graph, target_platform):
 
 def record_quantized_layout(plan, graph):
     """Capture actual tensor quantization domains BEFORE the mutating exporter."""
+    plan.layout_recorded = False
     roots = {}
     for name, decision in plan.decisions.items():
         operation = graph.operations.get(name)
@@ -297,6 +298,7 @@ def record_quantized_layout(plan, graph):
                     "scale": config.scale.detach().cpu().numpy().tolist(),
                     "zero_point": config.offset.detach().cpu().numpy().tolist()})
         actual = "int8" if active else "fp32"
+        _check_precision(actual, plan.allowed_precisions)
         if actual != decision.precision:
             if decision.requested_precision is not None or decision.locked:
                 raise ValueError(f"Requested precision for {name!r} is {decision.precision}, actual PPQ state is {actual}.")
@@ -345,6 +347,8 @@ def validate_export_layout(plan, exported_model):
     """Verify actual QDQ wiring; return a JSON-safe coverage report or fail closed."""
     if not plan.layout_recorded:
         raise ValueError("QDQ evidence not recorded; call record_quantized_layout before exporting.")
+    for decision in plan.decisions.values():
+        _check_precision(decision.precision, plan.allowed_precisions)
     onnx.checker.check_model(exported_model, full_check=True)
     inferred = onnx.shape_inference.infer_shapes(exported_model, strict_mode=True, check_type=True)
     shapes = {value.name: [dim.dim_value if dim.HasField("dim_value") else None
@@ -402,10 +406,43 @@ def validate_export_layout(plan, exported_model):
         if candidate.op_type in {"QuantizeLinear", "DequantizeLinear"} and not valid_qdq(candidate):
             raise ValueError(f"Invalid QDQ scale, zero point or axis/channel layout at {candidate.name!r}.")
 
+    expected_producers = {tensor: (name, index) for name, decision in plan.decisions.items()
+                          for index, tensor in enumerate(decision.outputs) if tensor}
+
+    def activation_origin(tensor):
+        """Trace only validated QDQ pairs to an exact producer socket or external tensor.
+
+        Internal fused edges have no QDQ of their own, but must retain the same
+        producer and output index. Other wrappers require explicit validation.
+        """
+        visited = set()
+        while tensor not in visited:
+            visited.add(tensor)
+            producer = producers.get(tensor)
+            if producer is None:
+                return (None, tensor)
+            if producer.name in plan.decisions:
+                return (producer.name, list(producer.output).index(tensor))
+            if producer.op_type != "DequantizeLinear" or not valid_qdq(producer):
+                return (producer.name, list(producer.output).index(tensor))
+            quantize = producers.get(producer.input[0])
+            if quantize is None or quantize.op_type != "QuantizeLinear" or not valid_qdq(quantize):
+                return (producer.name, list(producer.output).index(tensor))
+            tensor = quantize.input[0]
+        raise ValueError("Cycle in exported activation provenance.")
+
     for name, decision in plan.decisions.items():
         node = by_name.get(name)
         if node is None or node.op_type != decision.op_type:
             raise ValueError(f"Planned node {name!r} missing or changed in actual exported layout.")
+        if len(node.input) != len(decision.inputs) or len(node.output) != len(decision.outputs):
+            raise ValueError(f"Planned node {name!r} changed input/output socket counts.")
+        for index, original in enumerate(decision.inputs):
+            if index in decision.parameter_inputs:
+                continue
+            expected = expected_producers.get(original, (None, original))
+            if activation_origin(node.input[index]) != expected:
+                raise ValueError(f"Node {name!r} input socket {index} changed activation provenance.")
         nearby = [producers[tensor] for tensor in node.input if tensor in producers]
         nearby.extend(child for tensor in node.output for child in consumers.get(tensor, []))
         qdq = [candidate.name for candidate in nearby if valid_qdq(candidate)]
