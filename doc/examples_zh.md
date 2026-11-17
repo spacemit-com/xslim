@@ -431,3 +431,22 @@ python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/hea
 
 转换在 ONNX 输出旁生成 `<output_prefix>_precision_report.json`，可检查原名映射、
 实际分组/共享域、socket 证据及覆盖率；任务精度仍需用有代表性的独立评估数据验证。
+
+## 自动静态混合精度
+
+在具有真实校准数据的静态配置中加入以下顶层字段：
+
+```json
+"strategy_parameters": {
+  "mode": "auto_mixed",
+  "node_precisions": {"encoder.matmul": "int8"},
+  "score_steps": 8,
+  "max_trials": 8,
+  "max_adjust_groups": 1,
+  "max_time_s": 600,
+  "cosine_similarity_min": 0.9999
+}
+```
+
+将示例节点名替换为原模型节点名；该节点保持 INT8 锁定，其他合法组可被提升为 FP32。
+使用选中导出前，请检查独立的 `<output_prefix>_final_check.json`。

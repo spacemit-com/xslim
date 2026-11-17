@@ -352,7 +352,7 @@ The optional top-level `strategy_parameters` uses `mode: "standard"`. Defaults a
 keep legacy dispatch unchanged. Changing allowed precisions also enables validation;
 implicit decisions outside that list fail. Active strategies require static precision
 levels 0–2. FP16 is accepted in the precision vocabulary but execution requests fail
-until an FP16 export capability is available. Other modes are currently unsupported.
+until an FP16 export capability is available. `auto_mixed` is described below; other modes are currently unsupported.
 
 Rules use `{"selector":"node","names":["head"],"precision":"fp32"}`,
 `{"selector":"type","op_types":["MatMul"],"precision":"int8"}`, or
@@ -368,3 +368,42 @@ After prequantization, mapping requires matching operator type and output tensor
 renames are recorded, and missing or ambiguous selected targets fail. Skip-simplify
 does not guarantee name preservation. A global INT8 default applies only to supported
 data operators. Explicit unsupported INT8 targets fail.
+
+### Automatic mixed precision (static only)
+
+Set `strategy_parameters.mode` to `"auto_mixed"` to promote unlocked atomic INT8
+groups to FP32 using real exported QDQ models and ONNX Runtime outputs. The default
+mode remains `"standard"`. Existing rules and locks apply to the initial legal plan.
+
+| Flat strategy field | Default | Validation / meaning |
+|---|---|---|
+| `score_steps` | `8` | Positive integer; maximum scoring batches |
+| `max_trials` | `8` | Positive integer; total full conversions, including baseline, failed attempts and final check |
+| `max_adjust_groups` | `2` | Nonnegative integer; maximum accepted group promotions |
+| `max_time_s` | `600.0` | Finite positive number; includes preparation, hashing, calibration and scoring |
+| `cosine_similarity_min` | `0.9999` | Finite number in `[-1, 1]`; early-stop target |
+
+Booleans are rejected for these numeric fields. Every input must provide real
+`data_list_path` data; implicit zero inputs are rejected. The same frozen,
+preprocessed batches score the original float model and each candidate. Zero norms,
+nonfinite values, empty outputs and shape mismatches invalidate metrics.
+
+Candidate enumeration reserves one full conversion for an independent final export.
+Synchronous preparation/conversion may finish after the time limit; no new candidate
+starts after the deadline, and `time_overrun` records this. Cache hits do not consume
+conversion budget. Reusing `<output_prefix>_candidates` resumes counts and elapsed
+work; a changed model/config/data/runtime context requires a new work directory or
+output prefix. Identity includes preprocessing file contents, raw samples, processed
+batches, source model and effective precision/calibration/explicit-INT8 semantics.
+
+Outputs include `<output_prefix>_auto_mixed_report.json` and the independent
+`<output_prefix>_final_check.json`, with metrics, hashes, layout evidence, conversion
+counts, stop and fallback reasons. Final outputs must match the selected candidate
+with `rtol=1e-5`, `atol=1e-6`. When selection or final verification fails, the original
+legal baseline artifact is retained; a missing/failed final check is never marked
+verified. Active strategies currently reject models of 2 GB or larger and scoring
+that requires truncated-model inputs. They do not switch to another strategy.
+
+When the Python API receives a model path override, its default output name is
+`<input_stem>.q.onnx`. An output resolving to the input file (including a symlink
+or hardlink alias) is rejected before conversion.

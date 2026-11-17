@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2023 SpacemiT. All rights reserved.
 import copy
+import math
 import json
 import os
 from enum import Enum
@@ -274,6 +275,11 @@ class StrategyParameterSetting(SettingSerialize):
         self.node_precisions = {}
         self.op_type_precisions = {}
         self.rules = []
+        self.score_steps = 8
+        self.max_trials = 8
+        self.max_adjust_groups = 2
+        self.max_time_s = 600.0
+        self.cosine_similarity_min = 0.9999
 
     @property
     def active(self):
@@ -282,8 +288,21 @@ class StrategyParameterSetting(SettingSerialize):
                 or bool(self.node_precisions or self.op_type_precisions or self.rules))
 
     def check(self, qsetting):
-        if self.mode != "standard":
+        if self.mode not in {"standard", "auto_mixed"}:
             raise NotImplementedError(f"Strategy mode {self.mode!r} is not supported.")
+        for name in ("score_steps", "max_trials", "max_adjust_groups"):
+            value = getattr(self, name)
+            minimum = 0 if name == "max_adjust_groups" else 1
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ValueError(f"{name} must be an integer >= {minimum}.")
+        for name in ("max_time_s", "cosine_similarity_min"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"{name} must be finite numeric.")
+        if self.max_time_s <= 0:
+            raise ValueError("max_time_s must be positive.")
+        if not -1 <= self.cosine_similarity_min <= 1:
+            raise ValueError("cosine_similarity_min must be in [-1, 1].")
         allowed = self.allowed_precisions
         if (not isinstance(allowed, list) or not allowed
                 or any(not isinstance(p, str) or p not in {"int8", "fp32", "fp16"} for p in allowed)

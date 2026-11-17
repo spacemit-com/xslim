@@ -21,6 +21,7 @@
 
 ## Features
 
+- **Automatic mixed precision** — Budgeted static INT8→FP32 group selection using real QDQ/ORT outputs and an independent final check; see [configuration](doc/configuration.md).
 - **INT8 / FP16 / Dynamic Quantization** – multiple precision levels for different deployment scenarios
 - **JSON-driven configuration** – simple, declarative quantization setup
 - **Operator precision rules** – select static INT8 or FP32 by operation name with wildcard patterns; see [configuration](doc/configuration.md#operator-quantization-rules-static-int8)

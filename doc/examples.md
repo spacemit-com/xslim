@@ -436,3 +436,23 @@ an original node name present in your model:
 Conversion writes `<output_prefix>_precision_report.json` next to the ONNX output.
 Inspect mapping, effective groups/domains, socket evidence and coverage; evaluate
 accuracy independently on representative held-out data.
+
+## Automatic static mixed precision
+
+Add this top-level block to a static configuration with real calibration data:
+
+```json
+"strategy_parameters": {
+  "mode": "auto_mixed",
+  "node_precisions": {"encoder.matmul": "int8"},
+  "score_steps": 8,
+  "max_trials": 8,
+  "max_adjust_groups": 1,
+  "max_time_s": 600,
+  "cosine_similarity_min": 0.9999
+}
+```
+
+Replace the example node name with an original model node; it remains locked INT8.
+Other eligible groups may be promoted to FP32. Check the independent
+`<output_prefix>_final_check.json` before relying on the selected export.

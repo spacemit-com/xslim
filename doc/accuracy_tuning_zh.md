@@ -508,3 +508,18 @@ standard 策略在 prequant 后、逐算子量化前构建并应用可复用的�
 导出报告检查实际激活 socket、整数权重 DQ、有限正 scale、逐通道 axis 及
 ONNX full check；FP32 节点保留自身 socket。覆盖率按优化后实际算子计数，
 另报原始节点映射数和未映射数。布局通过只证明导出契约，不能证明任务精度或硬件延迟。
+
+## 自动混合精度选择
+
+`calibration_type: "auto"` 只选择 minmax、percentile、MSE 或 KL 校准算法，不选择
+算子精度。自动静态 INT8→FP32 选择使用 `strategy_parameters.mode: "auto_mixed"`。
+策略基于当前最佳组合逐一评估未锁定组的提升，接受后重新评估组合，而不是只做一次
+孤立组排名。只有按输出元素加权的 MSE 严格降低、且所有输出与批次的最小 cosine
+不降低才接受候选。达到 cosine 目标或组数、转换次数、时间预算后停止；无改善时保留
+原始合法基线。
+
+每次缓存未命中均从不可变浮点源独立构建真实 QDQ 导出，复用冻结校准输入，以可靠性
+优先。最终导出另行重建并做数值复核。请同时检查 `*_auto_mixed_report.json` 与
+`*_final_check.json`；`verified` 和 `target_met` 含义不同。输出一致性指标不能替代
+代表性留出集上的任务评估。即使阈值宽松，零范数或非有限输出也不能通过。
+参数见[配置文档](configuration_zh.md)。

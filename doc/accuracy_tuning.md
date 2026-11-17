@@ -518,3 +518,22 @@ positive scales, per-channel axes and ONNX full checks. FP32 targets retain thei
 own sockets. Coverage counts effective optimized operations, with source mapping
 and unmapped-source counts reported separately. Layout verification proves an
 export contract, not task accuracy or hardware latency.
+
+## Automatic mixed-precision selection
+
+`calibration_type: "auto"` selects a calibration algorithm (minmax, percentile,
+MSE or KL); it does not select operator precision. Use
+`strategy_parameters.mode: "auto_mixed"` for automatic static INT8-to-FP32 selection.
+The strategy evaluates each unlocked group promotion against the current best
+combination and repeats, rather than ranking isolated groups once. It accepts a
+strictly lower element-weighted output MSE only when minimum per-output/per-batch
+cosine does not decrease. It stops at the cosine target or an adjustment, conversion
+or time budget. No improvement keeps the original legal baseline.
+
+Scoring uses real QDQ exports, independently rebuilt from an immutable float source
+with the same frozen calibration inputs; this prioritizes reliability over speed.
+The final export is rebuilt and numerically checked independently. Inspect both
+`*_auto_mixed_report.json` and `*_final_check.json`; `verified` and `target_met` are
+separate. These output-consistency metrics do not replace task validation on a
+representative held-out dataset. Zero-norm or nonfinite outputs cannot pass, even
+with a permissive cosine threshold. See [configuration](configuration.md).

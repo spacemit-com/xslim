@@ -130,6 +130,7 @@ def quantize_onnx_model(
         onnx.ModelProto: output model onnx proto
     """
     time_start = time.time()
+    monotonic_start = time.monotonic()
     config_setting = parse_xslim_config(path_or_config)
 
     model_path = config_setting.model_parameters.onnx_model
@@ -142,7 +143,7 @@ def quantize_onnx_model(
             model_path = input_onnx_model_or_path
             config_setting.model_parameters.output_prefix = os.path.splitext(
                 os.path.basename(input_onnx_model_or_path)
-            )[0]
+            )[0] + ".q"
         else:
             raise RuntimeError("input_onnx_model_or_path set error.")
 
@@ -164,6 +165,13 @@ def quantize_onnx_model(
     calibration_step = config_setting.calibration_parameters.calibration_step
     calibration_device = config_setting.calibration_parameters.calibration_device
 
+    # Never overwrite the float source, including aliases through symlinks/hardlinks.
+    if isinstance(model_path, (str, os.PathLike)):
+        destination = os.path.join(working_dir, output_prefix + ".onnx")
+        same_path = os.path.normcase(os.path.realpath(destination)) == os.path.normcase(os.path.realpath(model_path))
+        if same_path or (os.path.exists(destination) and os.path.samefile(model_path, destination)):
+            raise ValueError("Output model path must differ from the input model path.")
+
     if not os.path.exists(working_dir):
         logger.info("{} not existed and make new one.".format(working_dir))
         os.makedirs(working_dir)
@@ -174,6 +182,11 @@ def quantize_onnx_model(
         ori_onnx_model = onnx.load(model_path)
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
+
+    if config_setting.strategy_parameters.mode == "auto_mixed":
+        from .auto_mixed import run_auto_mixed
+        _check_static_quantization_input_model(ori_onnx_model)
+        return run_auto_mixed(ori_onnx_model, config_setting, started_at=monotonic_start)
 
     precision_source_model = (copy.deepcopy(ori_onnx_model)
                               if config_setting.strategy_parameters.active else None)
@@ -317,3 +330,68 @@ def quantize_onnx_model(
 
     logger.info("quantization eplased time {:.2f} s".format(time.time() - time_start))
     return quant_onnx_model
+
+
+def _convert_precision_candidate(original_model, config_setting, precision_plan, batches, output_path,
+                                 *, post_qdq_hook=None):
+    """One independent float-to-QDQ conversion, without recursive strategy dispatch."""
+    ori_onnx_model = original_model
+    precision_source_model = copy.deepcopy(original_model)
+    model_path = copy.deepcopy(original_model)
+    target_onnx_opset = config_setting.model_parameters.opset
+    calibration_step = config_setting.calibration_parameters.calibration_step
+    calibration_device = config_setting.calibration_parameters.calibration_device
+    _check_static_quantization_input_model(ori_onnx_model)
+    ppq_ir, truncate_left_graph, truncate_vars, saved_functions = xslim_load_onnx_graph(
+        model_path,
+        not config_setting.model_parameters.skip_onnxsim,
+        config_setting.quantization_parameters.truncate_var_names,
+        target_onnx_opset,
+    )
+
+    GraphLegalized(ppq_ir)()
+
+    ppq_ir = dispatch_graph(graph=ppq_ir, dispatcher="conservative")
+
+    config_setting.calibration_parameters.check_input_parameters(ppq_ir)
+    input_parameters = config_setting.calibration_parameters.input_parameters
+
+    quantizer = XSlimQuantizer(ppq_ir)
+    executor = TorchExecutor(graph=quantizer._graph, device=calibration_device)
+    calib_dataloader = [{name: torch.from_numpy(value.copy()).to(calibration_device)
+                         for name, value in batch.items()} for batch in batches]
+    def collate_fn(batch):
+        return {name: value.clone() for name, value in batch.items()}
+    dummy_input = collate_fn(calib_dataloader[0])
+    quantizer.quantize(
+        inputs=dummy_input,
+        calib_dataloader=calib_dataloader,
+        executor=executor,
+        xslim_setting=config_setting,
+        calib_steps=calibration_step,
+        collate_fn=collate_fn,
+        precision_source_model=precision_source_model,
+        precision_plan=precision_plan,
+    )
+
+    if quantizer.precision_plan is None:
+        raise RuntimeError("Candidate conversion requires an active precision plan.")
+    record_quantized_layout(quantizer.precision_plan, quantizer._graph)
+    quant_onnx_model = ONNXRUNTIMExporter().export(quantizer._graph, remove_activation=False)
+    quant_onnx_model = merge_onnx_model(quant_onnx_model, truncate_left_graph, truncate_vars)
+    for function_proto in saved_functions:
+        if not any(f.domain == function_proto.domain and f.name == function_proto.name
+                   for f in quant_onnx_model.functions):
+            quant_onnx_model.functions.append(function_proto)
+    metadata = {entry.key: entry.value for entry in quant_onnx_model.metadata_props}
+    metadata.update({entry.key: entry.value for entry in ori_onnx_model.metadata_props
+                     if entry.key not in {"xslim_export_time", "xslim_version"}})
+    onnx.helper.set_model_props(quant_onnx_model, metadata)
+    quant_onnx_model.ir_version = max(9, ori_onnx_model.ir_version)
+    if post_qdq_hook is not None:
+        quant_onnx_model = post_qdq_hook(quant_onnx_model, plan=quantizer.precision_plan)
+    if is_large_model(quant_onnx_model):
+        raise ValueError("Precision candidate execution does not support models >= 2GB.")
+    report = validate_export_layout(quantizer.precision_plan, quant_onnx_model)
+    onnx.save(quant_onnx_model, output_path)
+    return quant_onnx_model, quantizer.precision_plan, report
