@@ -456,3 +456,61 @@ Add this top-level block to a static configuration with real calibration data:
 Replace the example node name with an original model node; it remains locked INT8.
 Other eligible groups may be promoted to FP32. Check the independent
 `<output_prefix>_final_check.json` before relying on the selected export.
+
+
+### Real task search and deployment measurement
+
+Supply your own evaluator object; no built-in toy metric can stand in for a task
+metric. It must expose `metric_name`, `higher_is_better`, `direction`,
+`preprocessing_version`, `postprocessing_version`, `tuning_data_id`,
+`validation_data_id`, `fingerprint` and `evaluate(model, *, split)`.
+The caller must keep tuning/validation data disjoint and freeze data and processing
+identities. See [the exact schema](configuration.md#task-metric-search-and-backend-evidence).
+
+```python
+import xslim
+from xslim.search_strategy import build_measurement_request
+
+# Reuse the same real task evaluator for the float reference and every candidate.
+# evaluate(model, *, split) returns {"metric": value_in_0_to_1, "sample_count": n}.
+# Required identity attributes are listed in configuration.md.
+config["strategy_parameters"] = {
+    "mode": "search", "default_precision": "int8",
+    "allowed_precisions": ["int8", "fp32", "fp16"],
+    "node_precisions": {"encoder.matmul": "int8"},
+    "search": {"objective": "min_error", "max_metric_drop": 0.01,
+               "max_full_trials": 8, "max_time_s": 600}
+}
+result = xslim.quantize_onnx_model(config, "float.onnx", "out/search.onnx",
+                                   evaluator=task_evaluator)
+```
+
+To minimize deployment latency, set `search.objective = "min_latency"`, populate
+`search.backend` with hardware/runtime/protocol descriptors, then provide either
+`measurement_callback` or `measurement_file`:
+
+```python
+def measure_on_device(model, *, request):
+    # Deploy THIS model, execute the declared protocol, return actual measurements.
+    # Do not substitute local export time or model file size.
+    latency_ms, peak_memory_bytes = run_declared_device_protocol(model, request)
+    return {"schema_version": 1, "identity": request["identity"],
+            "metrics": {"latency_ms": latency_ms, "peak_memory_bytes": peak_memory_bytes}}
+
+result = xslim.quantize_onnx_model(config, "float.onnx", "out/search.onnx",
+    evaluator=task_evaluator, measurement_callback=measure_on_device)
+```
+
+Offline files contain `{"schema_version": 1, "records": [record, ...]}` using
+exactly the same record format. Create the identity with
+`build_measurement_request(model, plan_or_plan_dict, effective_config)` and store
+the record for that exact artifact. Model, plan, config, hardware, runtime and
+protocol must all match. Only volatile export-time metadata is excluded from the
+model fingerprint; unrelated protobuf ordering is not canonicalized. A fresh final
+artifact can require its own record. Callback measurements are taken again for the
+final artifact. Missing/mismatched evidence yields pending, never a performance claim.
+
+For fixed local FP16 without search, retain `mode: "standard"`, allow `fp16`, and
+select complete nodes/groups using `node_precisions` or existing rules. Inspect the
+precision report's actual FP16 coverage, public IO and QDQ evidence. Unsupported
+conversion boundaries fail explicitly; see the configuration capability limits.

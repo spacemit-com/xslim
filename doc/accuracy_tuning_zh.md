@@ -523,3 +523,15 @@ ONNX full check；FP32 节点保留自身 socket。覆盖率按优化后实际�
 `*_final_check.json`；`verified` 和 `target_met` 含义不同。输出一致性指标不能替代
 代表性留出集上的任务评估。即使阈值宽松，零范数或非有限输出也不能通过。
 参数见[配置文档](configuration_zh.md)。
+
+
+### 任务级搜索验收
+
+当输出余弦相似度不能代表业务任务指标时，使用 `mode="search"` 与真实 evaluator。
+搜索前冻结前后处理及 tuning 身份，并保留独立 validation 数据。
+`max_metric_drop` 是有界任务指标的绝对差。仅在最终选型冻结后调用 validation，
+包括失败在内的验证结果均不回流候选选择。检查结构化报告中的 `task_metric`、
+`validation`、`backend`、`final_check`、覆盖分母及回退原因。任务质量与部署性能
+独立：`min_error` 可通过而可选板端测量仍 pending；后端目标必须匹配最终数值产物
+的真实测量证据才可通过。局部 FP16 另有真实 dtype/checker/ORT 正确性门禁，其通过
+不代表业务精度或提速。完整 evaluator/measurement 协议见配置和示例文档。

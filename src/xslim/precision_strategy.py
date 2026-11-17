@@ -83,6 +83,8 @@ class PrecisionPlan:
             precisions = {result.decisions[name].precision for name in group["members"]}
             if len(precisions) != 1:
                 raise ValueError(f"Incomplete precision override for shared group {group['id']}.")
+            if group.get("locked") and next(iter(precisions)) != group["precision"]:
+                raise ValueError(f"Cannot change locked precision group {group['id']!r}.")
             group["precision"] = next(iter(precisions))
             group["promotable"] = (not group["locked"] and group["precision"] == "int8"
                                    and "fp32" in result.allowed_precisions)
@@ -98,9 +100,7 @@ class PrecisionPlan:
 def _check_precision(precision, allowed):
     if precision not in allowed:
         raise ValueError(f"Precision {precision!r} is not in allowed_precisions {allowed!r}.")
-    if precision == "fp16":
-        raise NotImplementedError("Mixed FP16 requires an execution/export capability; unavailable in standard strategy.")
-    if precision not in {"int8", "fp32"}:
+    if precision not in {"int8", "fp32", "fp16"}:
         raise ValueError(f"Unsupported precision {precision!r}.")
 
 
@@ -298,8 +298,10 @@ def record_quantized_layout(plan, graph):
                     "scale": config.scale.detach().cpu().numpy().tolist(),
                     "zero_point": config.offset.detach().cpu().numpy().tolist()})
         actual = "int8" if active else "fp32"
-        _check_precision(actual, plan.allowed_precisions)
-        if actual != decision.precision:
+        staged_fp16 = decision.precision == "fp16" and actual == "fp32"
+        if not staged_fp16:
+            _check_precision(actual, plan.allowed_precisions)
+        if actual != decision.precision and not staged_fp16:
             if decision.requested_precision is not None or decision.locked:
                 raise ValueError(f"Requested precision for {name!r} is {decision.precision}, actual PPQ state is {actual}.")
             decision.precision = actual
@@ -313,6 +315,16 @@ def record_quantized_layout(plan, graph):
             parent[name] = parent[parent[name]]
             name = parent[name]
         return name
+
+    # Export staging may remove physical INT8 domains; inherited fusion remains
+    # an atomic precision constraint even when the whole group becomes FP16/FP32.
+    inherited_groups = copy.deepcopy(plan.groups)
+    for group in inherited_groups:
+        members = group["members"]
+        if not members or any(name not in parent for name in members):
+            raise ValueError("Inherited precision group has missing members.")
+        for name in members[1:]:
+            parent[find(name)] = find(members[0])
 
     domains = []
     for sockets in roots.values():
@@ -334,11 +346,15 @@ def record_quantized_layout(plan, graph):
         if len(precisions) != 1:
             raise ValueError(f"Conflicting user precisions in fused quantization group {members}.")
         group_id = "pg_" + hashlib.sha256(json.dumps(members).encode()).hexdigest()[:16]
-        locked = any(plan.decisions[name].locked for name in members)
+        inherited = [group for group in inherited_groups if set(group["members"]) & set(members)]
+        locked = (any(plan.decisions[name].locked for name in members)
+                  or any(group.get("locked", False) for group in inherited))
+        inherited_reasons = {reason for group in inherited for reason in group.get("reasons", [])}
         precision = next(iter(precisions))
         groups.append({"id": group_id, "members": members, "precision": precision, "locked": locked,
                        "promotable": not locked and precision == "int8" and "fp32" in plan.allowed_precisions,
-                       "reasons": sorted({reason for name in members for reason in plan.decisions[name].reasons})})
+                       "reasons": sorted(inherited_reasons | {
+                           reason for name in members for reason in plan.decisions[name].reasons})})
     plan.groups = sorted(groups, key=lambda group: group["id"])
     plan.layout_recorded = True
 
@@ -354,6 +370,10 @@ def validate_export_layout(plan, exported_model):
     shapes = {value.name: [dim.dim_value if dim.HasField("dim_value") else None
                            for dim in value.type.tensor_type.shape.dim]
               for value in [*inferred.graph.input, *inferred.graph.output, *inferred.graph.value_info]}
+    types = {v.name: v.type.tensor_type.elem_type for v in
+             [*inferred.graph.input, *inferred.graph.output, *inferred.graph.value_info]}
+    types.update({t.name: t.data_type for t in inferred.graph.initializer})
+    has_fp16 = any(d.precision == "fp16" for d in plan.decisions.values())
     nodes = list(exported_model.graph.node)
     by_name = {}
     for node in nodes:
@@ -409,25 +429,55 @@ def validate_export_layout(plan, exported_model):
     expected_producers = {tensor: (name, index) for name, decision in plan.decisions.items()
                           for index, tensor in enumerate(decision.outputs) if tensor}
 
-    def activation_origin(tensor):
+    def activation_origin(tensor, *, require_output_qdq=False):
         """Trace only validated QDQ pairs to an exact producer socket or external tensor.
 
         Internal fused edges have no QDQ of their own, but must retain the same
         producer and output index. Other wrappers require explicit validation.
         """
         visited = set()
+        traversed_pairs = []
         while tensor not in visited:
             visited.add(tensor)
             producer = producers.get(tensor)
+            if producer is not None and producer.op_type == "Cast" and has_fp16:
+                targets = [a.i for a in producer.attribute if a.name == "to"]
+                if (producer.domain or len(producer.input) != 1 or len(producer.output) != 1
+                        or len(producer.attribute) != 1 or len(targets) != 1
+                        or targets[0] not in {onnx.TensorProto.FLOAT, onnx.TensorProto.FLOAT16}
+                        or types.get(producer.input[0]) not in {onnx.TensorProto.FLOAT, onnx.TensorProto.FLOAT16}
+                        or types.get(tensor) != targets[0]):
+                    raise ValueError("Invalid FP16 Cast boundary in activation provenance.")
+                tensor = producer.input[0]
+                continue
             if producer is None:
                 return (None, tensor)
             if producer.name in plan.decisions:
-                return (producer.name, list(producer.output).index(tensor))
+                index = list(producer.output).index(tensor)
+                decision = plan.decisions[producer.name]
+                if require_output_qdq and decision.precision == "int8":
+                    for socket in decision.quantized_activation_sockets:
+                        if socket["side"] != "output" or socket["index"] != index:
+                            continue
+                        # A dangling QDQ branch proves nothing about this consumer's
+                        # numerical path. Require its exact producer-output QDQ here.
+                        matching = [q for q, _ in traversed_pairs if q.input[0] == tensor
+                            and np.asarray(socket["scale"]).shape == onnx.numpy_helper.to_array(
+                                initializers[q.input[1]]).shape
+                            and np.allclose(onnx.numpy_helper.to_array(initializers[q.input[1]]),
+                                            socket["scale"], rtol=1e-5, atol=1e-7)
+                            and np.array_equal(onnx.numpy_helper.to_array(initializers[q.input[2]]),
+                                               np.rint(socket["zero_point"]))]
+                        if not matching:
+                            raise ValueError(f"Activation path bypasses recorded output QDQ at "
+                                             f"{producer.name!r} socket {index}.")
+                return (producer.name, index)
             if producer.op_type != "DequantizeLinear" or not valid_qdq(producer):
                 return (producer.name, list(producer.output).index(tensor))
             quantize = producers.get(producer.input[0])
             if quantize is None or quantize.op_type != "QuantizeLinear" or not valid_qdq(quantize):
                 return (producer.name, list(producer.output).index(tensor))
+            traversed_pairs.append((quantize, producer))
             tensor = quantize.input[0]
         raise ValueError("Cycle in exported activation provenance.")
 
@@ -441,15 +491,27 @@ def validate_export_layout(plan, exported_model):
             if index in decision.parameter_inputs:
                 continue
             expected = expected_producers.get(original, (None, original))
-            if activation_origin(node.input[index]) != expected:
+            if activation_origin(node.input[index], require_output_qdq=True) != expected:
                 raise ValueError(f"Node {name!r} input socket {index} changed activation provenance.")
         nearby = [producers[tensor] for tensor in node.input if tensor in producers]
         nearby.extend(child for tensor in node.output for child in consumers.get(tensor, []))
         qdq = [candidate.name for candidate in nearby if valid_qdq(candidate)]
-        if decision.precision == "fp32":
-            # Neighboring INT8 nodes may have QDQ, but FP32 nodes keep their own exact sockets.
-            if list(node.input) != decision.inputs or list(node.output) != decision.outputs:
-                raise ValueError(f"FP32 node {name!r} acquired quantized sockets or changed export layout.")
+        if decision.precision in {"fp32", "fp16"}:
+            if not has_fp16:
+                if list(node.input) != decision.inputs or list(node.output) != decision.outputs:
+                    raise ValueError(f"FP32 node {name!r} acquired quantized sockets or changed export layout.")
+            else:
+                expected_type = onnx.TensorProto.FLOAT16 if decision.precision == "fp16" else onnx.TensorProto.FLOAT
+                floating = [t for t in [*node.input, *node.output]
+                            if types.get(t) in {onnx.TensorProto.FLOAT, onnx.TensorProto.FLOAT16}]
+                if not floating or any(types[t] != expected_type for t in floating):
+                    raise ValueError(f"Node {name!r} lacks actual {decision.precision} dtype evidence.")
+                for index, original in enumerate(decision.outputs):
+                    if activation_origin(original) != (name, index):
+                        raise ValueError(f"Node {name!r} changed output provenance.")
+                for index in decision.parameter_inputs:
+                    if node.input[index] != decision.inputs[index] or node.input[index] not in initializers:
+                        raise ValueError(f"Node {name!r} changed parameter provenance.")
         else:
             for socket in decision.quantized_activation_sockets:
                 side, index = socket["side"], socket["index"]
@@ -477,16 +539,10 @@ def validate_export_layout(plan, exported_model):
                         continue
                     if side == "input":
                         origin = q.input[0]
-                        source = producers.get(origin)
                         original = socket["tensor"]
-                        original_source = next((other for other in plan.decisions.values()
-                                                if original in other.outputs), None)
-                        if origin != original and not (source is not None and original_source is not None
-                                                       and source.name == original_source.node_name
-                                                       and list(source.output).index(origin)
-                                                       == original_source.outputs.index(original)):
+                        if activation_origin(origin) != expected_producers.get(original, (None, original)):
                             continue
-                    elif dq.output[0] != socket["tensor"]:
+                    elif (activation_origin(dq.output[0]) != expected_producers.get(socket["tensor"], (None, socket["tensor"]))):
                         continue
                     pairs.append([q.name, dq.name])
                 if not pairs:
@@ -499,6 +555,10 @@ def validate_export_layout(plan, exported_model):
                             onnx.TensorProto.INT8, onnx.TensorProto.UINT8, onnx.TensorProto.INT32}):
                     raise ValueError(f"INT8 node {name!r} parameter {index} lacks integer-weight DQ evidence.")
         evidence[name] = {"qdq_nodes": sorted(set(qdq)), "precision": decision.precision}
+    for output in exported_model.graph.output:
+        if output.name in expected_producers:
+            if activation_origin(output.name, require_output_qdq=True) != expected_producers[output.name]:
+                raise ValueError(f"Public output {output.name!r} changed activation provenance.")
     for name, decision in plan.decisions.items():
         if decision.precision != "int8" or evidence[name]["qdq_nodes"]:
             continue
@@ -513,7 +573,9 @@ def validate_export_layout(plan, exported_model):
     count = sum(decision.precision == "int8" for decision in plan.decisions.values())
     return {"schema_version": 1, "verified": True, "plan_fingerprint": plan.fingerprint,
             "coverage": {"optimized_nodes": total, "quantizable_nodes": capable,
-                         "int8_nodes": count, "fp32_nodes": total - count,
+                         "int8_nodes": count,
+                         "fp16_nodes": sum(d.precision == "fp16" for d in plan.decisions.values()),
+                         "fp32_nodes": sum(d.precision == "fp32" for d in plan.decisions.values()),
                          "int8_fraction_of_quantizable": count / capable if capable else 0.0,
                          "mapped_source_nodes": len(plan.source_to_optimized),
                          "unmapped_source_nodes": len(plan.unmapped_source_nodes)},

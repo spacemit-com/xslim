@@ -163,3 +163,7 @@ xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
 `remove_activation=False`；恢复 metadata/functions 后验证最终合并模型。
 `request_fingerprint` 在记录证据前后稳定，`fingerprint` 则包含当前完整证据。
 显式 INT8 请求会影响精度细化行为，候选缓存必须保留该语义差异。
+
+任务指标 `mode="search"` 与受控局部 INT8/FP32/FP16 均须显式启用。
+[配置文档](doc/configuration_zh.md)说明 evaluator 身份、独立验证、预算及板端测量
+证据。未测后端指标保持 pending，本机导出耗时不作为提速证据。

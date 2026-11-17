@@ -166,3 +166,8 @@ Validate the final merged model after metadata/functions restoration.
 `request_fingerprint` is stable across evidence recording; `fingerprint` hashes
 the complete current report state. Explicit INT8 requests force refinement behavior,
 so candidate caches must retain that semantic distinction.
+
+Task-metric `mode="search"` and controlled local INT8/FP32/FP16 plans are opt-in.
+See [configuration](doc/configuration.md) for evaluator identities, independent
+validation, bounded budgets and deployment measurement evidence. Unmeasured
+backend metrics remain pending; CPU export timings are not speedup evidence.

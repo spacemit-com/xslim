@@ -114,6 +114,7 @@ def quantize_onnx_model(
     path_or_config: Union[str, dict],
     input_onnx_model_or_path: Optional[Union[str, onnx.ModelProto]] = None,
     output_path: Optional[str] = None,
+    *, evaluator=None, measurement_callback=None, measurement_file=None,
 ) -> onnx.ModelProto:
     """
     xslim model quantize api
@@ -177,11 +178,24 @@ def quantize_onnx_model(
         os.makedirs(working_dir)
 
     if isinstance(model_path, onnx.ModelProto):
-        ori_onnx_model = model_path
+        ori_onnx_model = (copy.deepcopy(model_path)
+                          if config_setting.strategy_parameters.active else model_path)
     elif isinstance(model_path, str):
         ori_onnx_model = onnx.load(model_path)
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
+
+    if isinstance(model_path, onnx.ModelProto) and config_setting.strategy_parameters.active:
+        model_path = ori_onnx_model
+
+    if config_setting.strategy_parameters.mode == "search":
+        from .search_strategy import run_search
+        _check_static_quantization_input_model(ori_onnx_model)
+        return run_search(ori_onnx_model, config_setting, started_at=monotonic_start,
+                          evaluator=evaluator, measurement_callback=measurement_callback,
+                          measurement_file=measurement_file)
+    if any(v is not None for v in (evaluator, measurement_callback, measurement_file)):
+        raise ValueError("evaluator/measurement keywords require strategy_parameters.mode=search.")
 
     if config_setting.strategy_parameters.mode == "auto_mixed":
         from .auto_mixed import run_auto_mixed
@@ -305,6 +319,12 @@ def quantize_onnx_model(
     onnx.helper.set_model_props(quant_onnx_model, metadata)
     quant_onnx_model.ir_version = max(9, ori_onnx_model.ir_version)
     if config_setting.strategy_parameters.active:
+        from .local_fp16 import convert_local_fp16
+        fp16_batch = ({k: v.detach().cpu().numpy() for k, v in dummy_input.items()}
+                      if isinstance(dummy_input, dict) else
+                      {next(iter(quantizer._graph.inputs)): dummy_input.detach().cpu().numpy()})
+        quant_onnx_model = convert_local_fp16(quant_onnx_model, plan=quantizer.precision_plan,
+                                              batches=[fp16_batch])
         precision_report = validate_export_layout(quantizer.precision_plan, quant_onnx_model)
     _out_path = os.path.join(working_dir, "{}.onnx".format(output_prefix))
     if is_large_model(quant_onnx_model):
@@ -388,6 +408,8 @@ def _convert_precision_candidate(original_model, config_setting, precision_plan,
                      if entry.key not in {"xslim_export_time", "xslim_version"}})
     onnx.helper.set_model_props(quant_onnx_model, metadata)
     quant_onnx_model.ir_version = max(9, ori_onnx_model.ir_version)
+    from .local_fp16 import convert_local_fp16
+    quant_onnx_model = convert_local_fp16(quant_onnx_model, plan=quantizer.precision_plan, batches=batches)
     if post_qdq_hook is not None:
         quant_onnx_model = post_qdq_hook(quant_onnx_model, plan=quantizer.precision_plan)
     if is_large_model(quant_onnx_model):

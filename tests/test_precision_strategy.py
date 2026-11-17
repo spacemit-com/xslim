@@ -133,8 +133,8 @@ class PrecisionPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "static INT8"):
             XSlimSettingFactory.from_json({"strategy_parameters": {"default_precision": "fp32"},
                                           "quantization_parameters": {"precision_level": 3}})
-        with self.assertRaisesRegex(NotImplementedError, "FP16"):
-            self.plan({"allowed_precisions": ["fp16", "fp32"], "default_precision": "fp16"})
+        fp16 = self.plan({"allowed_precisions": ["fp16", "fp32"], "default_precision": "fp16"})
+        self.assertTrue(all(d.precision == "fp16" for d in fp16.decisions.values()))
         with self.assertRaisesRegex(ValueError, "allowed"):
             self.plan({"allowed_precisions": ["fp32"], "node_precisions": {"a": "int8"}})
         with self.assertRaisesRegex(ValueError, "allowed_precisions"):

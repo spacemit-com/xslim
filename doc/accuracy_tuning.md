@@ -537,3 +537,19 @@ The final export is rebuilt and numerically checked independently. Inspect both
 separate. These output-consistency metrics do not replace task validation on a
 representative held-out dataset. Zero-norm or nonfinite outputs cannot pass, even
 with a permissive cosine threshold. See [configuration](configuration.md).
+
+
+### Task-level search acceptance
+
+Use `mode="search"` with a real evaluator when output cosine similarity is not
+the task metric. Freeze preprocessing/postprocessing and tuning identities before
+search; keep validation data independent. `max_metric_drop` is an absolute
+bounded metric difference. Validation runs only after final selection and cannot
+feed back into candidate selection, including on failure. Inspect `task_metric`,
+`validation`, `backend`, `final_check`, coverage denominators and fallback reasons
+in the structured report. Task quality and deployment performance are separate:
+`min_error` can pass while optional backend measurements remain pending. A backend
+objective cannot pass without matching evidence for the final numerical artifact.
+Local FP16 has a separate true-dtype/checker/ORT sanity gate; passing it does not
+prove task accuracy or speedup. See the configuration and examples for the exact
+public evaluator and measurement protocols.

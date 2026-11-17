@@ -342,8 +342,7 @@ XSlim 2.1.0 扩展了分析与校准阶段使用的 ONNX 执行器和量化 sock
 `allowed_precisions: ["int8", "fp32"]`、`default_precision: null`、空的
 `node_precisions` / `op_type_precisions` 映射和空 `rules`。保持这些默认值时，
 原有分派行为不变。修改 allowed 列表也会启用校验，隐式决策超出列表时拒绝执行。
-启用策略仅支持静态 precision_level 0–2。schema 接受 fp16 名称，但实际请求
-必须具备 FP16 导出能力；当前阶段拒绝执行。`auto_mixed` 见下文，其他 mode 暂不支持。
+启用策略仅支持静态 precision_level 0–2。受控局部 FP16、`auto_mixed` 与 `search` 见下文，默认行为保持不变。
 
 规则形式为 `{"selector":"node","names":["head"],"precision":"fp32"}`、
 `{"selector":"type","op_types":["MatMul"],"precision":"int8"}` 或
@@ -389,3 +388,85 @@ Runtime 输出，将未锁定的原子 INT8 组提升为 FP32。默认仍为 `"s
 
 Python API 显式传入模型路径时，默认输出名为 `<input_stem>.q.onnx`。若输出解析到
 输入文件本身（含符号链接或硬链接别名），会在转换前明确拒绝，保护浮点源文件。
+
+
+### 任务指标搜索与后端度量
+
+显式设置 `strategy_parameters.mode: "search"` 后，通过 Python 增量入口
+`quantize_onnx_model(config, model_or_path, output_path, *, evaluator=...,
+measurement_callback=None, measurement_file=None)` 调用。原有位置参数、返回值及
+默认 `standard` 行为保持不变；未提供 evaluator 时明确拒绝。measurement callback
+与离线文件互斥。
+
+以下配置的完整路径均为 **`strategy_parameters.search.<字段>`**：
+
+| 字段 | 默认值 | 含义 |
+|---|---|---|
+| `objective` | `"min_error"` | 支持 `min_error`、`min_latency`、`min_memory` |
+| `max_metric_drop` | `0.01` | `[0,1]` 内、考虑方向的任务指标绝对差，不是相对百分比 |
+| `stop_on_feasible` | `true` | 找到可行候选后停止调优，但仍进行最终独立转换 |
+| `max_full_trials` | `8` | 全转换总次数，baseline、失败尝试、最终转换均计数 |
+| `max_time_s` | `600.0` | 有限正数；包括准备和外部回调的总工作耗时 |
+| `max_candidates` | `32` | 快速筛选候选计划的全局上限 |
+| `prior_full_conversion_count` | `0` | 初始已消耗次数，与恢复值取最大值 |
+| `prior_elapsed_s` | `0.0` | 初始已消耗时间，与恢复值取最大值 |
+| `backend` | `null` | 以下硬件、运行时、协议身份 |
+| `constraints` | 两项均 `null` | `max_latency_ms` 为正数，`max_memory_bytes` 为正整数 |
+
+未知 search/backend/constraints 字段或无效类型明确报错，数值字段拒绝布尔值。
+后端目标或约束必须提供 `backend`：
+
+```json
+{
+  "hardware": {"id": "board-model", "version": "revision", "options": {}},
+  "runtime": {"name": "deployment-runtime", "version": "version", "options": {}},
+  "protocol": {"id": "measurement-protocol", "version": "version", "options": {}}
+}
+```
+
+每项必须有非空身份和版本；`options` 是可选的有限 JSON 对象。协议应说明预热、
+重复次数、线程数、输入形状及峰值内存定义。XSlim 无法独立认证用户提交的测量；
+verified 仅表示用户证据身份与指标齐全且匹配。严禁用 PC 转换耗时或模型文件大小
+代替板端延迟/内存。缺失或不匹配的测量保持 `pending`，不能满足后端目标。必须同时
+提供目标指标和每个约束所需指标；已知约束超限即 `failed`，不因另一指标缺失而放行。
+
+Evaluator 协议为 `evaluate(model, *, split) -> {"metric": float,
+"sample_count": int}`。metric 必须有限且在 `[0,1]` 内；sample_count 为正整数，
+同一 split 的 float/candidate 样本数须一致。必需属性为 `metric_name`、
+`higher_is_better`（bool）、`direction`（`maximize`/`minimize`）、
+`preprocessing_version`、`postprocessing_version`、`tuning_data_id`、
+`validation_data_id`、`fingerprint`。字符串非空、split ID 不同且方向一致。
+Evaluator 负责实际数据内容，必须为 float reference 与所有候选采用相同前后处理和
+同一 tuning 数据。任一身份变化都会使任务分数缓存失效，但不会重置已消耗预算。
+CandidateRunner 冻结真实校准 batch，以及原始数据/预处理后内容身份。
+
+快速筛选使用结构暴露度启发式，对完整原子组的 FP32/FP16 晋升排序；报告明确它不是
+任务指标或板端证据。仅有限候选进行全转换，按精度/校准/显式 INT8 语义去重，并预留
+一次独立最终转换。最终检查缺失或失败时可保留合法 baseline，但绝不标 verified。
+最终模型与计划冻结后，才在独立 validation 数据上分别评估 float 与选定产物；
+validation 失败不返选、不重排、不修改计划，也不回流 tuning。
+
+`<prefix>_search_report.json`、`<prefix>_final_check.json` 与精度报告包含实际布局、
+覆盖分母、源映射、决策/锁/组、reference/tuning/validation 指标、verified/pending、
+测量拒绝原因、预算及停止/回退原因。`min_error` 的任务验证可独立成功，此时未测后端
+仍为 pending。报告旁及 `<prefix>_search_candidates` 保存恢复状态；转换上下文变化
+会失败关闭，需改工作目录/前缀。上下文绑定 FP16 源实现与 `onnxconverter-common`
+版本。数值模型指纹仅排除易变 `xslim_export_time`，保留权重、图及其余 metadata。
+同步调用不能强行中断；超时后不再启动外部回调，已开始的调用若越限会记录
+`time_overrun` 且不报成功。
+
+### 静态计划中的受控局部 FP16
+
+在 `allowed_precisions` 加入 `"fp16"`，使用现有规则选择节点/完整融合组。PPQ 阶段
+先保持这些节点为 FP32，QDQ 导出后用受控 `onnxconverter-common` node block 转换
+生成真实 FP16 计算和权重，不拼接另一条全模型 FP16 路径。公共 IO 不变；INT8 QDQ
+的 scale/zero point 与 axis/type 证据继续校验。仅允许已验证 FLOAT/FLOAT16 Cast
+边界，全部激活 socket 仍追踪到精确 producer/output index。浮点参数必须保持原始
+initializer 名称身份。继承的融合组及锁在晋升后仍保持原子性。
+
+必须通过 strict infer、完整 ONNX checker，以及相对同一个转换前 QDQ 产物的真实
+CPU ORT 检查（关闭优化，`rtol=atol=1e-3`）。搜索候选使用冻结的真实校准 batch；
+standard 模式也检查当前校准输入。这是转换正确性检查，不代表板端性能或任务质量。
+ONNX functions、subgraphs、选中共享 initializer、转换器禁用算子、不安全输出边界、
+>=2 GB 模型、infer/ORT/provenance 失败均明确报错，不降级成 fake FP16。
+W4A8、FP8 不在本接口范围。

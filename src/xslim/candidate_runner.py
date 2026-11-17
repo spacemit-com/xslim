@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import importlib.metadata
 import platform
 import time
 import types
@@ -17,6 +18,13 @@ import torch
 
 from .calibration_helper import CalibrationCollect, XSlimDataset
 from .precision_strategy import PrecisionDecision, PrecisionPlan
+
+
+def _optional_distribution_version(name):
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def config_to_dict(value):
@@ -164,6 +172,7 @@ class CandidateRunner:
         # Start before source loading and hashing: preparation is part of the budget.
         self.started_at = time.monotonic() if started_at is None else started_at
         self.prior_elapsed_s = prior_elapsed_s
+        self.started_wall_time = time.time() - max(0, time.monotonic() - self.started_at)
         self._original_model = copy.deepcopy(onnx.load(original_model) if isinstance(original_model, (str, Path))
                                             else original_model)
         # Loading external data materializes bytes; hash those bytes, not a location/mtime.
@@ -265,11 +274,12 @@ class CandidateRunner:
         self._reference = tuple(tuple(float_session.run(None, copy.deepcopy(batch))) for batch in score_batches)
         runtime_hash = fingerprint({"ort": ort.__version__, "onnx": onnx.__version__, "torch": torch.__version__,
                                     "providers": float_session.get_providers(), "threads": 1,
-                                    "hook": self.hook_fingerprint, "runner_version": 2,
+                                    "hook": self.hook_fingerprint, "runner_version": 3,
+                                    "onnxconverter_common": _optional_distribution_version("onnxconverter-common"),
                                     "python": platform.python_version(), "platform": platform.platform(),
                                     "numpy": np.__version__, "implementation": {
                                         name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                                        for name in ("candidate_runner.py", "xslim_pipeline.py", "precision_strategy.py")}})
+                                        for name in ("candidate_runner.py", "xslim_pipeline.py", "precision_strategy.py", "local_fp16.py")}})
         preprocess_files = {}
         for item in parameters.input_parameters:
             specification = item.preprocess_file
@@ -312,7 +322,8 @@ class CandidateRunner:
         self.full_conversion_count = max(self.full_conversion_count, state["full_conversion_count"])
         saved_elapsed = state["elapsed_s"]
         if state.get("converting"):
-            saved_elapsed += max(0, time.time() - state["saved_wall_time"])
+            # Recovery is anchored before this run: live preparation must not be counted twice.
+            saved_elapsed += max(0, self.started_wall_time - state["saved_wall_time"])
         self.prior_elapsed_s = max(self.prior_elapsed_s, saved_elapsed)
         self.attempts = state.get("attempts", [])
         for key, value in state.get("entries", {}).items():

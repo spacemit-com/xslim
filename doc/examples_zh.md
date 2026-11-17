@@ -450,3 +450,57 @@ python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/hea
 
 将示例节点名替换为原模型节点名；该节点保持 INT8 锁定，其他合法组可被提升为 FP32。
 使用选中导出前，请检查独立的 `<output_prefix>_final_check.json`。
+
+
+### 真实任务搜索与部署测量
+
+需传入自有 evaluator 对象；内置玩具指标不能代替业务任务指标。对象必须提供
+`metric_name`、`higher_is_better`、`direction`、`preprocessing_version`、
+`postprocessing_version`、`tuning_data_id`、`validation_data_id`、`fingerprint`
+和 `evaluate(model, *, split)`。调用方保证 tuning/validation 数据独立且内容、
+前后处理身份冻结。[完整 schema](configuration_zh.md#任务指标搜索与后端度量)见配置文档。
+
+```python
+import xslim
+from xslim.search_strategy import build_measurement_request
+
+# float reference 与所有候选复用同一真实任务 evaluator。
+# evaluate(model, *, split) returns {"metric": value_in_0_to_1, "sample_count": n}.
+# 必需身份属性见 configuration_zh.md。
+config["strategy_parameters"] = {
+    "mode": "search", "default_precision": "int8",
+    "allowed_precisions": ["int8", "fp32", "fp16"],
+    "node_precisions": {"encoder.matmul": "int8"},
+    "search": {"objective": "min_error", "max_metric_drop": 0.01,
+               "max_full_trials": 8, "max_time_s": 600}
+}
+result = xslim.quantize_onnx_model(config, "float.onnx", "out/search.onnx",
+                                   evaluator=task_evaluator)
+```
+
+若最小化板端延迟，将 `search.objective` 设为 `"min_latency"`，在
+`search.backend` 填入 hardware/runtime/protocol 身份，并提供 measurement callback
+或离线文件（二选一）：
+
+```python
+def measure_on_device(model, *, request):
+    # 部署当前这个模型，执行声明的协议，返回真实板端测量。
+    # 不得用本机导出耗时或模型大小代替。
+    latency_ms, peak_memory_bytes = run_declared_device_protocol(model, request)
+    return {"schema_version": 1, "identity": request["identity"],
+            "metrics": {"latency_ms": latency_ms, "peak_memory_bytes": peak_memory_bytes}}
+
+result = xslim.quantize_onnx_model(config, "float.onnx", "out/search.onnx",
+    evaluator=task_evaluator, measurement_callback=measure_on_device)
+```
+
+离线文件格式为 `{"schema_version": 1, "records": [record, ...]}`，record 与回调
+返回格式相同。通过 `build_measurement_request(model, plan_or_plan_dict,
+effective_config)` 生成当前确切产物的身份。model、plan、config、hardware、runtime、
+protocol 六项必须全部匹配。模型指纹仅排除导出时间 metadata，不规范化其他 protobuf
+排列；新 final 产物可能需要独立记录。callback 会对最终产物重新测量。
+缺失/不匹配证据保持 pending，不得宣称性能已验证。
+
+固定局部 FP16 无需搜索：保留 `mode: "standard"`，允许 `fp16`，通过
+`node_precisions` 或既有规则选择完整节点/融合组。检查精度报告中的实际 FP16 覆盖、
+公共 IO 与 QDQ 证据。不支持的转换边界明确失败，能力限制见配置文档。

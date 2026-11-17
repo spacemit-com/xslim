@@ -351,8 +351,7 @@ The optional top-level `strategy_parameters` uses `mode: "standard"`. Defaults a
 `node_precisions` / `op_type_precisions` maps and an empty `rules` list. These defaults
 keep legacy dispatch unchanged. Changing allowed precisions also enables validation;
 implicit decisions outside that list fail. Active strategies require static precision
-levels 0–2. FP16 is accepted in the precision vocabulary but execution requests fail
-until an FP16 export capability is available. `auto_mixed` is described below; other modes are currently unsupported.
+levels 0–2. Controlled local FP16 and `search` are described below; the default remains unchanged.
 
 Rules use `{"selector":"node","names":["head"],"precision":"fp32"}`,
 `{"selector":"type","op_types":["MatMul"],"precision":"int8"}`, or
@@ -407,3 +406,100 @@ that requires truncated-model inputs. They do not switch to another strategy.
 When the Python API receives a model path override, its default output name is
 `<input_stem>.q.onnx`. An output resolving to the input file (including a symlink
 or hardlink alias) is rejected before conversion.
+
+
+### Task-metric search and backend evidence
+
+`strategy_parameters.mode: "search"` is opt-in and requires the Python API
+`quantize_onnx_model(config, model_or_path, output_path, *, evaluator=...,
+measurement_callback=None, measurement_file=None)`. Existing positional arguments,
+return type and default `standard` behavior are unchanged. No evaluator means an
+explicit error. Callback and offline measurement file are mutually exclusive.
+
+All search policy fields are nested under **`strategy_parameters.search`**:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `objective` | `"min_error"` | `min_error`, `min_latency`, or `min_memory` |
+| `max_metric_drop` | `0.01` | Absolute, direction-aware task metric difference in `[0,1]`, not a relative percentage |
+| `stop_on_feasible` | `true` | Stop tuning after a feasible candidate; still perform the final conversion |
+| `max_full_trials` | `8` | Total full conversions: baseline, failed attempts and independent final export all count |
+| `max_time_s` | `600.0` | Positive finite total elapsed-work budget, including preparation and external callbacks |
+| `max_candidates` | `32` | Global limit on cheaply screened candidate plans |
+| `prior_full_conversion_count` | `0` | Initial consumed budget; restored counts cannot be reduced |
+| `prior_elapsed_s` | `0.0` | Initial consumed elapsed budget; restored elapsed time cannot be reduced |
+| `backend` | `null` | Deployment identity described below |
+| `constraints` | both limits `null` | `max_latency_ms` (positive number), `max_memory_bytes` (positive integer) |
+
+Unknown search/backend/constraint keys and invalid types are rejected, including
+booleans supplied as numbers. Backend objectives or constraints require `backend`:
+
+```json
+{
+  "hardware": {"id": "board-model", "version": "revision", "options": {}},
+  "runtime": {"name": "deployment-runtime", "version": "version", "options": {}},
+  "protocol": {"id": "measurement-protocol", "version": "version", "options": {}}
+}
+```
+
+Each descriptor requires its identity and version; `options` is an optional finite
+JSON object. The protocol should describe warmup, repetitions, threading, input
+shapes and the definition of peak memory. XSlim cannot independently authenticate
+callback/file measurements; verified means matching caller-supplied evidence.
+PC conversion duration and model file size are never latency/memory substitutes.
+A missing or mismatched measurement remains `pending` and cannot satisfy a backend
+objective. A record must contain the objective metric **and every constrained
+metric**; a known violated constraint is `failed` even if another metric is missing.
+
+The evaluator protocol is `evaluate(model, *, split) -> {"metric": float,
+"sample_count": int}`. Metric must be finite in `[0,1]`, sample count positive and
+equal for the reference/candidate on each split. Required attributes are
+`metric_name`, `higher_is_better` (bool), `direction` (`maximize`/`minimize`),
+`preprocessing_version`, `postprocessing_version`, `tuning_data_id`,
+`validation_data_id`, and `fingerprint`. Strings must be nonempty, split IDs must
+differ and direction must agree with the boolean. The evaluator owns actual split
+contents and must apply identical preprocessing/postprocessing and tuning samples
+to the float reference and every candidate. Changing any identity invalidates task
+scores, while consumed search budget is retained. Calibration batches and their
+raw/processed identities are frozen by CandidateRunner.
+
+A cheap structural exposure proxy orders whole-group promotions to allowed
+FP32/FP16; it is reported as a heuristic, never a task score or board measurement.
+Only limited full exports are evaluated. Candidate deduplication includes effective
+precision/calibration/explicit-INT8 semantics. One conversion is reserved for a fresh
+final export; a missing or failed final check can publish the legal baseline but is
+never verified. After the final model and plan are frozen, validation runs on the
+float reference and selected artifact only. Validation failure never changes the
+plan, reranks candidates or feeds back into tuning.
+
+`<prefix>_search_report.json`, `<prefix>_final_check.json`, and the precision report
+contain actual layout/coverage denominators, source mapping, decisions/locks/groups,
+reference/tuning/validation metrics, verified/pending status, measurement rejections,
+budget counts and stop/fallback reasons. For `min_error`, task verification may be
+successful while optional backend evidence remains pending. Search resume files
+live beside the report and in `<prefix>_search_candidates`; a changed conversion
+context fails closed and requires a new work directory/prefix. Context binds FP16
+implementation bytes and `onnxconverter-common` version. Only volatile
+`xslim_export_time` metadata is excluded from numerical model fingerprints.
+Synchronous work cannot be interrupted; no new external callback starts after the
+deadline, and a callback that finishes late is reported as `time_overrun`, not success.
+
+### Controlled local FP16 in static plans
+
+Add `"fp16"` to `allowed_precisions` and select nodes/groups using the existing
+rules. PPQ stages these nodes as FP32, then a controlled post-QDQ
+`onnxconverter-common` node-block conversion produces real FP16 computation and
+weights. It does not invoke the separate whole-model FP16 path. Public IO remains
+unchanged, INT8 QDQ scales/zero-points and axis/type evidence remain checked, and
+all activation sockets retain exact producer/output-index provenance across verified
+FLOAT/FLOAT16 Cast boundaries. Floating parameter names must retain their original
+initializer identity. Inherited fusion groups and locks remain atomic after promotion.
+
+Strict shape inference, full ONNX checker and real CPU ORT comparison against the
+same pre-FP16 QDQ artifact are mandatory (`rtol=atol=1e-3`, optimization disabled).
+Search/candidate conversion uses frozen real calibration batches; standard mode
+also checks the current calibration input. This is a conversion sanity gate, not a
+deployment performance claim or task-quality guarantee. Unsupported ONNX functions,
+subgraphs, selected shared initializers, converter-blocked operators, unsafe output
+boundaries, models >=2 GB and inference/ORT/provenance failures raise explicit errors.
+No fake FP16 fallback is published. W4A8 and FP8 are outside this interface.

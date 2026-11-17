@@ -267,9 +267,82 @@ class CalibrationParameterSetting(SettingSerialize):
                 calib_parameter.input_shape = input_shape
 
 
+
+class SearchParameterSetting(SettingSerialize):
+    # Strict opt-in task search schema; legacy settings remain unchanged.
+    def __init__(self):
+        self.objective = "min_error"
+        self.max_metric_drop = 0.01
+        self.stop_on_feasible = True
+        self.max_full_trials = 8
+        self.max_time_s = 600.0
+        self.max_candidates = 32
+        self.prior_full_conversion_count = 0
+        self.prior_elapsed_s = 0.0
+        self.backend = None
+        self.constraints = {"max_latency_ms": None, "max_memory_bytes": None}
+
+    def from_json(self, obj_setting, qsetting):
+        if not isinstance(obj_setting, dict):
+            raise ValueError("strategy_parameters.search must be an object.")
+        unknown = set(obj_setting) - set(vars(self))
+        if unknown:
+            raise ValueError(f"Unknown strategy_parameters.search keys: {sorted(unknown)}")
+        for key, value in obj_setting.items():
+            if key == "constraints" and isinstance(value, dict):
+                self.constraints.update(copy.deepcopy(value))
+            else:
+                setattr(self, key, copy.deepcopy(value))
+        self.check(qsetting)
+
+    def check(self, qsetting):
+        prefix = "strategy_parameters.search"
+        if not isinstance(self.objective, str) or self.objective not in {"min_error", "min_latency", "min_memory"}:
+            raise ValueError(f"{prefix}.objective is invalid.")
+        if not isinstance(self.stop_on_feasible, bool):
+            raise ValueError(f"{prefix}.stop_on_feasible must be bool.")
+        for key, minimum in (("max_full_trials", 1), ("max_candidates", 1), ("prior_full_conversion_count", 0)):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ValueError(f"{prefix}.{key} must be integer >= {minimum}.")
+        for key in ("max_metric_drop", "max_time_s", "prior_elapsed_s"):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
+                raise ValueError(f"{prefix}.{key} must be finite numeric.")
+        if not 0 <= self.max_metric_drop <= 1 or self.max_time_s <= 0 or self.prior_elapsed_s < 0:
+            raise ValueError(f"{prefix} drop/time ranges are invalid.")
+        if not isinstance(self.constraints, dict) or set(self.constraints) - {"max_latency_ms", "max_memory_bytes"}:
+            raise ValueError(f"Unknown or invalid {prefix}.constraints keys.")
+        for key, value in self.constraints.items():
+            if value is None:
+                continue
+            kind = (int,) if key == "max_memory_bytes" else (int, float)
+            if isinstance(value, bool) or not isinstance(value, kind) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{prefix}.constraints.{key} must be positive numeric (bytes: integer).")
+        if self.backend is not None:
+            if not isinstance(self.backend, dict) or set(self.backend) != {"hardware", "runtime", "protocol"}:
+                raise ValueError(f"{prefix}.backend requires hardware/runtime/protocol.")
+            for key, label in (("hardware", "id"), ("runtime", "name"), ("protocol", "id")):
+                descriptor = self.backend[key]
+                if (not isinstance(descriptor, dict) or set(descriptor) - {label, "version", "options"}
+                        or any(not isinstance(descriptor.get(k), str) or not descriptor[k].strip()
+                               for k in (label, "version"))):
+                    raise ValueError(f"{prefix}.backend.{key} requires nonempty {label}/version; optional options.")
+                descriptor.setdefault("options", {})
+                if not isinstance(descriptor["options"], dict):
+                    raise ValueError(f"{prefix}.backend.{key}.options must be an object.")
+                try:
+                    json.dumps(descriptor, allow_nan=False, sort_keys=True)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"{prefix}.backend.{key} must be finite JSON.") from error
+        if self.backend is None and (self.objective != "min_error" or any(v is not None for v in self.constraints.values())):
+            raise ValueError(f"{prefix}.backend is required for backend objectives/constraints.")
+
+
 class StrategyParameterSetting(SettingSerialize):
     def __init__(self):
         self.mode = "standard"
+        self.search = SearchParameterSetting()
         self.allowed_precisions = ["int8", "fp32"]
         self.default_precision = None
         self.node_precisions = {}
@@ -281,6 +354,13 @@ class StrategyParameterSetting(SettingSerialize):
         self.max_time_s = 600.0
         self.cosine_similarity_min = 0.9999
 
+    def from_json(self, obj_setting, qsetting):
+        if isinstance(obj_setting, dict) and obj_setting.get("mode") == "search":
+            unknown = set(obj_setting) - set(vars(self))
+            if unknown:
+                raise ValueError(f"Unknown strategy_parameters keys: {sorted(unknown)}")
+        super().from_json(obj_setting, qsetting)
+
     @property
     def active(self):
         return (self.mode != "standard" or self.allowed_precisions != ["int8", "fp32"]
@@ -288,7 +368,7 @@ class StrategyParameterSetting(SettingSerialize):
                 or bool(self.node_precisions or self.op_type_precisions or self.rules))
 
     def check(self, qsetting):
-        if self.mode not in {"standard", "auto_mixed"}:
+        if self.mode not in {"standard", "auto_mixed", "search"}:
             raise NotImplementedError(f"Strategy mode {self.mode!r} is not supported.")
         for name in ("score_steps", "max_trials", "max_adjust_groups"):
             value = getattr(self, name)
