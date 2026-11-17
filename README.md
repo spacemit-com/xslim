@@ -151,3 +151,17 @@ branch naming, PR titles, code style and verification requirements, then open an
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
+
+### Reusable static precision plans
+
+Use optional `strategy_parameters` to mix INT8 and FP32 with node, path-subgraph
+and operator-type rules. See [configuration](doc/configuration.md) and
+[example](doc/examples.md). The `xslim.precision_strategy` module exposes
+`build_precision_plan`, `apply_precision_plan`, `record_quantized_layout` and
+`validate_export_layout`; `PrecisionPlan` supports `to_dict()`,
+`with_precisions()` and `promote_group()`. Build/apply after prequantization;
+record before the mutating exporter and export with `remove_activation=False`.
+Validate the final merged model after metadata/functions restoration.
+`request_fingerprint` is stable across evidence recording; `fingerprint` hashes
+the complete current report state. Explicit INT8 requests force refinement behavior,
+so candidate caches must retain that semantic distinction.

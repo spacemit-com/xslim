@@ -422,3 +422,17 @@ To enable auto only for selected operators, keep the global method at `default`
 and set `calibration_type: "auto"` on their INT8 rules. Shared scales also share
 one selected method; conflicting explicit rules fail. Check selection logs and
 validate task accuracy separately on held-out evaluation data.
+
+### Keep a static INT8 head in FP32
+
+Add this block to a static calibration configuration, replacing `head.matmul` with
+an original node name present in your model:
+
+```json
+{"strategy_parameters": {"mode": "standard", "default_precision": "int8",
+  "allowed_precisions": ["int8", "fp32"], "node_precisions": {"head.matmul": "fp32"}}}
+```
+
+Conversion writes `<output_prefix>_precision_report.json` next to the ONNX output.
+Inspect mapping, effective groups/domains, socket evidence and coverage; evaluate
+accuracy independently on representative held-out data.

@@ -122,6 +122,10 @@ class XSlimQuantizer:
         self._set_max_percentile = xslim_setting.quantization_parameters.max_percentile
         self._calibration_type = xslim_setting.calibration_parameters.calibration_type
 
+        precision_plan = kwargs.pop("precision_plan", None)
+        precision_source_model = kwargs.pop("precision_source_model", None)
+        self.precision_plan = None
+
         # Get ignore lists from settings
         ignore_op_types = set(xslim_setting.quantization_parameters.ignore_op_types)
         ignore_op_names = set(xslim_setting.quantization_parameters.ignore_op_names)
@@ -139,12 +143,31 @@ class XSlimQuantizer:
         executor.load_graph(self._graph)
         executor.tracing_operation_meta(inputs=inputs)
 
-        rules = xslim_setting.quantization_parameters.operator_quantization
+        from xslim.precision_strategy import apply_precision_plan, build_precision_plan
+
+        if xslim_setting.strategy_parameters.active or precision_plan is not None:
+            if precision_plan is None:
+                if precision_source_model is None:
+                    raise ValueError("An immutable original model is required to build a precision plan.")
+                precision_plan = build_precision_plan(
+                    precision_source_model, self._graph, xslim_setting, self.quant_operation_types)
+            apply_precision_plan(precision_plan, self._graph, self.target_platform)
+            self.precision_plan = precision_plan
+
+        rules = xslim_setting.quantization_parameters.operator_quantization if precision_plan is None else []
         for rule in rules:
             if not any(fnmatchcase(name, rule.pattern) for name in self._graph.operations):
                 raise ValueError(f"Operator pattern {rule.pattern!r} matched no operations after graph optimization.")
 
         for op_name, operation in self._graph.operations.items():
+            if precision_plan is not None:
+                decision = precision_plan.decisions[op_name]
+                if decision.precision == "int8":
+                    operation = self.quantize_operation(op_name)
+                    if decision.requested_precision == "int8":
+                        operation._detail["operator_precision"] = "int8"
+                    operation._detail["operator_calibration_type"] = decision.calibration_type
+                continue
             rule = next((rule for rule in reversed(rules) if fnmatchcase(op_name, rule.pattern)), None)
             if rule is not None:
                 if rule.precision == "fp32":

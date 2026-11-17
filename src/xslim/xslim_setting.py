@@ -266,14 +266,67 @@ class CalibrationParameterSetting(SettingSerialize):
                 calib_parameter.input_shape = input_shape
 
 
+class StrategyParameterSetting(SettingSerialize):
+    def __init__(self):
+        self.mode = "standard"
+        self.allowed_precisions = ["int8", "fp32"]
+        self.default_precision = None
+        self.node_precisions = {}
+        self.op_type_precisions = {}
+        self.rules = []
+
+    @property
+    def active(self):
+        return (self.mode != "standard" or self.allowed_precisions != ["int8", "fp32"]
+                or self.default_precision is not None
+                or bool(self.node_precisions or self.op_type_precisions or self.rules))
+
+    def check(self, qsetting):
+        if self.mode != "standard":
+            raise NotImplementedError(f"Strategy mode {self.mode!r} is not supported.")
+        allowed = self.allowed_precisions
+        if (not isinstance(allowed, list) or not allowed
+                or any(not isinstance(p, str) or p not in {"int8", "fp32", "fp16"} for p in allowed)
+                or len(set(allowed)) != len(allowed)):
+            raise ValueError("allowed_precisions must be a non-empty distinct list of int8, fp32 or fp16.")
+        if self.default_precision is not None and self.default_precision not in allowed:
+            raise ValueError("default_precision must be in allowed_precisions.")
+        for field_name in ("node_precisions", "op_type_precisions"):
+            values = getattr(self, field_name)
+            if (not isinstance(values, dict)
+                    or any(not isinstance(k, str) or not k or not isinstance(v, str) or v not in allowed
+                           for k, v in values.items())):
+                raise ValueError(f"{field_name} must map non-empty names to allowed precisions.")
+        if not isinstance(self.rules, list):
+            raise ValueError("strategy rules must be a list.")
+        for rule in self.rules:
+            if not isinstance(rule, dict) or rule.get("precision") not in allowed:
+                raise ValueError("Each strategy rule must be an object with an allowed precision.")
+            selector = rule.get("selector")
+            fields = {"node": ["names"], "type": ["op_types"],
+                      "subgraph": ["start_nodes", "end_nodes"]}.get(selector)
+            if fields is None or set(rule) != {"selector", "precision", *fields}:
+                raise ValueError("Strategy rules require selector-specific fields (node/type/subgraph).")
+            for name in fields:
+                values = rule[name]
+                if (not isinstance(values, list) or not values
+                        or any(not isinstance(v, str) or not v for v in values)):
+                    raise ValueError(f"Strategy rule {name} must be a non-empty list of names.")
+
+
 class XSlimSetting(SettingSerialize):
     def __init__(self) -> None:
         self.model_parameters = ModelParameterSetting()
         self.calibration_parameters = CalibrationParameterSetting()
         self.quantization_parameters = QuantizationParameterSetting()
+        self.strategy_parameters = StrategyParameterSetting()
 
 
     def check(self, qsetting):
+        self.strategy_parameters.check(qsetting)
+        if (self.strategy_parameters.active
+                and self.quantization_parameters.precision_level.value not in {0, 1, 2}):
+            raise ValueError("Precision strategies are supported only for static INT8 precision levels 0, 1 and 2.")
         if (self.calibration_parameters.calibration_type == "auto"
                 and self.quantization_parameters.precision_level.value not in {0, 1, 2}):
             raise ValueError("auto calibration is supported only for static INT8 precision levels 0, 1 and 2.")

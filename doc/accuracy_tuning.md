@@ -503,3 +503,18 @@ is a selection criterion, not evidence of better end-to-end accuracy; evaluate
 the resulting model on separate task data. The search adds calibration work and
 does not choose precision/bit width. See [configuration](configuration.md) for
 candidate and sample bounds and [examples](examples.md) for per-operator pins.
+
+### Precision plan evidence
+
+Standard strategies resolve a reusable precision plan after prequantization and
+apply it before per-operation quantization. Explicit node/type/subgraph rules are
+locked. Shared output quantization roots form atomic groups; ordinary shared
+producer/consumer scales remain domains without pulling in unrelated branches.
+Conflicting locked precisions within a fused group fail. Candidate promotion must
+change a whole unlocked group and preserve calibration and provenance.
+
+The export report verifies actual activation sockets, integer-weight DQ, finite
+positive scales, per-channel axes and ONNX full checks. FP32 targets retain their
+own sockets. Coverage counts effective optimized operations, with source mapping
+and unmapped-source counts reported separately. Layout verification proves an
+export contract, not task accuracy or hardware latency.

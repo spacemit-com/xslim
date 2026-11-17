@@ -8,3 +8,5 @@ from .defs import *
 from .optimizer import *
 from .quantizer import *
 from .xslim_pipeline import quantize_onnx_model
+
+from .precision_strategy import PrecisionPlan, build_precision_plan, validate_export_layout

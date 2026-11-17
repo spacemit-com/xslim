@@ -419,3 +419,15 @@ python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/hea
 `default`，在对应 INT8 规则中设置 `calibration_type: "auto"`。共享 scale 的量化域
 也共享同一个选中方法，显式规则冲突时会报错。请检查选型日志，并使用独立评估数据
 验证任务精度。
+
+### 静态 INT8 中保留 FP32 输出头
+
+在静态校准配置中加入以下字段，将 `head.matmul` 替换为模型中存在的原始节点名：
+
+```json
+{"strategy_parameters": {"mode": "standard", "default_precision": "int8",
+  "allowed_precisions": ["int8", "fp32"], "node_precisions": {"head.matmul": "fp32"}}}
+```
+
+转换在 ONNX 输出旁生成 `<output_prefix>_precision_report.json`，可检查原名映射、
+实际分组/共享域、socket 证据及覆盖率；任务精度仍需用有代表性的独立评估数据验证。

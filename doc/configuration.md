@@ -343,3 +343,28 @@ operators into `"auto"`. Explicit methods apply to the effective shared
 quantization domain after fusion/simplification, including adjacent operators
 sharing its scale. Conflicting explicit methods in one domain raise `ValueError`.
 Logs record each selected method, sampled MSE and sample count.
+
+### Static precision strategy
+
+The optional top-level `strategy_parameters` uses `mode: "standard"`. Defaults are
+`allowed_precisions: ["int8", "fp32"]`, `default_precision: null`, empty
+`node_precisions` / `op_type_precisions` maps and an empty `rules` list. These defaults
+keep legacy dispatch unchanged. Changing allowed precisions also enables validation;
+implicit decisions outside that list fail. Active strategies require static precision
+levels 0–2. FP16 is accepted in the precision vocabulary but execution requests fail
+until an FP16 export capability is available. Other modes are currently unsupported.
+
+Rules use `{"selector":"node","names":["head"],"precision":"fp32"}`,
+`{"selector":"type","op_types":["MatMul"],"precision":"int8"}`, or
+`{"selector":"subgraph","start_nodes":["a"],"end_nodes":["b"],"precision":"fp32"}`.
+Node rules take priority over subgraph, type and default rules, in that order.
+Subgraphs contain only nodes on directed paths between inclusive boundaries.
+Conflicting rules at the same priority fail. Effective legacy
+`operator_quantization` rules retain last-match ordering and join at node priority;
+they override ignore lists, and conflicting new node rules fail.
+
+Targets refer to unique, non-empty original node names, captured before formatting.
+After prequantization, mapping requires matching operator type and output tensors;
+renames are recorded, and missing or ambiguous selected targets fail. Skip-simplify
+does not guarantee name preservation. A global INT8 default applies only to supported
+data operators. Explicit unsupported INT8 targets fail.

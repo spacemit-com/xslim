@@ -150,3 +150,15 @@ xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/head/MatMul
 ## 许可证
 
 本项目采用 [Apache License 2.0](LICENSE) 许可证。
+
+### 可复用静态精度计划
+
+可选 `strategy_parameters` 支持按节点、路径子图和算子类型混合 INT8/FP32，
+参见[配置](doc/configuration_zh.md)和[示例](doc/examples_zh.md)。
+`xslim.precision_strategy` 模块提供 `build_precision_plan`、
+`apply_precision_plan`、`record_quantized_layout` 和 `validate_export_layout`；
+`PrecisionPlan` 提供 `to_dict()`、`with_precisions()`、`promote_group()`。
+在 prequant 后构建/应用，导出器原地修改图之前记录状态，导出使用
+`remove_activation=False`；恢复 metadata/functions 后验证最终合并模型。
+`request_fingerprint` 在记录证据前后稳定，`fingerprint` 则包含当前完整证据。
+显式 INT8 请求会影响精度细化行为，候选缓存必须保留该语义差异。

@@ -335,3 +335,24 @@ XSlim 2.1.0 扩展了分析与校准阶段使用的 ONNX 执行器和量化 sock
 `operator_quantization[].calibration_type` 可固定算法或仅对选定算子启用 `"auto"`。
 显式方法应用于融合/简化后的实际共享量化域，包括共享 scale 的相邻算子。
 同一个量化域中的显式方法冲突时抛出 `ValueError`。日志记录选中算法、采样 MSE 和样本元素数。
+
+### 静态精度策略
+
+可选顶层字段 `strategy_parameters` 使用 `mode: "standard"`。默认值为
+`allowed_precisions: ["int8", "fp32"]`、`default_precision: null`、空的
+`node_precisions` / `op_type_precisions` 映射和空 `rules`。保持这些默认值时，
+原有分派行为不变。修改 allowed 列表也会启用校验，隐式决策超出列表时拒绝执行。
+启用策略仅支持静态 precision_level 0–2。schema 接受 fp16 名称，但实际请求
+必须具备 FP16 导出能力；当前阶段拒绝执行。其他 mode 暂不支持。
+
+规则形式为 `{"selector":"node","names":["head"],"precision":"fp32"}`、
+`{"selector":"type","op_types":["MatMul"],"precision":"int8"}` 或
+`{"selector":"subgraph","start_nodes":["a"],"end_nodes":["b"],"precision":"fp32"}`。
+优先级依次是 node > subgraph > type > default，同级矛盾拒绝执行。
+子图只包括两端边界之间有向路径上的节点（含边界），不扩展旁支。
+legacy `operator_quantization` 保持最后匹配生效，其最终规则按 node 优先级合并，
+仍可覆盖 ignore 列表；与新 node 规则矛盾时拒绝执行。
+
+节点名指格式化前的原始名字，必须唯一且非空。prequant 后按类型及输出张量精确
+验证映射，记录重命名；选中目标消失或映射歧义时拒绝执行。skip-simplify 不能保证
+节点名保留。全局 int8 默认仅作用于支持的数据算子，显式不支持的 int8 目标报错。

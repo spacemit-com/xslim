@@ -26,6 +26,7 @@ from .ppq_decorator import (DISPATCHER_TABLE, BaseGraph, GraphDispatcher,
 from .quantizer import (XSlimQuantizer, convert_to_fp16_onnx_model,
                         dynamic_quantize_onnx_model)
 from .xslim_setting import XSlimSetting, XSlimSettingFactory
+from .precision_strategy import record_quantized_layout, validate_export_layout
 
 
 STATIC_QUANTIZATION_INPUT_UNSUPPORTED_OP_TYPES = {"QuantizeLinear", "DequantizeLinear"}
@@ -174,6 +175,10 @@ def quantize_onnx_model(
     else:
         raise TypeError("type of file_or_model error, {} .vs str or modelproto".format(type(file_or_model)))
 
+    precision_source_model = (copy.deepcopy(ori_onnx_model)
+                              if config_setting.strategy_parameters.active else None)
+    precision_report = None
+
     if config_setting.quantization_parameters.precision_level.value >= 100:
         quant_onnx_model = format_onnx_model(
             ori_onnx_model,
@@ -248,6 +253,7 @@ def quantize_onnx_model(
             xslim_setting=config_setting,
             calib_steps=calibration_step,
             collate_fn=collate_fn,
+            precision_source_model=precision_source_model,
         )
 
         if config_setting.quantization_parameters.analysis_enable:
@@ -265,9 +271,10 @@ def quantize_onnx_model(
             except:
                 logger.warning("quantize analysis failed and skiped.")
 
-        quant_onnx_model = ONNXRUNTIMExporter().export(
-            quantizer._graph,
-        )
+        if quantizer.precision_plan is not None:
+            record_quantized_layout(quantizer.precision_plan, quantizer._graph)
+        export_options = {"remove_activation": False} if quantizer.precision_plan is not None else {}
+        quant_onnx_model = ONNXRUNTIMExporter().export(quantizer._graph, **export_options)
 
         quant_onnx_model = merge_onnx_model(quant_onnx_model, truncate_left_graph, truncate_vars)
 
@@ -277,8 +284,15 @@ def quantize_onnx_model(
             if not any(f.domain == function_proto.domain and f.name == function_proto.name for f in quant_onnx_model.functions):
                 quant_onnx_model.functions.append(function_proto)
 
-    quant_onnx_model.metadata_props.extend(ori_onnx_model.metadata_props)
+
+    # Preserve exporter-owned timestamps/version; merge source metadata by key.
+    metadata = {entry.key: entry.value for entry in quant_onnx_model.metadata_props}
+    metadata.update({entry.key: entry.value for entry in ori_onnx_model.metadata_props
+                     if entry.key not in {"xslim_export_time", "xslim_version"}})
+    onnx.helper.set_model_props(quant_onnx_model, metadata)
     quant_onnx_model.ir_version = max(9, ori_onnx_model.ir_version)
+    if config_setting.strategy_parameters.active:
+        precision_report = validate_export_layout(quantizer.precision_plan, quant_onnx_model)
     _out_path = os.path.join(working_dir, "{}.onnx".format(output_prefix))
     if is_large_model(quant_onnx_model):
         # Serialized model would exceed the 2GB protobuf limit; store weights
@@ -295,6 +309,11 @@ def quantize_onnx_model(
         )
     else:
         onnx.save(quant_onnx_model, _out_path)
+
+    if precision_report is not None:
+        report_path = os.path.join(working_dir, f"{output_prefix}_precision_report.json")
+        with open(report_path, "w", encoding="utf-8") as stream:
+            json.dump(precision_report, stream, ensure_ascii=False, indent=2, sort_keys=True)
 
     logger.info("quantization eplased time {:.2f} s".format(time.time() - time_start))
     return quant_onnx_model
