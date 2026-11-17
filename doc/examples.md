@@ -374,3 +374,23 @@ python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/hea
 - **YOLO models**: Start with `precision_level: 1` and `finetune_level: 2`. If the output model contains `spacemit_functions.YoloDecode`, automatic decode fusion succeeded; otherwise consider `truncate_var_names` as a fallback.
 - **Inspecting tensor names**: Use [Netron](https://netron.app) to visualize the ONNX graph and find tensor names for `custom_setting`, `truncate_var_names`, or fused YOLO decode validation.
 - **Operator coverage**: XSlim 2.1.0 improves support for opset-24 `Pad`, scalar reduce inputs, axes-input reduce operators, comparison/logical operators, and common activation/unary operators used by modern ONNX exports.
+
+## Select static precision by operator name
+
+Add this to a static calibration configuration:
+
+```json
+"quantization_parameters": {
+    "precision_level": 0,
+    "operator_quantization": [
+        {"pattern": "*", "precision": "fp32"},
+        {"pattern": "encoder.*", "precision": "int8"},
+        {"pattern": "encoder.*.sensitive", "precision": "fp32"},
+        {"pattern": "head.matmul", "precision": "int8", "calibration_type": "minmax"}
+    ]
+}
+```
+
+This opts in encoder operations and one head operation, retaining sensitive
+operations in FP32. Replace patterns with names present in your optimized graph.
+The usual calibration data and preprocessing settings are still required.

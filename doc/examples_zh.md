@@ -374,3 +374,22 @@ python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/hea
 - **YOLO 模型**：建议从 `precision_level: 1` 与 `finetune_level: 2` 起步。若输出模型中已经出现 `spacemit_functions.YoloDecode`，说明自动 decode 融合已生效；否则可考虑回退到 `truncate_var_names`。
 - **查看 Tensor 名称**：使用 [Netron](https://netron.app) 可视化 ONNX 计算图，找到用于 `custom_setting`、`truncate_var_names` 或验证 YOLO 融合结果的 Tensor / 节点名称。
 - **算子覆盖**：XSlim 2.1.0 增强了对 opset-24 `Pad`、标量规约输入、axes 输入形式规约算子、比较/逻辑算子以及现代 ONNX 导出常见激活/一元算子的支持。
+
+## 按算子名称选择静态精度
+
+在静态校准配置中加入以下部分：
+
+```json
+"quantization_parameters": {
+    "precision_level": 0,
+    "operator_quantization": [
+        {"pattern": "*", "precision": "fp32"},
+        {"pattern": "encoder.*", "precision": "int8"},
+        {"pattern": "encoder.*.sensitive", "precision": "fp32"},
+        {"pattern": "head.matmul", "precision": "int8", "calibration_type": "minmax"}
+    ]
+}
+```
+
+以上配置量化 encoder 和一个 head 算子，敏感算子保留 FP32。
+请用优化后图中实际存在的名称替换示例模式，仍需提供常规校准数据及预处理配置。

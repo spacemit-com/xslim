@@ -312,6 +312,8 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
             self.precesion_level_3(graph, operation)
 
     def precesion_level_3(self, graph: BaseGraph, operation: QuantableOperation):
+        if operation._detail.get("operator_precision") == "int8":
+            return
         for tqc, var in operation.config_with_variable:
             if tqc.dominated_by is tqc and tqc.state == QuantizationStates.INITIAL:
                 tqc.state = QuantizationStates.FP32
@@ -395,3 +397,13 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
         if isinstance(self._custom_setting, Sequence):
             for tqc_setting in self._custom_setting:
                 self.custom_tqc_set(graph, tqc_setting)
+
+        # Explicit operator calibration overrides global and subgraph settings.
+        for operation in sorted_ops:
+            if not isinstance(operation, QuantableOperation):
+                continue
+            method = operation._detail.get("operator_calibration_type")
+            if method is not None:
+                for config, variable in operation.config_with_variable:
+                    if not variable.is_parameter and config.state == QuantizationStates.INITIAL:
+                        config.observer_algorithm = "xslim" if method == "default" else method

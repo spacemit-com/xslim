@@ -300,3 +300,21 @@ When a model contains an unsupported ONNX operator, XSlim still reports it durin
     }
 }
 ```
+
+## Operator quantization rules (static INT8)
+
+`quantization_parameters.operator_quantization` defaults to `[]`. Each entry has
+`pattern` (non-empty string), `precision` (`int8` or `fp32`), and optional
+`calibration_type` (`default`, `minmax`, `percentile`, `kl`, `mse`, INT8 only).
+Patterns match optimized PPQ operation names, case-sensitively, using Python
+`fnmatchcase`: `*`, `?`, and `[abc]` are supported. The last matching rule wins.
+Rules override `ignore_op_names`, `ignore_op_types`, and precision-level/subgraph
+precision refinement. An explicit calibration method also overrides global and
+subgraph calibration methods. Operator socket constraints (shape/index inputs,
+FP32 bias) remain in effect.
+
+Use static `precision_level` 0, 1 or 2. FP16/dynamic modes reject these rules.
+An unmatched pattern or explicit INT8 on an unsupported/shape-only operation
+raises `ValueError`. Names refer to the graph **after** preprocessing/fusion;
+use `skip_onnxsim` when simplification changes names you need to address.
+Existing exact-name exclusion settings keep their behavior when rules are empty.

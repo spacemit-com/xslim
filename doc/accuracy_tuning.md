@@ -477,3 +477,14 @@ The following configuration combines multiple methods for a CNN model with high 
 
 - [Configuration Reference](configuration.md) — Complete description of all JSON configuration fields
 - [Examples](examples.md) — Step-by-step examples for common quantization scenarios
+
+## Operator precision overrides
+
+After identifying a sensitive operation, use `operator_quantization` to retain
+it in FP32, or force supported operations to INT8. Explicit rules take priority
+over exclusions and heuristic precision refinement; the last matching rule wins.
+An INT8 rule may also pin `calibration_type` for that operation. See the
+[configuration reference](configuration.md#operator-quantization-rules-static-int8)
+and [example](examples.md#select-static-precision-by-operator-name).
+Always validate task accuracy on representative evaluation data after changing
+precision or calibration choices; successful conversion alone is insufficient.

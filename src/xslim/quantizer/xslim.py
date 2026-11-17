@@ -4,6 +4,7 @@ import functools
 import os
 from collections import OrderedDict
 from enum import Enum
+from fnmatch import fnmatchcase
 from typing import Callable, Dict, Iterable, List, Set, Tuple, Union
 
 import numpy as np
@@ -137,7 +138,25 @@ class XSlimQuantizer:
         executor.load_graph(self._graph)
         executor.tracing_operation_meta(inputs=inputs)
 
+        rules = xslim_setting.quantization_parameters.operator_quantization
+        for rule in rules:
+            if not any(fnmatchcase(name, rule.pattern) for name in self._graph.operations):
+                raise ValueError(f"Operator pattern {rule.pattern!r} matched no operations after graph optimization.")
+
         for op_name, operation in self._graph.operations.items():
+            rule = next((rule for rule in reversed(rules) if fnmatchcase(op_name, rule.pattern)), None)
+            if rule is not None:
+                if rule.precision == "fp32":
+                    operation.platform = TargetPlatform.FP32
+                    continue
+                if operation.type not in self.quant_operation_types or operation.platform == TargetPlatform.SOI:
+                    raise ValueError(f"Operation {op_name!r} ({operation.type}) does not support static INT8.")
+                operation.platform = self.target_platform
+                operation = self.quantize_operation(op_name)
+                operation._detail["operator_precision"] = "int8"
+                operation._detail["operator_calibration_type"] = rule.calibration_type
+                continue
+
             # Skip if operator type is in ignore list
             if operation.type in ignore_op_types:
                 operation.platform = TargetPlatform.FP32

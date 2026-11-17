@@ -126,6 +126,22 @@ class CustomQuantizationParameterSetting(SettingSerialize):
         self.calibration_type: str = None
 
 
+class OperatorQuantizationSetting(SettingSerialize):
+    def __init__(self) -> None:
+        self.pattern: str = None
+        self.precision: str = None
+        self.calibration_type: str = None
+
+    def check(self, qsetting):
+        if not isinstance(self.pattern, str) or not self.pattern:
+            raise ValueError("operator_quantization pattern must be a non-empty string.")
+        if self.precision not in {"int8", "fp32"}:
+            raise ValueError("operator_quantization precision must be int8 or fp32.")
+        if self.calibration_type is not None:
+            if self.precision != "int8" or self.calibration_type not in {"default", "minmax", "percentile", "kl", "mse"}:
+                raise ValueError("operator calibration_type requires int8 and a supported calibration method.")
+
+
 class QuantizationParameterSetting(SettingSerialize):
     def __init__(self) -> None:
         self.precision_level: PrecisionLevel = PrecisionLevel.LEVEL_0
@@ -136,8 +152,18 @@ class QuantizationParameterSetting(SettingSerialize):
         self.truncate_var_names: Sequence[str] = []
         self.ignore_op_types: Sequence[str] = []
         self.ignore_op_names: Sequence[str] = []
+        self.operator_quantization: Sequence[OperatorQuantizationSetting] = []
 
     def from_list(self, value_name, obj_setting, qsetting):
+        if value_name == "operator_quantization":
+            rules = []
+            for item in obj_setting:
+                if not isinstance(item, dict):
+                    raise ValueError("operator_quantization entries must be objects.")
+                rule = OperatorQuantizationSetting()
+                rule.from_json(item, qsetting)
+                rules.append(rule)
+            return rules
         if value_name == "custom_setting":
             custom_setting = []
             for item_dict in obj_setting:
@@ -149,6 +175,14 @@ class QuantizationParameterSetting(SettingSerialize):
             return obj_setting
 
     def check(self, qsetting):
+        if not isinstance(self.operator_quantization, list):
+            raise ValueError("operator_quantization must be a list.")
+        for rule in self.operator_quantization:
+            if not isinstance(rule, OperatorQuantizationSetting):
+                raise ValueError("operator_quantization entries must be OperatorQuantizationSetting objects.")
+            rule.check(qsetting)
+        if self.operator_quantization and self.precision_level.value not in {0, 1, 2}:
+            raise ValueError("operator_quantization is supported only for static INT8 precision levels 0, 1 and 2.")
         if self.precision_level.value > PrecisionLevel.LEVEL_0.value:
             logger.info("set higher precision level.")
         if self.finetune_level.value > AutoFinetuneLevel.LEVEL_1.value:

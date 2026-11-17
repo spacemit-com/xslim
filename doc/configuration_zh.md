@@ -300,3 +300,18 @@ XSlim 2.1.0 扩展了分析与校准阶段使用的 ONNX 执行器和量化 sock
     }
 }
 ```
+
+## 指定算子量化规则（静态 INT8）
+
+`quantization_parameters.operator_quantization` 默认为 `[]`。每项包含
+`pattern`（非空字符串）、`precision`（`int8` 或 `fp32`），以及可选的
+`calibration_type`（`default`、`minmax`、`percentile`、`kl`、`mse`，仅限 INT8）。
+匹配优化后的 PPQ 算子名称，区分大小写，采用 Python `fnmatchcase` 语义，
+支持 `*`、`?` 和 `[abc]`。多项匹配时最后一项生效。
+显式规则优先于 `ignore_op_names`、`ignore_op_types` 以及精度级别/子图精度调整；
+显式校准算法也优先于全局和子图算法。算子的形状/索引输入、FP32 bias 等约束仍然保留。
+
+仅支持静态 `precision_level` 0、1、2，FP16/动态模式会拒绝这些规则。
+无匹配规则、对不支持或仅处理形状的算子显式指定 INT8 时抛出 `ValueError`。
+名称是预处理/融合**之后**的名称；若简化改变了需要匹配的名称，可设置 `skip_onnxsim`。
+规则为空时，现有精确名称排除配置保持原有行为。
