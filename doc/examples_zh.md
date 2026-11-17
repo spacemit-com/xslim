@@ -393,3 +393,29 @@ python -m xslim -i input.onnx -o output.onnx --fp16 --ignore_op_names /model/hea
 
 以上配置量化 encoder 和一个 head 算子，敏感算子保留 FP32。
 请用优化后图中实际存在的名称替换示例模式，仍需提供常规校准数据及预处理配置。
+
+## 根据用户数据选择校准算法
+
+将以下片段合入静态校准配置，并按正常方式填写代表性校准数据的输入路径、形状和预处理：
+
+```json
+{
+  "calibration_parameters": {
+    "calibration_type": "auto",
+    "auto_calibration_methods": ["minmax", "percentile", "mse", "kl"],
+    "auto_calibration_samples": 8192
+  },
+  "quantization_parameters": {
+    "precision_level": 1,
+    "operator_quantization": [
+      {"pattern": "head.*", "precision": "int8", "calibration_type": "minmax"}
+    ]
+  }
+}
+```
+
+未固定算法的量化域自动选型，head 固定使用 minmax。请用优化后实际存在的算子名称
+替换 `head.*`，或省略该规则。若仅希望对部分算子自动选型，可保持全局方法为
+`default`，在对应 INT8 规则中设置 `calibration_type: "auto"`。共享 scale 的量化域
+也共享同一个选中方法，显式规则冲突时会报错。请检查选型日志，并使用独立评估数据
+验证任务精度。

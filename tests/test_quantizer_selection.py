@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import onnx
@@ -10,8 +10,10 @@ import torch
 from onnx import TensorProto, helper, numpy_helper
 
 import xslim
+from xslim.optimizer.observer import TorchAutoObserver
 from xslim.optimizer.refine import QuantizeConfigRefinePass
 from xslim.ppq_decorator import BaseGraph, Operation, QuantableOperation, QuantizationStates, TargetPlatform, Variable
+from xslim.ppq_decorator import QuantizeFusionPass, QuantizeSimplifyPass
 from xslim.quantizer.xslim import XSlimQuantizer
 from xslim.xslim_setting import XSlimSetting, XSlimSettingFactory
 
@@ -32,6 +34,14 @@ class OperatorQuantizationTests(unittest.TestCase):
             operation.outputs.append(output)
             graph.operations[name] = operation
             graph.variables.update({source.name: source, output.name: output})
+        if op_type == "Gemm":
+            for operation in graph.operations.values():
+                weight = Variable(operation.name + ".weight", value=torch.eye(4), is_parameter=True,
+                                  dest_ops=[operation])
+                bias = Variable(operation.name + ".bias", value=torch.zeros(4), is_parameter=True,
+                                dest_ops=[operation])
+                operation.inputs.extend([weight, bias])
+                graph.variables.update({weight.name: weight, bias.name: bias})
         quantizer = XSlimQuantizer(graph)
         quantizer.build_prequant_pipeline = Mock(return_value=Mock())
         quantizer.build_quant_pipeline = Mock(return_value=Mock())
@@ -67,6 +77,56 @@ class OperatorQuantizationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not support static INT8"):
             self.dispatch(["shape"], [{"pattern": "*", "precision": "int8"}], op_type="Shape")
 
+    def connected(self, rules, op_type):
+        graph = self.dispatch(["producer", "consumer"], rules, op_type=op_type)
+        first, second = graph.operations["producer"], graph.operations["consumer"]
+        old = second.inputs[0]
+        old.dest_ops.remove(second)
+        second.inputs[0] = first.outputs[0]
+        first.outputs[0].dest_ops.append(second)
+        del graph.variables[old.name]
+        QuantizeConfigRefinePass().optimize(graph)
+        QuantizeFusionPass(fuse_activation=True, fuse_passive_op=True, fuse_relu_clip=True,
+                           activation_type={"Relu", "Clip"}).optimize(graph)
+        QuantizeSimplifyPass().optimize(graph, dataloader=[], executor=None)
+        return graph
+
+    def test_pinned_method_survives_fusion_and_simplify(self):
+        for name, op_type in [("producer", "Relu"), ("consumer", "Sigmoid")]:
+            with self.subTest(name=name):
+                graph = self.connected([{"pattern": name, "precision": "int8", "calibration_type": "minmax"}],
+                                       op_type=op_type)
+                QuantizeConfigRefinePass.apply_operator_calibration(graph)
+                operation = graph.operations[name]
+                for config, variable in operation.config_with_variable:
+                    if not variable.is_parameter:
+                        self.assertEqual(config.dominated_by.observer_algorithm, "minmax")
+
+    def test_conflicting_pins_on_shared_domain_fail(self):
+        graph = self.connected([
+            {"pattern": "producer", "precision": "int8", "calibration_type": "minmax"},
+            {"pattern": "consumer", "precision": "int8", "calibration_type": "percentile"},
+        ], op_type="Sigmoid")
+        with self.assertRaisesRegex(ValueError, "Conflicting operator calibration"):
+            QuantizeConfigRefinePass.apply_operator_calibration(graph)
+
+    def test_int8_rule_preserves_shape_input_socket(self):
+        graph = self.dispatch(["reshape"], [{"pattern": "*", "precision": "int8"}], op_type="Reshape")
+        operation = graph.operations["reshape"]
+        # Construct the real data + shape sockets through the public config initializer.
+        shape = Variable("shape", value=torch.tensor([1]), is_parameter=True)
+        operation.inputs.append(shape)
+        config = XSlimQuantizer.create_default_quant_config(operation)
+        self.assertEqual(config.input_quantization_config[0].state, QuantizationStates.INITIAL)
+        self.assertEqual(config.input_quantization_config[1].state, QuantizationStates.FP32)
+
+    def test_explicit_int8_preserves_fp32_bias(self):
+        graph = self.dispatch(["dense"], [{"pattern": "*", "precision": "int8"}], op_type="Gemm")
+        config = graph.operations["dense"].config
+        self.assertEqual(config.input_quantization_config[0].state, QuantizationStates.INITIAL)
+        self.assertEqual(config.input_quantization_config[1].state, QuantizationStates.INITIAL)
+        self.assertEqual(config.input_quantization_config[2].state, QuantizationStates.FP32)
+
     def test_invalid_rules_fail_during_config_parsing(self):
         for rules in [None, {}, [1], [{"pattern": "", "precision": "int8"}],
                       [{"pattern": "*", "precision": "fp16"}],
@@ -83,6 +143,14 @@ class OperatorQuantizationTests(unittest.TestCase):
 
 class OperatorQuantizationPipelineTests(unittest.TestCase):
     def test_public_api_exports_explicit_fp32_and_int8_and_executes(self):
+        self.convert_and_execute("minmax", None)
+
+    def test_public_api_auto_and_explicit_calibration_overrides(self):
+        for global_method, operator_method in [("auto", None), ("minmax", "auto"), ("auto", "minmax")]:
+            with self.subTest(global_method=global_method, operator_method=operator_method):
+                self.convert_and_execute(global_method, operator_method)
+
+    def convert_and_execute(self, global_method, operator_method):
         # Synthetic calibration proves dispatch/export/execution, not deployment accuracy.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -100,16 +168,25 @@ class OperatorQuantizationPipelineTests(unittest.TestCase):
             list_path = root / "data.list"
             list_path.write_text((str(sample_path) + "\n") * 10)
             output_path = root / "quantized.onnx"
-            result = xslim.quantize_onnx_model({
+            original_render = TorchAutoObserver.render_quantization_config
+            with patch.object(TorchAutoObserver, "render_quantization_config", autospec=True,
+                              side_effect=original_render) as render:
+                result = xslim.quantize_onnx_model({
                 "model_parameters": {"onnx_model": str(model_path), "skip_onnxsim": True, "opset": 18},
                 "calibration_parameters": {"calibration_step": 10, "calibration_device": "cpu",
-                    "calibration_type": "minmax", "input_parameters": [{"input_name": "input",
+                    "calibration_type": global_method, "input_parameters": [{"input_name": "input",
                         "input_shape": [1, 4], "file_type": "npy", "data_list_path": str(list_path)}]},
                 "quantization_parameters": {"analysis_enable": False, "finetune_level": 0,
                     "ignore_op_names": ["encoder.matmul"], "operator_quantization": [
-                        {"pattern": "encoder.*", "precision": "int8"},
+                        {"pattern": "encoder.*", "precision": "int8", "calibration_type": operator_method},
                         {"pattern": "head.*", "precision": "fp32"}]},
             }, output_path=str(output_path))
+            expect_auto = operator_method == "auto" or (operator_method is None and global_method == "auto")
+            self.assertEqual(bool(render.call_count), expect_auto)
+            for call in render.call_args_list:
+                report = call.args[0]._quant_cfg.detail["auto_calibration"]
+                self.assertEqual(set(report["mse"]), {"minmax", "percentile", "mse", "kl"})
+                self.assertEqual(report["mse"][report["method"]], min(report["mse"].values()))
             onnx.checker.check_model(result)
             nodes = {node.name: node for node in result.graph.node}
             self.assertEqual(nodes["head.sigmoid"].input[0], "hidden")

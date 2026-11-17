@@ -394,3 +394,31 @@ Add this to a static calibration configuration:
 This opts in encoder operations and one head operation, retaining sensitive
 operations in FP32. Replace patterns with names present in your optimized graph.
 The usual calibration data and preprocessing settings are still required.
+
+## Select calibration methods from user data
+
+Merge this fragment into a static calibration configuration; provide the normal
+input paths, shapes and preprocessing for your representative calibration data:
+
+```json
+{
+  "calibration_parameters": {
+    "calibration_type": "auto",
+    "auto_calibration_methods": ["minmax", "percentile", "mse", "kl"],
+    "auto_calibration_samples": 8192
+  },
+  "quantization_parameters": {
+    "precision_level": 1,
+    "operator_quantization": [
+      {"pattern": "head.*", "precision": "int8", "calibration_type": "minmax"}
+    ]
+  }
+}
+```
+
+Unpinned domains select their methods automatically; the head uses minmax.
+Replace `head.*` with a matching optimized operator name, or omit the rule.
+To enable auto only for selected operators, keep the global method at `default`
+and set `calibration_type: "auto"` on their INT8 rules. Shared scales also share
+one selected method; conflicting explicit rules fail. Check selection logs and
+validate task accuracy separately on held-out evaluation data.

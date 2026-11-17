@@ -138,7 +138,7 @@ class OperatorQuantizationSetting(SettingSerialize):
         if self.precision not in {"int8", "fp32"}:
             raise ValueError("operator_quantization precision must be int8 or fp32.")
         if self.calibration_type is not None:
-            if self.precision != "int8" or self.calibration_type not in {"default", "minmax", "percentile", "kl", "mse"}:
+            if self.precision != "int8" or self.calibration_type not in {"default", "minmax", "percentile", "kl", "mse", "auto"}:
                 raise ValueError("operator calibration_type requires int8 and a supported calibration method.")
 
 
@@ -195,6 +195,8 @@ class CalibrationParameterSetting(SettingSerialize):
         self.calibration_step: int = 500
         self.calibration_device: str = "cuda" if XQUANT_CONFIG.cuda_support else "cpu"
         self.calibration_type: str = "default"
+        self.auto_calibration_methods: Sequence[str] = ["minmax", "percentile", "mse", "kl"]
+        self.auto_calibration_samples: int = 8192
         self.input_parameters: Sequence[InputParameterSetting] = None
 
     def from_list(self, value_name: str, obj_setting: Sequence, qsetting):
@@ -209,6 +211,13 @@ class CalibrationParameterSetting(SettingSerialize):
             return obj_setting
 
     def check(self, qsetting):
+        methods = self.auto_calibration_methods
+        if (not isinstance(methods, list) or not methods
+                or any(not isinstance(method, str) or method not in {"minmax", "percentile", "mse", "kl"}
+                       for method in methods) or len(set(methods)) != len(methods)):
+            raise ValueError("auto_calibration_methods must be a non-empty list of distinct minmax/percentile/mse/kl.")
+        if type(self.auto_calibration_samples) is not int or self.auto_calibration_samples < 1:
+            raise ValueError("auto_calibration_samples must be a positive integer.")
         if self.calibration_device == "cuda" and not XQUANT_CONFIG.cuda_support:
             logger.warning(
                 "Specifies that cuda is used but not detected. Turn to cpu.")
@@ -221,7 +230,7 @@ class CalibrationParameterSetting(SettingSerialize):
         assert len(
             self.input_parameters) > 0, "Calibration input_parameters setting not detected."
 
-        if self.calibration_type not in {"default", "minmax", "percentile", "kl", "mse"}:
+        if self.calibration_type not in {"default", "minmax", "percentile", "kl", "mse", "auto"}:
             raise NotImplementedError(
                 "calibration_type {} not implemented yet.".format(self.calibration_type))
 
@@ -262,6 +271,12 @@ class XSlimSetting(SettingSerialize):
         self.model_parameters = ModelParameterSetting()
         self.calibration_parameters = CalibrationParameterSetting()
         self.quantization_parameters = QuantizationParameterSetting()
+
+
+    def check(self, qsetting):
+        if (self.calibration_parameters.calibration_type == "auto"
+                and self.quantization_parameters.precision_level.value not in {0, 1, 2}):
+            raise ValueError("auto calibration is supported only for static INT8 precision levels 0, 1 and 2.")
 
 
 class XSlimSettingFactory:

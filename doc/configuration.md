@@ -51,7 +51,9 @@ Controls how calibration data is loaded and how quantization ranges are computed
 | `calibration_step` | `int` | `500` | 10–1000 | Maximum number of calibration steps (dataloader iterations/batches); effective sample count ≈ `calibration_step × batch_size` |
 | `calibration_batch_size` | `int` | `1` | ≥ `1` | Number of samples loaded per calibration batch; effective sample count ≈ `calibration_step × calibration_batch_size` |
 | `calibration_device` | `string` | `cuda` | `cuda`, `cpu` | Inference device for calibration; auto-detected, falls back to `cpu` |
-| `calibration_type` | `string` | `default` | `default`, `kl`, `minmax`, `percentile`, `mse` | Observer algorithm for computing activation ranges |
+| `auto_calibration_methods` | `string[]` | `["minmax", "percentile", "mse", "kl"]` | Non-empty, distinct subset of these methods | Candidates for `auto`; order breaks equal-MSE ties |
+| `auto_calibration_samples` | `int` | `8192` | Positive integer | Maximum sampled activation elements per quantization domain for scoring |
+| `calibration_type` | `string` | `default` | `default`, `kl`, `minmax`, `percentile`, `mse`, `auto` | Observer algorithm for computing activation ranges |
 | `input_parameters` | `list` | **required** | — | Per-input settings, one entry per model input (see below) |
 
 ### Calibration Type Details
@@ -63,6 +65,7 @@ Controls how calibration data is loaded and how quantization ranges are computed
 | `minmax` | Uses the observed minimum and maximum values |
 | `percentile` | Clips activations at `max_percentile` to suppress outliers |
 | `mse` | Minimizes mean squared error between original and quantized activations |
+| `auto` | Select a calibration method per activation quantization domain by sampled Q/DQ MSE on user data (static INT8 only) |
 
 > **Tip:** Start with `default`. If accuracy is insufficient, try `percentile` or `minmax`.
 
@@ -305,7 +308,7 @@ When a model contains an unsupported ONNX operator, XSlim still reports it durin
 
 `quantization_parameters.operator_quantization` defaults to `[]`. Each entry has
 `pattern` (non-empty string), `precision` (`int8` or `fp32`), and optional
-`calibration_type` (`default`, `minmax`, `percentile`, `kl`, `mse`, INT8 only).
+`calibration_type` (`default`, `minmax`, `percentile`, `kl`, `mse`, `auto`, INT8 only).
 Patterns match optimized PPQ operation names, case-sensitively, using Python
 `fnmatchcase`: `*`, `?`, and `[abc]` are supported. The last matching rule wins.
 Rules override `ignore_op_names`, `ignore_op_types`, and precision-level/subgraph
@@ -318,3 +321,25 @@ An unmatched pattern or explicit INT8 on an unsupported/shape-only operation
 raises `ValueError`. Names refer to the graph **after** preprocessing/fusion;
 use `skip_onnxsim` when simplification changes names you need to address.
 Existing exact-name exclusion settings keep their behavior when rules are empty.
+
+### Automatic layerwise calibration
+
+Set `calibration_parameters.calibration_type` to `"auto"` for static INT8
+(`precision_level` 0, 1 or 2). Each activation quantization domain evaluates the
+configured candidates using the supplied calibration data, and keeps the method
+with the smallest sampled quantize/dequantize reconstruction MSE. Weights retain
+the existing calibration behavior. Default configuration remains `"default"`.
+
+The fixed-seed uniform streaming sample buffer is bounded by
+`auto_calibration_samples`, samples across calibration batches without batch-split
+bias, and is released after selection. Candidate calibrators still
+observe the full calibration tensors and use the existing histogram passes;
+additional candidates increase calibration time and memory. Selection is local
+to activation tensors, not an end-to-end task-accuracy or latency search, and
+does not automatically switch bit width or choose FP16/FP32.
+
+`operator_quantization[].calibration_type` can pin a method or opt selected
+operators into `"auto"`. Explicit methods apply to the effective shared
+quantization domain after fusion/simplification, including adjacent operators
+sharing its scale. Conflicting explicit methods in one domain raise `ValueError`.
+Logs record each selected method, sampled MSE and sample count.

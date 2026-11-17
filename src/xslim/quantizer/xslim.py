@@ -64,6 +64,7 @@ class XSlimQuantizer:
         }
         self._observer_mapping = {
             "default": "xslim",
+            "auto": "auto",
             "kl": "kl",
             "mse": "mse",
             "minmax": "minmax",
@@ -429,6 +430,8 @@ class XSlimQuantizer:
                 block_wise=True,
                 fintune_epoch=XQUANT_CONFIG.fine_tune_epoch,
                 auto_finetune_level=setting.quantization_parameters.finetune_level.value,
+                auto_calibration_methods=setting.calibration_parameters.auto_calibration_methods,
+                auto_calibration_samples=setting.calibration_parameters.auto_calibration_samples,
             )
         )
 

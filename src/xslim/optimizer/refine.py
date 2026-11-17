@@ -302,6 +302,27 @@ class QuantizeConfigRefinePass(QuantizationOptimizationPass):
         self._quant_min = -(2 ** (self._max_bits - 1))
         self._custom_setting = custom_setting
 
+    @staticmethod
+    def apply_operator_calibration(graph: BaseGraph):
+        # Fusion and simplify share configs; resolve explicit choices on their
+        # final owners, so a pinned method cannot silently become the global one.
+        methods = {}
+        for operation in graph.operations.values():
+            method = operation._detail.get("operator_calibration_type")
+            if not isinstance(operation, QuantableOperation) or method is None:
+                continue
+            method = "xslim" if method == "default" else method
+            for config, variable in operation.config_with_variable:
+                owner = config.dominated_by
+                if variable.is_parameter or owner.state != QuantizationStates.INITIAL:
+                    continue
+                if owner in methods and methods[owner] != method:
+                    raise ValueError("Conflicting operator calibration methods in a shared quantization domain: "
+                                     f"{methods[owner]!r} and {method!r} at {operation.name!r}.")
+                methods[owner] = method
+        for config, method in methods.items():
+            config.observer_algorithm = method
+
     def precesion_level_2(self, graph: BaseGraph, operation: QuantableOperation):
         upstream_operations = graph.get_upstream_operations(operation)
         downstream_operations = graph.get_downstream_operations(operation)

@@ -488,3 +488,18 @@ An INT8 rule may also pin `calibration_type` for that operation. See the
 and [example](examples.md#select-static-precision-by-operator-name).
 Always validate task accuracy on representative evaluation data after changing
 precision or calibration choices; successful conversion alone is insufficient.
+
+### Automatic calibration selection
+
+With static INT8, `calibration_type: "auto"` compares minmax, percentile, MSE and
+KL calibration on the user calibration tensors. Each activation quantization
+domain keeps the candidate with the lowest sampled Q/DQ reconstruction MSE, so
+different layers can use different methods. Logs expose the selected method,
+MSE and sample count. Fusion and shared scales require one method per domain;
+explicit operator methods override auto, and conflicting explicit methods fail.
+
+Keep calibration preprocessing representative of deployment. Sampled local MSE
+is a selection criterion, not evidence of better end-to-end accuracy; evaluate
+the resulting model on separate task data. The search adds calibration work and
+does not choose precision/bit width. See [configuration](configuration.md) for
+candidate and sample bounds and [examples](examples.md) for per-operator pins.

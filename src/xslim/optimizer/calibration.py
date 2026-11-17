@@ -23,7 +23,7 @@ from ..ppq_decorator import (
     torch_snr_error,
 )
 from .observer import TorchXSlimObserver
-from .refine import PassiveParameterBakingPass
+from .refine import PassiveParameterBakingPass, QuantizeConfigRefinePass
 from .training import LearnedStepSizePassDecorator, XSlimBlockBuilder, XSlimTrainableBlock
 
 
@@ -57,6 +57,8 @@ class RuntimeBlockWiseCalibrationPass(QuantizationOptimizationPass):
         block_wise: bool = True,
         fintune_epoch: int = 2,
         auto_finetune_level: int = 1,
+        auto_calibration_methods: Sequence[str] = ("minmax", "percentile", "mse", "kl"),
+        auto_calibration_samples: int = 8192,
     ) -> None:
         self.name = "XSlim Runtime Calibration Pass(BlockWise)"
         self._method = method
@@ -67,6 +69,8 @@ class RuntimeBlockWiseCalibrationPass(QuantizationOptimizationPass):
         self._fintune_epoch = fintune_epoch
         self._block_wise_loss = []
         self._auto_finetune_level = auto_finetune_level
+        self._auto_calibration_methods = auto_calibration_methods
+        self._auto_calibration_samples = auto_calibration_samples
 
     def split_graph_into_blocks(
         self,
@@ -154,6 +158,10 @@ class RuntimeBlockWiseCalibrationPass(QuantizationOptimizationPass):
 
         for operation in block.rps:
             if isinstance(operation, QuantableOperation):
+                for config, variable in operation.config_with_variable:
+                    if not variable.is_parameter and config.observer_algorithm == "auto":
+                        config.detail["auto_calibration_methods"] = self._auto_calibration_methods
+                        config.detail["auto_calibration_samples"] = self._auto_calibration_samples
                 operation_observer = OperationObserver(operation=operation, monitor_parameter=False)
                 operation_observer_cache.append(operation_observer)
                 if operation.type in BIAS_CORRECTION_INTERST_TYPE and operation.num_of_parameter == 2:
@@ -426,6 +434,8 @@ class RuntimeBlockWiseCalibrationPass(QuantizationOptimizationPass):
                         and config.dominated_by == config
                     ):
                         config.state = QuantizationStates.INITIAL
+
+        QuantizeConfigRefinePass.apply_operator_calibration(graph)
 
         single_graph_input_name = None
         dataloader_cache = []

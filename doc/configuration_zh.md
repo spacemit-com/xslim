@@ -51,7 +51,9 @@ XSlim 通过 JSON 配置文件驱动，包含三个顶层字段。除特殊标�
 | `calibration_step` | `int` | `500` | 10–1000 | 最大校准迭代步数（dataloader 的 batch 次数），实际使用样本数约为 `calibration_step * batch_size` |
 | `calibration_batch_size` | `int` | `1` | ≥ `1` | 每个校准 batch 加载的样本数量，实际使用样本数约为 `calibration_step × calibration_batch_size` |
 | `calibration_device` | `string` | `cuda` | `cuda`、`cpu` | 校准推理设备，自动检测，无 GPU 时回退到 `cpu` |
-| `calibration_type` | `string` | `default` | `default`、`kl`、`minmax`、`percentile`、`mse` | 激活值范围计算所用的观测算法 |
+| `auto_calibration_methods` | `string[]` | `["minmax", "percentile", "mse", "kl"]` | 非空且不重复的候选算法子集 | `auto` 的候选集；MSE 相同时按列表顺序选择 |
+| `auto_calibration_samples` | `int` | `8192` | 正整数 | 每个量化域用于评分的激活元素采样上限 |
+| `calibration_type` | `string` | `default` | `default`、`kl`、`minmax`、`percentile`、`mse`、`auto` | 激活值范围计算所用的观测算法 |
 | `input_parameters` | `list` | **必填** | — | 每个输入的校准设置，每个模型输入对应一项（见下方） |
 
 ### 校准类型说明
@@ -63,6 +65,7 @@ XSlim 通过 JSON 配置文件驱动，包含三个顶层字段。除特殊标�
 | `minmax` | 使用观测到的最小值和最大值 |
 | `percentile` | 按 `max_percentile` 截断激活范围，抑制异常值 |
 | `mse` | 最小化原始激活值与量化激活值之间的均方误差 |
+| `auto` | 根据用户数据的采样 Q/DQ MSE 为每个激活量化域选择校准算法（仅限静态 INT8） |
 
 > **建议：** 优先使用 `default`。若精度不足，可尝试 `percentile` 或 `minmax`。
 
@@ -305,7 +308,7 @@ XSlim 2.1.0 扩展了分析与校准阶段使用的 ONNX 执行器和量化 sock
 
 `quantization_parameters.operator_quantization` 默认为 `[]`。每项包含
 `pattern`（非空字符串）、`precision`（`int8` 或 `fp32`），以及可选的
-`calibration_type`（`default`、`minmax`、`percentile`、`kl`、`mse`，仅限 INT8）。
+`calibration_type`（`default`、`minmax`、`percentile`、`kl`、`mse`、`auto`，仅限 INT8）。
 匹配优化后的 PPQ 算子名称，区分大小写，采用 Python `fnmatchcase` 语义，
 支持 `*`、`?` 和 `[abc]`。多项匹配时最后一项生效。
 显式规则优先于 `ignore_op_names`、`ignore_op_types` 以及精度级别/子图精度调整；
@@ -315,3 +318,20 @@ XSlim 2.1.0 扩展了分析与校准阶段使用的 ONNX 执行器和量化 sock
 无匹配规则、对不支持或仅处理形状的算子显式指定 INT8 时抛出 `ValueError`。
 名称是预处理/融合**之后**的名称；若简化改变了需要匹配的名称，可设置 `skip_onnxsim`。
 规则为空时，现有精确名称排除配置保持原有行为。
+
+### 自动逐层校准选型
+
+静态 INT8（`precision_level` 为 0、1、2）可设置
+`calibration_parameters.calibration_type: "auto"`。每个激活量化域根据用户提供的
+校准数据评估候选算法，选择采样量化/反量化重建 MSE 最小的方法。权重沿用现有
+校准逻辑，默认配置仍为 `"default"`。
+
+采样使用固定随机种子的均匀流式采样，缓存受 `auto_calibration_samples` 限制，
+跨校准 batch 采样且不受 batch 拆分偏差影响，选型后释放。
+候选校准器仍观察完整的校准张量并执行现有直方图流程；增加候选算法会增加校准
+时间和内存。这是激活张量局部选型，不是端到端任务精度或延迟搜索，也不会自动
+切换位宽或选择 FP16/FP32。
+
+`operator_quantization[].calibration_type` 可固定算法或仅对选定算子启用 `"auto"`。
+显式方法应用于融合/简化后的实际共享量化域，包括共享 scale 的相邻算子。
+同一个量化域中的显式方法冲突时抛出 `ValueError`。日志记录选中算法、采样 MSE 和样本元素数。

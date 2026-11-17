@@ -12,6 +12,7 @@ from xslim.logger import logger
 from ..defs import OBSERVER_FLOATING_MSE_FETCHES, OBSERVER_MIN_SCALE_THRESHOLD, OBSERVER_PERCENTILE
 from ..ppq_decorator import (
     BaseTensorObserver,
+    PPQLinearQuantFunction,
     QuantizationProperty,
     QuantizationStates,
     TensorQuantizationConfig,
@@ -485,3 +486,92 @@ class TorchXSlimKLObserver(TorchXSlimObserver):
 ppq_observer.OBSERVER_TABLE["kl"] = TorchXSlimKLObserver
 ppq_observer.OBSERVER_TABLE["mse"] = TorchXSlimMSEObserver
 ppq_observer.OBSERVER_TABLE["xslim"] = TorchXSlimObserver
+
+
+class TorchAutoObserver(TorchXSlimObserver):
+    """Compare existing calibrators by sampled reconstruction MSE in one quantization domain.
+
+    Inherits the two-pass observer marker used by blockwise calibration. Candidate
+    configs are private copies; the graph's config stays INITIAL until selection.
+    """
+
+    def __init__(self, watch_on: Variable, quant_cfg: TensorQuantizationConfig):
+        BaseTensorObserver.__init__(self, watch_on, quant_cfg)
+        if not quant_cfg.policy.has_property(QuantizationProperty.PER_TENSOR):
+            raise ValueError("Auto calibration requires per-tensor activation quantization.")
+        self._phase = "Detecting Minmax"
+        self._sample_limit = quant_cfg.detail.get("auto_calibration_samples", 8192)
+        self._samples = torch.empty(0, dtype=torch.float32)
+        self._sample_keys = torch.empty(0, dtype=torch.float64)
+        self._sample_generator = torch.Generator().manual_seed(0)
+        self._observed_elements = 0
+        self._candidates = []
+        for method in quant_cfg.detail.get("auto_calibration_methods", ["minmax", "percentile", "mse", "kl"]):
+            config = quant_cfg.copy()
+            config.observer_algorithm = method
+            observer = ppq_observer.TensorObserverFactroy.build_observer(watch_on, config)
+            self._candidates.append((method, config, observer))
+
+    @torch.no_grad()
+    def observe(self, value: torch.Tensor):
+        if self._quant_cfg.state != QuantizationStates.INITIAL:
+            return
+        if value is not None and value.numel():
+            if not torch.isfinite(value).all():
+                raise ValueError(f"Non-finite calibration data for {self._watch_on.name!r}.")
+            if self._phase == "Detecting Minmax":
+                values = value.detach().flatten()
+                # Independent priorities give every element equal inclusion probability.
+                # A private generator makes the selected stream independent of batch splits.
+                # Chunking bounds temporary priority/sample buffers as well as retained data.
+                for chunk in values.split(max(self._sample_limit, 8192)):
+                    keys = torch.rand(chunk.numel(), generator=self._sample_generator, dtype=torch.float64)
+                    if chunk.numel() > self._sample_limit:
+                        keys, indices = keys.topk(self._sample_limit)
+                        chunk = chunk[indices.to(chunk.device)]
+                    keys = torch.cat([self._sample_keys, keys])
+                    samples = torch.cat([self._samples, chunk.float().cpu()])
+                    self._sample_keys, indices = keys.topk(min(self._sample_limit, keys.numel()))
+                    self._samples = samples[indices]
+                self._observed_elements += values.numel()
+        for _, _, observer in self._candidates:
+            observer.observe(value)
+
+    @torch.no_grad()
+    def render_quantization_config(self):
+        if self._quant_cfg.state != QuantizationStates.INITIAL:
+            return
+        if self._phase == "Detecting Minmax" and self._observed_elements == 0:
+            raise ValueError(f"No non-empty calibration data for {self._watch_on.name!r}.")
+        for _, _, observer in self._candidates:
+            observer.render_quantization_config()
+        if self._phase == "Detecting Minmax":
+            self._phase = "Collating Hist"
+            return
+
+        scores = {}
+        for method, config, _ in self._candidates:
+            if config.state != QuantizationStates.ACTIVATED:
+                raise RuntimeError(f"Calibration candidate {method!r} did not produce quantization parameters.")
+            actual = PPQLinearQuantFunction(self._samples, config)
+            score = (actual.double() - self._samples.double()).square().mean().item()
+            if not math.isfinite(score):
+                raise ValueError(f"Non-finite calibration error for {self._watch_on.name!r} ({method}).")
+            scores[method] = score
+        # Stable minimum: candidate order resolves equal scores reproducibly.
+        method, selected, _ = min(self._candidates, key=lambda candidate: scores[candidate[0]])
+        self._quant_cfg.scale = selected.scale
+        self._quant_cfg.offset = selected.offset
+        self._quant_cfg.state = QuantizationStates.ACTIVATED
+        self._quant_cfg.observer_algorithm = method
+        self._quant_cfg.detail["auto_calibration"] = {
+            "method": method, "mse": scores, "sample_count": self._samples.numel(),
+        }
+        logger.info("Auto calibration {}: {} (sampled MSE={:.6g}, samples={})".format(
+            self._watch_on.name, method, scores[method], self._samples.numel()))
+        self._samples = torch.empty(0, dtype=torch.float32)
+        self._sample_keys = torch.empty(0, dtype=torch.float64)
+        self._candidates.clear()
+
+
+ppq_observer.OBSERVER_TABLE["auto"] = TorchAutoObserver
