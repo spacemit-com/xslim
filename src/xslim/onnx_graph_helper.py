@@ -446,6 +446,17 @@ def format_onnx_model(
         onnx.ModelProto: output ONNX Model
     """
     onnx_model.graph.ClearField("value_info")
+    # Save output shapes before clearing so they can be restored after shape
+    # inference if the inferred result is still unknown ("?").
+    saved_output_shapes = {}
+    for o_var in onnx_model.graph.output:
+        try:
+            saved_output_shapes[o_var.name] = [
+                (dim.dim_value, dim.dim_param)
+                for dim in o_var.type.tensor_type.shape.dim
+            ]
+        except Exception:
+            pass
     for o_var in onnx_model.graph.output:
         try:
             for dim in o_var.type.tensor_type.shape.dim:
@@ -481,6 +492,32 @@ def format_onnx_model(
         onnx_model = infer_onnx_model(onnx_model)
     except Exception as e:
         logger.warning("shape_inference error with {}, skipped".format(e))
+
+    # Restore output dims that shape inference could not resolve. The
+    # original (pre-clearing) values are the best available hint, since
+    # ops like Resize/Concat with dynamic inputs often defeat inference.
+    for o_var in onnx_model.graph.output:
+        saved = saved_output_shapes.get(o_var.name)
+        if saved is None:
+            continue
+        dims = o_var.type.tensor_type.shape.dim
+        for i, dim in enumerate(dims):
+            if i >= len(saved):
+                break
+            saved_value, saved_param = saved[i]
+            is_unknown = (
+                (dim.HasField("dim_value") and dim.dim_value == 0)
+                or (not dim.HasField("dim_value") and not dim.dim_param)
+                or (dim.dim_param == "?")
+            )
+            if not is_unknown:
+                continue
+            if saved_value:
+                dim.dim_value = saved_value
+                dim.ClearField("dim_param")
+            elif saved_param and saved_param != "?":
+                dim.dim_param = saved_param
+                dim.ClearField("dim_value")
 
     onnx_model = _normalize_clip_optional_bounds(onnx_model)
     onnx_model = _deduplicate_node_names(onnx_model)
