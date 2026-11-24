@@ -9,6 +9,7 @@ from .gelu import *
 from .layernorm import *
 from .rmsnorm import *
 from .padpool import *
+from .patch_embedding import *
 from .qkv_split import *
 from .reciprocal_div import *
 from .slice_fusion import *
@@ -34,9 +35,11 @@ def infer_onnx_model(onnx_model):
 
 def optimize_onnx_model(onnx_model):
     onnx_model = onnxslim.slim(onnx_model, skip_fusion_patterns=["FusionGemm"])
+    onnx_model = fuse_patch_embedding(onnx_model)
     onnx_model = fuse_window_partition(onnx_model)
     onnx_model = fuse_window_reverse(onnx_model)
     onnx_model = ensure_yolo_decode_function(onnx_model)
+    onnx_model = ensure_patch_embedding_function(onnx_model)
     onnx_model = ensure_window_partition_function(onnx_model)
     onnx_model = ensure_window_reverse_function(onnx_model)
     return onnx_model
