@@ -446,10 +446,22 @@ def format_onnx_model(
         onnx.ModelProto: output ONNX Model
     """
     onnx_model.graph.ClearField("value_info")
+    # Save output shapes before clearing so they can be restored after shape
+    # inference if the inferred result is still unknown ("?").
+    # Preserve explicit zeros: dim_value=0 with the field set is a known dimension.
+    saved_output_shapes = {}
+    for o_var in onnx_model.graph.output:
+        try:
+            saved_output_shapes[o_var.name] = [
+                (dim.dim_value if dim.HasField("dim_value") else None, dim.dim_param or None)
+                for dim in o_var.type.tensor_type.shape.dim
+            ]
+        except Exception:
+            pass
     for o_var in onnx_model.graph.output:
         try:
             for dim in o_var.type.tensor_type.shape.dim:
-                dim.dim_value = 0
+                dim.ClearField("dim_value")
                 dim.dim_param = "?"
         except:
             pass
@@ -481,6 +493,35 @@ def format_onnx_model(
         onnx_model = infer_onnx_model(onnx_model)
     except Exception as e:
         logger.warning("shape_inference error with {}, skipped".format(e))
+
+    # Restore output dims that shape inference could not resolve. Only overwrite
+    # when the axis remains unresolved (no dim_value field, dim_param missing or "?").
+    # Preserve inferred zeros: if inference set dim_value=0, keep it even if the
+    # original was different, since an explicit zero is a known dimension.
+    for o_var in onnx_model.graph.output:
+        saved = saved_output_shapes.get(o_var.name)
+        if saved is None:
+            continue
+        dims = o_var.type.tensor_type.shape.dim
+        for i, dim in enumerate(dims):
+            if i >= len(saved):
+                break
+            saved_value, saved_param = saved[i]
+            # Axis is unresolved if dim_value is unset and dim_param is missing or "?".
+            is_unknown = (
+                not dim.HasField("dim_value")
+                and (not dim.dim_param or dim.dim_param == "?")
+            )
+            if not is_unknown:
+                # Inference resolved this axis (possibly to an explicit 0); keep it.
+                continue
+            # Restore the original annotation: prefer dim_value if it was set.
+            if saved_value is not None:
+                dim.dim_value = saved_value
+                dim.ClearField("dim_param")
+            elif saved_param and saved_param != "?":
+                dim.dim_param = saved_param
+                dim.ClearField("dim_value")
 
     onnx_model = _normalize_clip_optional_bounds(onnx_model)
     onnx_model = _deduplicate_node_names(onnx_model)
